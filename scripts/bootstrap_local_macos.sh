@@ -39,7 +39,7 @@ fi
   "transformers==4.57.6" \
   "accelerate==1.12.0" \
   "librosa==0.11.0" \
-  "soundfile==0.14.0" \
+  "soundfile==0.13.1" \
   "sox>=1.5" \
   "nagisa==0.2.11" \
   "soynlp==0.0.493" \

@@ -14,6 +14,8 @@ transformers: 4.57.6
 accelerate: 1.12.0
 av: 17.0.1
 gradio: 6.17.3
+librosa: 0.11.0
+soundfile: 0.13.1
 Model: models/Qwen3-ASR-1.7B
 ```
 

@@ -10,7 +10,9 @@ if [[ "${ACTIVE_ENV}" != "${EXPECTED_ENV}" ]]; then
   exit 2
 fi
 
-python -m pip install -e ".[workzone]"
+python -m pip install \
+  -c requirements/constraints-common.txt \
+  -e ".[workzone]"
 
 if [[ ! -f configs/workzone.local.yaml ]]; then
   cp configs/workzone.example.yaml configs/workzone.local.yaml
