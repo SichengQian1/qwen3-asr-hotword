@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+.conda/
+venv/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+configs/*.local.yaml
+configs/*.local.yml
+configs/secrets/
+
+# Models, training data, and generated artifacts
+/models/
+/data/
+/datasets/
+/features/
+/checkpoints/
+/runs/
+/outputs/
+/reports/internal/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.wav
+*.flac
+*.mp3
+*.m4a
+
+# Local business manifests and transcripts
+local_data/
+private_data/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

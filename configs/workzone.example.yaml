@@ -1,0 +1,22 @@
+project:
+  name: qwen3-asr-hotword
+
+model:
+  # This must point to the local Qwen3-ASR-1.7B model directory.
+  path: /glusterfs_103/models/Qwen3-ASR-1.7B
+  expected_name: Qwen3-ASR-1.7B
+  dtype: bfloat16
+  device: cuda:0
+  local_files_only: true
+
+paths:
+  # Keep these paths on persistent work-zone storage.
+  work_root: /glusterfs_103/qwen3-asr-hotword
+  data_root: /path/to/business/data
+  cache_dir: /glusterfs_103/qwen3-asr-hotword/cache
+  output_dir: /glusterfs_103/qwen3-asr-hotword/runs
+
+runtime:
+  expected_python_major_minor: "3.12"
+  expected_gpu_name: NVIDIA H200
+  minimum_gpu_memory_gib: 130

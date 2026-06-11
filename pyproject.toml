@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen3-asr-hotword"
+version = "0.1.0"
+description = "Phoneme-based multilingual hotword biasing for Qwen3-ASR-1.7B"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10",
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "types-PyYAML>=6.0",
+]
+workzone = [
+  "datasets>=3,<5",
+  "jiwer>=3,<5",
+  "tensorboard>=2.17,<3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["qwen_hotword"]
+
+[[tool.mypy.overrides]]
+module = [
+  "accelerate",
+  "qwen_asr",
+  "torch",
+  "transformers",
+  "yaml",
+]
+ignore_missing_imports = true

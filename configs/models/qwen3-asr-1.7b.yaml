@@ -1,0 +1,26 @@
+model:
+  repository_id: Qwen/Qwen3-ASR-1.7B
+  revision: 7278e1e70fe206f11671096ffdd38061171dd6e5
+  expected_name: Qwen3-ASR-1.7B
+
+compatibility:
+  python: "3.12"
+  torch_macos: "2.10.0"
+  torch_workzone: "2.10.0+cu128"
+  qwen_asr: "0.0.6"
+  transformers: "4.57.6"
+  accelerate: "1.12.0"
+
+files:
+  config_sha256: 2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f
+  weight_index_sha256: f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60
+
+architecture:
+  model_type: qwen3_asr
+  total_parameters: 2349217408
+  audio_tower_parameters: 317477504
+  audio_encoder_layers: 24
+  audio_encoder_dimension: 1024
+  audio_projected_dimension: 2048
+  ctc_tap_module: thinker.audio_tower.ln_post
+  ctc_tap_dimension: 1024

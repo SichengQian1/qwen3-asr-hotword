@@ -1,0 +1,2 @@
+-c constraints-common.txt
+torch==2.10.0
