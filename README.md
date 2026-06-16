@@ -47,3 +47,8 @@ python -m pytest
 ruff check .
 mypy src
 ```
+
+## Evaluation assets
+
+The hotword evaluation set is built in the work zone from local open-source
+corpora. See `docs/EVALUATION_SET.md`.

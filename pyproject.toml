@@ -24,6 +24,9 @@ ci = [
   "safetensors>=0.4,<1",
   "transformers==4.57.6",
 ]
+eval = [
+  "phonemizer>=3.3,<4",
+]
 workzone = [
   "datasets>=3,<5",
   "jiwer>=3,<5",
@@ -56,6 +59,8 @@ packages = ["qwen_hotword"]
 [[tool.mypy.overrides]]
 module = [
   "accelerate",
+  "phonemizer",
+  "pyarrow",
   "qwen_asr",
   "torch",
   "transformers",
