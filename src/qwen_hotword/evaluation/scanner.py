@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import json
 import random
 from collections.abc import Iterable
@@ -190,10 +191,10 @@ def _read_metadata_rows(path: Path) -> list[dict[str, Any]]:
             return [dict(row) for row in csv.DictReader(handle, delimiter=delimiter)]
     if path.suffix == ".parquet":
         try:
-            import pyarrow.parquet as pq
+            pq: Any = importlib.import_module("pyarrow.parquet")
         except ImportError:
             return []
-        table = pq.read_table(path)  # type: ignore[no-untyped-call]
+        table = pq.read_table(path)
         return [dict(row) for row in table.to_pylist() if isinstance(row, dict)]
     return []
 
