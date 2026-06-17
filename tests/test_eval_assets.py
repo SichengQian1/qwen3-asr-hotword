@@ -17,6 +17,13 @@ def test_build_eval_assets_from_small_corpora(tmp_path: Path) -> None:
         "1-2-0001 THE SAINT MICHAEL PROJECT ARRIVED TODAY\n",
         encoding="utf-8",
     )
+    flat_libri_dir = tmp_path / "FlatLibriSpeech"
+    (flat_libri_dir / "clean").mkdir(parents=True)
+    (flat_libri_dir / "clean" / "clean001.wav").write_bytes(b"fake")
+    (flat_libri_dir / "trans_clean.tsv").write_text(
+        "id\tpath\ttext\nclean001\tclean/clean001.wav\tTHE OXFORD ROBOT ARRIVED\n",
+        encoding="utf-8",
+    )
 
     cv_dir = tmp_path / "CommonVoice" / "en"
     (cv_dir / "clips").mkdir(parents=True)
@@ -63,6 +70,11 @@ sources:
     language: en
     root: {tmp_path / "LibriSpeech"}
     include_splits: [test-clean]
+  - name: flat_librispeech
+    dataset: librispeech
+    language: en
+    root: {tmp_path / "FlatLibriSpeech"}
+    include_splits: [clean]
   - name: commonvoice_en
     dataset: commonvoice
     language: en
@@ -80,7 +92,7 @@ sources:
 
     config = load_eval_asset_config(config_path)
     utterances = scan_sources(config)
-    assert len(utterances) == 3
+    assert len(utterances) == 4
     assert {utterance.language for utterance in utterances} == {"en", "pt-BR"}
     assert all(Path(utterance.audio_path).is_file() for utterance in utterances)
 
@@ -118,4 +130,3 @@ def test_eval_config_template_is_valid() -> None:
     assert config.sources
     assert config.hotwords.max_per_language == 800
     assert json.dumps(config.sources[0].name)
-
