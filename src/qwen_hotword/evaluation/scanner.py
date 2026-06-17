@@ -81,6 +81,43 @@ def _scan_librispeech(source: SourceConfig) -> list[Utterance]:
                         text=text,
                     )
                 )
+    utterances.extend(_scan_librispeech_tsv(source))
+    return utterances
+
+
+def _scan_librispeech_tsv(source: SourceConfig) -> list[Utterance]:
+    root = source.root
+    utterances: list[Utterance] = []
+    for transcript_path in sorted(root.glob("trans_*.tsv")):
+        split = transcript_path.stem.removeprefix("trans_")
+        audio_root = root / split
+        audio_index = _build_audio_index(audio_root if audio_root.is_dir() else root)
+        rows = _read_tsv_with_fallback_header(transcript_path)
+        for row in rows:
+            text = _first_string(row, TEXT_COLUMNS)
+            audio_value = _first_value(row, PATH_COLUMNS)
+            raw_utt_id = _first_string(row, ("id", "utt_id", "audio_id", "key"))
+            if raw_utt_id is None and isinstance(audio_value, str):
+                raw_utt_id = Path(audio_value).stem
+            if not text or not raw_utt_id:
+                continue
+            audio_path = None
+            if isinstance(audio_value, str):
+                audio_path = _resolve_audio_path(transcript_path.parent, audio_value, root=root)
+            if audio_path is None:
+                audio_path = audio_index.get(raw_utt_id) or audio_index.get(Path(raw_utt_id).stem)
+            if audio_path is None:
+                continue
+            utterances.append(
+                Utterance(
+                    utt_id=f"{source.name}_{split}_{raw_utt_id}",
+                    dataset=source.name,
+                    split=split,
+                    language=source.language,
+                    audio_path=str(audio_path),
+                    text=text,
+                )
+            )
     return utterances
 
 
@@ -197,6 +234,25 @@ def _read_metadata_rows(path: Path) -> list[dict[str, Any]]:
         table = pq.read_table(path)
         return [dict(row) for row in table.to_pylist() if isinstance(row, dict)]
     return []
+
+
+def _read_tsv_with_fallback_header(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8") as handle:
+        sample = handle.readline()
+        handle.seek(0)
+        columns = sample.rstrip("\n").split("\t")
+        known_columns = set(TEXT_COLUMNS + PATH_COLUMNS + ("id", "utt_id", "audio_id", "key"))
+        has_header = any(column in known_columns for column in columns)
+        if has_header:
+            return [dict(row) for row in csv.DictReader(handle, delimiter="\t")]
+        reader = csv.reader(handle, delimiter="\t")
+        rows = []
+        for row in reader:
+            if len(row) >= 3:
+                rows.append({"id": row[0], "path": row[1], "text": row[2]})
+            elif len(row) == 2:
+                rows.append({"id": row[0], "text": row[1]})
+        return rows
 
 
 def _row_to_utterance(
