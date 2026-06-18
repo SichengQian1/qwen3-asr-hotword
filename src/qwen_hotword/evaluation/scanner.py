@@ -284,7 +284,12 @@ def _row_to_utterance(
     audio_value = _first_value(row, PATH_COLUMNS)
     if text is None or audio_value is None:
         return None
-    audio_path = _audio_value_to_path(audio_value, metadata_path.parent, source.root)
+    audio_path = _audio_value_to_path(
+        audio_value,
+        metadata_path.parent,
+        source.root,
+        split=split,
+    )
     if audio_path is None:
         return None
     raw_utt_id = (
@@ -316,18 +321,30 @@ def _first_value(row: dict[str, Any], columns: tuple[str, ...]) -> Any | None:
     return None
 
 
-def _audio_value_to_path(value: Any, base_dir: Path, root: Path) -> Path | None:
+def _audio_value_to_path(
+    value: Any,
+    base_dir: Path,
+    root: Path,
+    *,
+    split: str | None = None,
+) -> Path | None:
     if isinstance(value, dict):
         nested = value.get("path") or value.get("array")
         if isinstance(nested, str):
-            return _resolve_audio_path(base_dir, nested, root=root)
+            return _resolve_audio_path(base_dir, nested, root=root, split=split)
         return None
     if isinstance(value, str):
-        return _resolve_audio_path(base_dir, value, root=root)
+        return _resolve_audio_path(base_dir, value, root=root, split=split)
     return None
 
 
-def _resolve_audio_path(base_dir: Path, audio_value: str, *, root: Path) -> Path | None:
+def _resolve_audio_path(
+    base_dir: Path,
+    audio_value: str,
+    *,
+    root: Path,
+    split: str | None = None,
+) -> Path | None:
     candidate = Path(audio_value)
     candidates = []
     if candidate.is_absolute():
@@ -341,6 +358,15 @@ def _resolve_audio_path(base_dir: Path, audio_value: str, *, root: Path) -> Path
                 root / "clips" / candidate,
             ]
         )
+        if split:
+            candidates.extend(
+                [
+                    base_dir / split / candidate,
+                    root / split / candidate,
+                    base_dir / split / "clips" / candidate,
+                    root / split / "clips" / candidate,
+                ]
+            )
     for path in candidates:
         if path.is_file():
             return path

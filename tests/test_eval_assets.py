@@ -33,6 +33,14 @@ def test_build_eval_assets_from_small_corpora(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    fleurs_dir = tmp_path / "Fleurs" / "English"
+    (fleurs_dir / "validation").mkdir(parents=True)
+    (fleurs_dir / "validation" / "fleurs001.wav").write_bytes(b"fake")
+    (fleurs_dir / "validation.tsv").write_text(
+        "path\ttranscription\nfleurs001.wav\tThe Cambridge Atlas project starts tomorrow\n",
+        encoding="utf-8",
+    )
+
     mls_dir = tmp_path / "MLS"
     (mls_dir / "test" / "audio").mkdir(parents=True)
     (mls_dir / "test" / "audio" / "mls001.flac").write_bytes(b"fake")
@@ -85,6 +93,11 @@ sources:
     root: {tmp_path / "CommonVoice"}
     include_locales: [en]
     include_splits: [test]
+  - name: fleurs_en
+    dataset: fleurs
+    language: en
+    root: {tmp_path / "Fleurs" / "English"}
+    include_splits: [validation]
   - name: mls_pt
     dataset: mls
     language: pt-BR
@@ -103,9 +116,10 @@ sources:
 
     config = load_eval_asset_config(config_path)
     utterances = scan_sources(config)
-    assert len(utterances) == 5
+    assert len(utterances) == 6
     assert {utterance.language for utterance in utterances} == {"en", "pt-BR"}
     assert all(Path(utterance.audio_path).is_file() for utterance in utterances)
+    assert any(utterance.dataset == "fleurs_en" for utterance in utterances)
     assert any(
         utterance.split == "dev" and utterance.metadata["use_for_cases"] == "false"
         for utterance in utterances
