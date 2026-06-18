@@ -34,14 +34,18 @@ def test_build_eval_assets_from_small_corpora(tmp_path: Path) -> None:
     )
 
     mls_dir = tmp_path / "MLS"
-    (mls_dir / "splits").mkdir(parents=True)
-    (mls_dir / "audio" / "a").mkdir(parents=True)
-    (mls_dir / "audio" / "a" / "mls001.flac").write_bytes(b"fake")
-    (mls_dir / "transcripts.txt").write_text(
+    (mls_dir / "test" / "audio").mkdir(parents=True)
+    (mls_dir / "test" / "audio" / "mls001.flac").write_bytes(b"fake")
+    (mls_dir / "test" / "transcripts.txt").write_text(
         "mls001\tA estação central fica perto de São Paulo\n",
         encoding="utf-8",
     )
-    (mls_dir / "splits" / "test.txt").write_text("mls001\n", encoding="utf-8")
+    (mls_dir / "dev" / "audio").mkdir(parents=True)
+    (mls_dir / "dev" / "audio" / "mls-dev001.flac").write_bytes(b"fake")
+    (mls_dir / "dev" / "transcripts.txt").write_text(
+        "mls-dev001\tO aeroporto internacional recebe navios antigos\n",
+        encoding="utf-8",
+    )
 
     config_path = tmp_path / "eval.yaml"
     config_path.write_text(
@@ -86,34 +90,58 @@ sources:
     language: pt-BR
     root: {tmp_path / "MLS"}
     include_splits: [test]
+  - name: mls_pt_aux_hotwords
+    dataset: mls
+    language: pt-BR
+    root: {tmp_path / "MLS"}
+    include_splits: [dev]
+    use_for_hotwords: true
+    use_for_cases: false
 """,
         encoding="utf-8",
     )
 
     config = load_eval_asset_config(config_path)
     utterances = scan_sources(config)
-    assert len(utterances) == 4
+    assert len(utterances) == 5
     assert {utterance.language for utterance in utterances} == {"en", "pt-BR"}
     assert all(Path(utterance.audio_path).is_file() for utterance in utterances)
+    assert any(
+        utterance.split == "dev" and utterance.metadata["use_for_cases"] == "false"
+        for utterance in utterances
+    )
+
+    hotword_utterances = [
+        utterance
+        for utterance in utterances
+        if utterance.metadata["use_for_hotwords"] == "true"
+    ]
+    case_utterances = [
+        utterance
+        for utterance in utterances
+        if utterance.metadata["use_for_cases"] == "true"
+    ]
+    assert all(utterance.split != "dev" for utterance in case_utterances)
 
     hotwords = build_hotwords(
-        utterances,
+        hotword_utterances,
         config.hotwords,
         phonemizer_backend="none",
         require_ipa=False,
     )
     assert any(hotword.normalized == "saint michael" for hotword in hotwords)
+    assert any(hotword.normalized == "aeroporto internacional" for hotword in hotwords)
     assert any(hotword.language == "pt-BR" for hotword in hotwords)
 
     ctc_cases = build_eval_cases(
-        utterances,
+        case_utterances,
         hotwords,
         config.cases,
         seed=config.sampling.seed,
         eval_stage="ctc",
     )
     asr_cases = build_eval_cases(
-        utterances,
+        case_utterances,
         hotwords,
         config.cases,
         seed=config.sampling.seed,

@@ -19,6 +19,8 @@ class SourceConfig:
     root: Path
     include_splits: list[str] = field(default_factory=list)
     include_locales: list[str] = field(default_factory=list)
+    use_for_hotwords: bool = True
+    use_for_cases: bool = True
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,20 @@ def _string_list(value: Any) -> list[str]:
     return [str(item) for item in value]
 
 
+def _bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    raise EvalConfigError("expected a boolean value")
+
+
 def load_eval_asset_config(path: str | Path) -> EvalAssetConfig:
     config_path = Path(path).expanduser()
     if not config_path.is_file():
@@ -103,6 +119,8 @@ def load_eval_asset_config(path: str | Path) -> EvalAssetConfig:
                 root=Path(str(_required(source, "root", f"sources[{index}]"))).expanduser(),
                 include_splits=_string_list(source.get("include_splits")),
                 include_locales=_string_list(source.get("include_locales")),
+                use_for_hotwords=_bool(source.get("use_for_hotwords"), default=True),
+                use_for_cases=_bool(source.get("use_for_cases"), default=True),
             )
         )
 
@@ -130,4 +148,3 @@ def load_eval_asset_config(path: str | Path) -> EvalAssetConfig:
         ),
         sources=sources,
     )
-

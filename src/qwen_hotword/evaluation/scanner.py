@@ -40,6 +40,16 @@ def _scan_source(source: SourceConfig) -> Iterable[Utterance]:
     return _scan_generic_metadata(source)
 
 
+def _source_metadata(source: SourceConfig, extra: dict[str, str] | None = None) -> dict[str, str]:
+    metadata = {
+        "use_for_hotwords": str(source.use_for_hotwords).lower(),
+        "use_for_cases": str(source.use_for_cases).lower(),
+    }
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
 def _filter_utterances(
     utterances: list[Utterance],
     source: SourceConfig,
@@ -79,6 +89,7 @@ def _scan_librispeech(source: SourceConfig) -> list[Utterance]:
                         language=source.language,
                         audio_path=str(audio_path),
                         text=text,
+                        metadata=_source_metadata(source),
                     )
                 )
     utterances.extend(_scan_librispeech_tsv(source))
@@ -116,6 +127,7 @@ def _scan_librispeech_tsv(source: SourceConfig) -> list[Utterance]:
                     language=source.language,
                     audio_path=str(audio_path),
                     text=text,
+                    metadata=_source_metadata(source),
                 )
             )
     return utterances
@@ -124,16 +136,21 @@ def _scan_librispeech_tsv(source: SourceConfig) -> list[Utterance]:
 def _scan_mls(source: SourceConfig) -> list[Utterance]:
     root = source.root
     split_by_id = _load_mls_splits(root, source.include_splits)
-    audio_index = _build_audio_index(root)
+    audio_index = _build_mls_audio_index(root, source.include_splits)
     utterances: list[Utterance] = []
     for transcript_path in sorted(root.rglob("transcripts.txt")):
+        inferred_split = _infer_split(root, transcript_path)
+        if source.include_splits and inferred_split.lower() not in {
+            item.lower() for item in source.include_splits
+        }:
+            continue
         with transcript_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 parsed = _parse_transcript_line(line)
                 if parsed is None:
                     continue
                 raw_utt_id, text = parsed
-                split = split_by_id.get(raw_utt_id, _infer_split(root, transcript_path))
+                split = split_by_id.get(raw_utt_id, inferred_split)
                 if source.include_splits and split.lower() not in {
                     item.lower() for item in source.include_splits
                 }:
@@ -149,6 +166,7 @@ def _scan_mls(source: SourceConfig) -> list[Utterance]:
                         language=source.language,
                         audio_path=str(audio_path),
                         text=text,
+                        metadata=_source_metadata(source),
                     )
                 )
     return utterances
@@ -186,7 +204,7 @@ def _scan_common_voice(source: SourceConfig) -> list[Utterance]:
                         language=source.language,
                         audio_path=str(audio_path),
                         text=text,
-                        metadata={"locale": locale},
+                        metadata=_source_metadata(source, {"locale": locale}),
                     )
                 )
     return utterances
@@ -280,6 +298,7 @@ def _row_to_utterance(
         language=source.language,
         audio_path=str(audio_path),
         text=text,
+        metadata=_source_metadata(source),
     )
 
 
@@ -359,6 +378,18 @@ def _build_audio_index(root: Path) -> dict[str, Path]:
     for extension in AUDIO_EXTENSIONS:
         for path in root.rglob(f"*{extension}"):
             index.setdefault(path.stem, path)
+    return index
+
+
+def _build_mls_audio_index(root: Path, include_splits: list[str]) -> dict[str, Path]:
+    if not include_splits:
+        return _build_audio_index(root)
+    index: dict[str, Path] = {}
+    for split in include_splits:
+        split_root = root / split
+        if not split_root.is_dir():
+            continue
+        index.update(_build_audio_index(split_root))
     return index
 
 
