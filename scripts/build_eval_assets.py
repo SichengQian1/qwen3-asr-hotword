@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 
 from qwen_hotword.evaluation.cases import build_eval_cases
@@ -32,6 +34,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _count_by(records: Sequence[object], *fields: str) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for record in records:
+        key = " / ".join(str(getattr(record, field)) for field in fields)
+        counter[key] += 1
+    return dict(sorted(counter.items()))
+
+
 def main() -> int:
     args = parse_args()
     config = load_eval_asset_config(args.config)
@@ -39,21 +49,31 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     utterances = scan_sources(config)
+    hotword_utterances = [
+        utterance
+        for utterance in utterances
+        if str(utterance.metadata.get("use_for_hotwords", "true")).lower() == "true"
+    ]
+    case_utterances = [
+        utterance
+        for utterance in utterances
+        if str(utterance.metadata.get("use_for_cases", "true")).lower() == "true"
+    ]
     hotwords = build_hotwords(
-        utterances,
+        hotword_utterances,
         config.hotwords,
         phonemizer_backend=str(args.phonemizer),
         require_ipa=bool(args.require_ipa),
     )
     ctc_cases = build_eval_cases(
-        utterances,
+        case_utterances,
         hotwords,
         config.cases,
         seed=config.sampling.seed,
         eval_stage="ctc",
     )
     asr_cases = build_eval_cases(
-        utterances,
+        case_utterances,
         hotwords,
         config.cases,
         seed=config.sampling.seed + 1009,
@@ -70,9 +90,15 @@ def main() -> int:
     summary = {
         "output_dir": str(output_dir),
         "utterances": len(utterances),
+        "hotword_utterances": len(hotword_utterances),
+        "case_utterances": len(case_utterances),
         "hotwords": len(hotwords),
         "ctc_eval_cases": len(ctc_cases),
         "asr_injection_eval_cases": len(asr_cases),
+        "utterances_by_dataset": _count_by(utterances, "dataset"),
+        "utterances_by_dataset_split": _count_by(utterances, "dataset", "split"),
+        "case_utterances_by_dataset": _count_by(case_utterances, "dataset"),
+        "hotwords_by_language": _count_by(hotwords, "language"),
         "phonemizer": args.phonemizer,
         "require_ipa": args.require_ipa,
     }
@@ -86,4 +112,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

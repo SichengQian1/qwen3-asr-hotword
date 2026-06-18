@@ -1,0 +1,86 @@
+output_dir: outputs/eval_assets_workzone_v1
+
+sampling:
+  seed: 20260618
+  max_utterances_per_source: 0
+
+hotwords:
+  max_per_language: 2000
+  min_chars: 4
+  min_words: 1
+  max_words: 4
+  max_occurrences: 200
+  source_utt_limit: 50
+
+cases:
+  cases_per_language: 2000
+  active_hotwords_per_case: 10
+  positive_ratio: 0.50
+  negative_ratio: 0.25
+  confusable_ratio: 0.15
+  no_hotword_ratio: 0.10
+
+sources:
+  - name: librispeech_eval
+    dataset: librispeech
+    language: en
+    root: /host_home/z00841352/27A/data/LibriSpeech
+    include_splits:
+      - clean
+      - other
+    use_for_hotwords: true
+    use_for_cases: true
+
+  - name: commonvoice_en_eval
+    dataset: commonvoice
+    language: en
+    root: /host_home/z00841352/27A/data/Common_Voice_Scripted_Speech_25.0/cv-corpus-25.0-2026-03-09/en
+    include_locales:
+      - en
+    include_splits:
+      - test
+      - dev
+    use_for_hotwords: true
+    use_for_cases: true
+
+  - name: fleurs_en_eval
+    dataset: fleurs
+    language: en
+    root: /host_home/z00841352/27A/data/Fleurs/fleurs_wav/English
+    include_splits:
+      - test
+      - validation
+    use_for_hotwords: true
+    use_for_cases: true
+
+  - name: commonvoice_pt_eval
+    dataset: commonvoice
+    language: pt-BR
+    root: /host_home/z00841352/27A/data/Common_Voice_Scripted_Speech_25.0/cv-corpus-25.0-2026-03-09/pt
+    include_locales:
+      - pt
+    include_splits:
+      - test
+      - dev
+    use_for_hotwords: true
+    use_for_cases: true
+
+  - name: fleurs_pt_eval
+    dataset: fleurs
+    language: pt-BR
+    root: /host_home/z00841352/27A/data/Fleurs/fleurs_wav/Portuguese
+    include_splits:
+      - test
+      - validation
+    use_for_hotwords: true
+    use_for_cases: true
+
+  - name: mls_pt_eval
+    dataset: mls
+    language: pt-BR
+    root: /host_home/z00841352/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese
+    include_splits:
+      - dev
+      - test
+    use_for_hotwords: true
+    use_for_cases: true
