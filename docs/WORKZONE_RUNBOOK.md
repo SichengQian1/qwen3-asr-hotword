@@ -79,6 +79,53 @@ head -3 outputs/eval_assets_v1/hotwords.jsonl
 head -3 outputs/eval_assets_v1/ctc_eval_cases.jsonl
 ```
 
+## G2P Coverage Scan
+
+Before CTC training, scan the real training manifests against the current
+precision IPA vocabulary:
+
+```bash
+python scripts/scan_g2p_coverage.py \
+  --config configs/eval_sources.workzone.yaml \
+  --output-dir outputs/g2p_coverage_v0_2
+```
+
+This reuses the same work-zone source paths used by `scripts/build_eval_assets.py`.
+The current work-zone config contains English and Brazilian Portuguese sources.
+If Spanish training data is stored separately, either add it as another source
+in `configs/eval_sources.workzone.yaml` or pass it directly:
+
+```bash
+python scripts/scan_g2p_coverage.py \
+  --config configs/eval_sources.workzone.yaml \
+  --input /path/to/spanish_train.jsonl::es-419 \
+  --text-column text \
+  --output-dir outputs/g2p_coverage_v0_2
+```
+
+Direct `--input` files can be `.jsonl`, `.csv`, or `.tsv`. Each row should
+contain a text field such as `text`, `sentence`, `transcript`, or
+`transcription`. If the file already has a language column, `::LANG` can be
+omitted. If the column name is non-standard, pass `--language-column`.
+
+Outputs:
+
+```text
+summary.json
+language_summary.csv
+phone_counts.csv
+oov_counts.csv
+records_with_oov_or_g2p_failure.jsonl
+```
+
+Use this scan to decide whether the v0.2 vocabulary needs a v0.3 cleanup before
+training:
+
+- recurring OOV phones should be reviewed and either added or normalized;
+- extremely rare narrow phones should be checked before production training;
+- language-specific coverage should be inspected separately for English,
+  Latin American Spanish, and Brazilian Portuguese.
+
 For final IPA generation, install the optional Python wrapper and confirm the
 container has the `espeak-ng` binary:
 

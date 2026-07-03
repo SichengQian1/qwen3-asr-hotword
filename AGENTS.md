@@ -197,6 +197,31 @@ Known data-copy target, if used:
 
 Prefer direct mounts for original data paths when possible.
 
+Known work-zone corpus paths currently recorded in
+`configs/eval_sources.workzone.yaml` and reused by the evaluation/G2P scanners:
+
+```text
+English:
+  LibriSpeech:
+    /host_home/z00841352/27A/data/LibriSpeech
+  Common Voice English:
+    /host_home/z00841352/27A/data/Common_Voice_Scripted_Speech_25.0/cv-corpus-25.0-2026-03-09/en
+  FLEURS English:
+    /host_home/z00841352/27A/data/Fleurs/fleurs_wav/English
+
+Brazilian Portuguese:
+  Common Voice Portuguese:
+    /host_home/z00841352/27A/data/Common_Voice_Scripted_Speech_25.0/cv-corpus-25.0-2026-03-09/pt
+  FLEURS Portuguese:
+    /host_home/z00841352/27A/data/Fleurs/fleurs_wav/Portuguese
+  MLS Portuguese:
+    /host_home/z00841352/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese
+```
+
+As of July 2026, the checked-in work-zone source config does not yet contain a
+Spanish corpus path. Do not assume Spanish data is available until the user
+provides or confirms the `es-419`/Spanish training path.
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
