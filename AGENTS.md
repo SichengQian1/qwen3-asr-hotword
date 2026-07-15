@@ -347,6 +347,44 @@ rather than manual path concatenation. This corpus has not yet been processed
 with MFA/G2P. Earlier G2P work was on FLEURS and must not be treated as coverage
 evidence for this new corpus.
 
+The first 1,000-row Noah Portuguese TSV audit passed on 2026-07-15:
+
+```text
+Rows/audio/text: 1000/1000/1000
+Resolved audio files: 1000
+Missing audio files: 0
+Duplicate audio values: 0
+Absolute audio values: 0
+Text characters: min 3, mean 80.829, max 242
+Status: pass, no errors
+```
+
+MFA is available in the work zone through the Conda environment `aligner`:
+
+```bash
+conda run -n aligner mfa ...
+```
+
+The downloaded Brazilian Portuguese G2P model is:
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/models/mfa/g2p/portuguese_brazil_mfa.zip
+```
+
+The previously verified MFA invocation is:
+
+```bash
+conda run -n aligner mfa g2p \
+  --num_pronunciations 1 \
+  WORDS_TXT \
+  G2P_MODEL_ZIP \
+  OUTPUT_DICT
+```
+
+`--num_pronunciations 1` keeps the top-1 pronunciation per unique word. The
+Noah corpus must first produce its own normalized unique-word list; do not reuse
+the earlier FLEURS word list or its G2P coverage report.
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
