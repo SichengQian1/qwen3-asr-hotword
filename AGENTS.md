@@ -272,6 +272,27 @@ This validates the first frozen-backbone training boundary: the extractor can
 turn variable-length audio into padded `[B, T_max, 1024]` states while retaining
 the exact per-sample lengths needed by CTC loss.
 
+The minimal frozen-backbone CTC training smoke test passed on H200 on
+2026-07-15:
+
+```text
+CTC head: Linear(1024, 90), 92,250 trainable parameters
+Encoder states: [2, 26, 1024], input lengths [13, 26]
+CTC logits: [2, 26, 90]
+CTC log probabilities: [26, 2, 90]
+Synthetic targets: English "cat" length 3; Portuguese "bom dia" length 5
+Float32 CTC loss: 17.65545654296875
+Head gradient norm before clipping: 22.5
+Head weights changed after optimizer step: true
+Frozen audio-tower parameters: 317,477,504
+Audio-tower parameters with gradients: 0
+Status: pass, no errors
+```
+
+The loss and gradient magnitude above come from random Head initialization,
+synthetic sine-wave audio, and artificial labels, so they validate mechanics
+only and must not be used as quality baselines.
+
 Known data-copy target, if used:
 
 ```text
@@ -304,6 +325,27 @@ Brazilian Portuguese:
 As of July 2026, the checked-in work-zone source config does not yet contain a
 Spanish corpus path. Do not assume Spanish data is available until the user
 provides or confirms the `es-419`/Spanish training path.
+
+The first real CTC training corpus confirmed on 2026-07-15 is a 500-hour
+Brazilian Portuguese conversational dataset:
+
+```text
+TSV inside container:
+  /host_home/z00841352/27A/data/Noah_espt/tsv/pt_tsv/500小时巴西葡萄牙语口语化语音数据.tsv
+Audio root inside container:
+  /host_home/z00841352/27A/data/Noah_espt/noah_pt
+TSV columns:
+  audio, text
+Language:
+  pt-BR
+```
+
+The TSV `audio` values are relative paths such as
+`APY.../data/category/...wav`; resolve them as `audio_root / audio`. Paths and
+texts contain non-ASCII characters, so readers must use UTF-8 and `pathlib`
+rather than manual path concatenation. This corpus has not yet been processed
+with MFA/G2P. Earlier G2P work was on FLEURS and must not be treated as coverage
+evidence for this new corpus.
 
 ## Coding Guidelines
 
