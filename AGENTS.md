@@ -27,14 +27,30 @@ machine where possible.
 - The target model is `Qwen3-ASR-1.7B`.
 - Do not design against Qwen3-ASR 0.6B unless the user explicitly asks for a
   separate compatibility experiment.
-- The known work-zone model path is:
+- The verified work-zone model path is:
 
 ```text
-/glutsterfs_103/models/Qwen3-ASR-1.7B
+/glusterfs_103/models/Qwen3-ASR-1.7B
 ```
 
-Confirm paths in the work zone before relying on them, because shared storage
-mount names have appeared with similar spellings.
+This path was confirmed in the work zone on 2026-07-15 and contains the
+complete local Qwen3-ASR-1.7B snapshot, including `config.json`,
+`model.safetensors.index.json`, model shards, tokenizer files, and
+`preprocessor_config.json`.
+
+The model inspection also passed on 2026-07-15 and confirmed:
+
+```text
+Architecture: Qwen3ASRForConditionalGeneration
+Audio encoder layers: 24
+Audio encoder hidden dimension: 1024
+Audio projected dimension: 2048
+CTC tap module: thinker.audio_tower.ln_post
+CTC tap dimension: 1024
+Audio tower parameters: 317,477,504
+Total model parameters: 2,349,217,408
+Manifest validation: pass, no mismatches
+```
 
 ## Architecture Direction
 
@@ -183,11 +199,44 @@ The work zone may use Docker containers and mounted shared storage. Prefer
 mounting large datasets directly into containers instead of copying millions of
 small files between shared filesystems.
 
-Known project path used in the work zone:
+Known project paths used in the work zone:
 
 ```text
-/glusterfs_103/q00933266/qwen3-asr-hotword
+Inside container:
+  /host_home/star/q00933266/qwen3-asr-hotword
+Outside container:
+  /home/star/q00933266/qwen3-asr-hotword
 ```
+
+Confirmed work-zone diagnostics as of 2026-07-15:
+
+```text
+Python: 3.12.12
+CUDA visible: true
+GPUs: 8 x NVIDIA H200, about 139.8 GiB each
+Torch: 2.10.0, CUDA 12.8
+qwen-asr: 0.0.6
+transformers: 4.57.6
+accelerate: 1.12.0
+datasets: 5.0.0
+librosa: 0.11.0
+soundfile: 0.13.1
+jiwer: 4.0.0
+flash-attn: not installed
+vllm: not installed
+```
+
+The work-zone `doctor.py` check has `overall_status: pass`. The configured
+`cache` and `runs` directories have been created. The earlier broken editable
+`qwen-asr` installation was replaced, and `qwen_asr` now imports from the active
+Conda environment's `site-packages` directory.
+
+The single-H200 synthetic-audio smoke test also passed on 2026-07-15. The
+complete Qwen3-ASR-1.7B checkpoint loaded successfully and transcribed a
+one-second 440 Hz synthetic input, returning one result. The test was launched
+with physical GPU 4 exposed as logical `cuda:0` via `CUDA_VISIBLE_DEVICES=4`.
+The recurring `pynvml` deprecation message is a non-fatal telemetry dependency
+warning and did not affect model loading or inference.
 
 Known data-copy target, if used:
 
