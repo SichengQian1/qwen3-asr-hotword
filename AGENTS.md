@@ -255,6 +255,23 @@ precision. The first training implementation should therefore retain explicit
 per-sample lengths and avoid assuming that `ln_post` directly returns a padded
 `[B, T, 1024]` tensor.
 
+The padded Encoder batch probe also passed on H200 on 2026-07-15:
+
+```text
+Processor input_features: [2, 128, 200]
+Processor feature lengths: [100, 200]
+Padded ln_post hidden states: [2, 26, 1024]
+CTC input lengths: [13, 26]
+Encoder attention mask: [2, 26], valid counts [13, 26]
+Backbone gradients enabled: false
+Device/dtype: logical cuda:0, torch.bfloat16
+Status: pass, no errors
+```
+
+This validates the first frozen-backbone training boundary: the extractor can
+turn variable-length audio into padded `[B, T_max, 1024]` states while retaining
+the exact per-sample lengths needed by CTC loss.
+
 Known data-copy target, if used:
 
 ```text
