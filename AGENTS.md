@@ -238,6 +238,23 @@ with physical GPU 4 exposed as logical `cuda:0` via `CUDA_VISIBLE_DEVICES=4`.
 The recurring `pynvml` deprecation message is a non-fatal telemetry dependency
 warning and did not affect model loading or inference.
 
+The runtime CTC tap probe passed on 2026-07-15 and confirmed the following real
+`thinker.audio_tower.ln_post` behavior on H200:
+
+```text
+1.0 s audio: input_features [128, 100] -> ln_post [13, 1024]
+2.0 s audio: input_features [128, 200] -> ln_post [26, 1024]
+Device/dtype: logical cuda:0, torch.bfloat16
+Length validation: pass, no errors
+```
+
+Although the wrapper received two audio samples together, the official
+`get_audio_features` path invoked `audio_tower` once per sample. This matches
+the upstream implementation, which loops over input audios to preserve
+precision. The first training implementation should therefore retain explicit
+per-sample lengths and avoid assuming that `ln_post` directly returns a padded
+`[B, T, 1024]` tensor.
+
 Known data-copy target, if used:
 
 ```text

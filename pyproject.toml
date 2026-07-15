@@ -63,6 +63,7 @@ module = [
   "pyarrow",
   "qwen_asr",
   "torch",
+  "torch.*",
   "transformers",
   "yaml",
 ]
