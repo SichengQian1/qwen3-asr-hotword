@@ -18,7 +18,9 @@ from qwen_hotword.modeling.qwen_backbone import ModelValidationError, load_asr_m
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab, normalization_key
 
 DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json"
-TARGET_PHONE_SEQUENCES = (("k", "æ", "t"), ("b", "o", "n", "dʒ", "u", "r"))
+TARGET_LANGUAGES = ("English", "Portuguese")
+TARGET_TEXTS = ("cat", "bom dia")
+TARGET_PHONE_SEQUENCES = (("k", "æ", "t"), ("b", "õ", "dʒ", "i", "a"))
 
 
 def synthetic_waveform(seconds: float, sample_rate: int = 16_000) -> Any:
@@ -109,7 +111,10 @@ def main() -> int:
 
         seconds = [1.0, 2.0]
         waveforms = [synthetic_waveform(duration) for duration in seconds]
-        prompts = [build_audio_prompt(wrapper.processor, "English") for _ in waveforms]
+        prompts = [
+            build_audio_prompt(wrapper.processor, language)
+            for language in TARGET_LANGUAGES
+        ]
         processor_batch = wrapper.processor(
             text=prompts,
             audio=waveforms,
@@ -194,6 +199,8 @@ def main() -> int:
                 "parameters_with_gradients": backbone_gradients,
             },
             "targets": {
+                "languages": list(TARGET_LANGUAGES),
+                "texts": list(TARGET_TEXTS),
                 "tokens": [list(sequence) for sequence in TARGET_PHONE_SEQUENCES],
                 "token_ids": token_ids,
                 "padded_shape": list(targets.shape),
