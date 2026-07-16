@@ -385,6 +385,24 @@ conda run -n aligner mfa g2p \
 Noah corpus must first produce its own normalized unique-word list; do not reuse
 the earlier FLEURS word list or its G2P coverage report.
 
+The complete Noah Portuguese word-list and MFA G2P run finished on 2026-07-16:
+
+```text
+TSV records: 366,508
+Corpus word tokens: 5,348,219
+Unique input words: 76,744
+MFA dictionary lines: 76,736
+MFA runtime: 1,702.057 seconds
+```
+
+The eight-line difference must be audited as missing words rather than assumed
+to be harmless. The generated dictionary is stored in the ignored work-zone
+output directory and should not be committed:
+
+```text
+outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict
+```
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
