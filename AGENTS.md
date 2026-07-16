@@ -343,9 +343,10 @@ Language:
 The TSV `audio` values are relative paths such as
 `APY.../data/category/...wav`; resolve them as `audio_root / audio`. Paths and
 texts contain non-ASCII characters, so readers must use UTF-8 and `pathlib`
-rather than manual path concatenation. This corpus has not yet been processed
-with MFA/G2P. Earlier G2P work was on FLEURS and must not be treated as coverage
-evidence for this new corpus.
+rather than manual path concatenation. This corpus has now been processed with
+the Brazilian Portuguese MFA G2P model described below. Earlier FLEURS G2P
+reports remain separate and must not be treated as coverage evidence for this
+corpus.
 
 The first 1,000-row Noah Portuguese TSV audit passed on 2026-07-15:
 
@@ -402,6 +403,15 @@ output directory and should not be committed:
 ```text
 outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict
 ```
+
+The first real-data feasibility run is Experiment A. It intentionally uses only
+128 high-confidence Portuguese samples to test whether the frozen Qwen3-ASR
+audio encoder plus linear CTC Head can overfit a tiny dataset. The first pass
+excludes standalone `h`, unresolved apostrophe/hyphen forms, dictionary misses,
+ambiguous pronunciations, phone OOVs, invalid audio, and CTC-length-infeasible
+samples. Do not add normalization fallbacks to this first manifest; connector
+and code-switch recovery should be evaluated separately after the clean-label
+training path is proven.
 
 ## Coding Guidelines
 
