@@ -23,7 +23,7 @@ def _write_wav(path: Path, seconds: float = 2.0, sample_rate: int = 16_000) -> N
         handle.writeframes(b"\x00\x00" * int(seconds * sample_rate))
 
 
-def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
     audio_root = tmp_path / "audio"
     rows = [
         ("a.wav", "Bom dia"),
@@ -32,11 +32,15 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         ("d.wav", "Mundo novo"),
         ("e.wav", "Boa casa"),
         ("h.wav", "Letra h"),
+        ("letter.wav", "Letra g"),
         ("connector.wav", "Bem-vindo"),
         ("missing.wav", "Palavra xpto"),
+        ("rare.wav", "Palavra rara"),
+        ("tight.wav", "Mundo mundo"),
     ]
     for audio_name, _text in rows:
         _write_wav(audio_root / audio_name)
+    _write_wav(audio_root / "tight.wav", seconds=1.0)
 
     tsv = tmp_path / "train.tsv"
     tsv.write_text(
@@ -54,7 +58,29 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         "mundo\tm u n d o\n"
         "novo\tn o v o\n"
         "letra\tl e t r a\n"
-        "palavra\tp a l a v r a\n",
+        "g\tɡ e\n"
+        "palavra\tp a l a v r a\n"
+        "rara\tr a r a\n",
+        encoding="utf-8",
+    )
+    word_counts = tmp_path / "word_counts.tsv"
+    word_counts.write_text(
+        "word\tcount\n"
+        "bom\t200\n"
+        "dia\t200\n"
+        "casa\t200\n"
+        "azul\t200\n"
+        "vida\t200\n"
+        "boa\t200\n"
+        "mundo\t200\n"
+        "novo\t200\n"
+        "letra\t200\n"
+        "h\t200\n"
+        "g\t200\n"
+        "bem-vindo\t200\n"
+        "palavra\t200\n"
+        "xpto\t200\n"
+        "rara\t1\n",
         encoding="utf-8",
     )
     vocab = tmp_path / "vocab.json"
@@ -85,7 +111,7 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         ),
         encoding="utf-8",
     )
-    return tsv, audio_root, dictionary, vocab
+    return tsv, audio_root, dictionary, word_counts, vocab
 
 
 def test_ctc_minimum_length_accounts_for_repeated_labels() -> None:
@@ -102,13 +128,14 @@ def test_estimate_qwen_lengths_matches_verified_probe_lengths() -> None:
 
 
 def test_build_experiment_a_manifest_filters_unclean_labels(tmp_path: Path) -> None:
-    tsv, audio_root, dictionary, vocab = _write_fixture_files(tmp_path)
+    tsv, audio_root, dictionary, word_counts, vocab = _write_fixture_files(tmp_path)
     output_dir = tmp_path / "output"
 
     summary = build_experiment_a_manifest(
         tsv,
         audio_root,
         dictionary,
+        word_counts,
         vocab,
         output_dir,
         num_samples=4,
@@ -118,11 +145,13 @@ def test_build_experiment_a_manifest_filters_unclean_labels(tmp_path: Path) -> N
 
     assert summary.status == "pass"
     assert summary.selected_samples == 4
-    assert summary.rows_scanned == 8
-    assert summary.lexically_clean_rows == 5
+    assert summary.rows_scanned == 11
+    assert summary.lexically_clean_rows == 6
     assert summary.rejection_counts["standalone_h"] == 1
+    assert summary.rejection_counts["unsupported_single_letter"] == 1
     assert summary.rejection_counts["unresolved_connector"] == 1
     assert summary.rejection_counts["dictionary_missing"] == 1
+    assert summary.rejection_counts["low_frequency_word"] == 1
 
     records = [
         json.loads(line)
@@ -137,6 +166,7 @@ def test_build_experiment_a_manifest_filters_unclean_labels(tmp_path: Path) -> N
         >= record["ctc_minimum_input_length"] + record["ctc_safety_margin"]
         for record in records
     )
+    assert all(record["ctc_target_ratio"] <= 0.75 for record in records)
     assert "phonemes:" in (output_dir / "experiment_a_review.txt").read_text(
         encoding="utf-8"
     )
@@ -145,12 +175,13 @@ def test_build_experiment_a_manifest_filters_unclean_labels(tmp_path: Path) -> N
 def test_build_experiment_a_manifest_fails_when_clean_pool_is_too_small(
     tmp_path: Path,
 ) -> None:
-    tsv, audio_root, dictionary, vocab = _write_fixture_files(tmp_path)
+    tsv, audio_root, dictionary, word_counts, vocab = _write_fixture_files(tmp_path)
 
     summary = build_experiment_a_manifest(
         tsv,
         audio_root,
         dictionary,
+        word_counts,
         vocab,
         tmp_path / "output",
         num_samples=6,
@@ -159,16 +190,18 @@ def test_build_experiment_a_manifest_fails_when_clean_pool_is_too_small(
 
     assert summary.status == "fail"
     assert summary.selected_samples == 5
+    assert summary.rejection_counts["ctc_alignment_too_tight"] == 1
 
 
 def test_build_experiment_a_manifest_rejects_small_candidate_pool(tmp_path: Path) -> None:
-    tsv, audio_root, dictionary, vocab = _write_fixture_files(tmp_path)
+    tsv, audio_root, dictionary, word_counts, vocab = _write_fixture_files(tmp_path)
 
     with pytest.raises(ValueError, match="candidate_pool_size"):
         build_experiment_a_manifest(
             tsv,
             audio_root,
             dictionary,
+            word_counts,
             vocab,
             tmp_path / "output",
             num_samples=4,

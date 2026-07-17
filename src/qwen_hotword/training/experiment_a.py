@@ -19,7 +19,9 @@ from qwen_hotword.phonemes.coverage import (
     tokenize_ipa_to_vocab,
 )
 from qwen_hotword.training.g2p_prep import extract_word_tokens, normalize_training_text
-from qwen_hotword.training.mfa_audit import load_mfa_dictionary
+from qwen_hotword.training.mfa_audit import load_mfa_dictionary, load_word_counts
+
+ALLOWED_SINGLE_LETTER_WORDS = {"a", "e", "o"}
 
 
 @dataclass(frozen=True)
@@ -52,9 +54,12 @@ class ExperimentASummary:
     tsv_path: str
     audio_root: str
     dictionary_path: str
+    word_counts_path: str
     vocab_path: str
     language: str
     seed: int
+    minimum_word_frequency: int
+    maximum_ctc_target_ratio: float
     requested_samples: int
     selected_samples: int
     rows_scanned: int
@@ -140,6 +145,9 @@ def resolve_clean_label(
     text: str,
     dictionary: dict[str, tuple[str, ...]],
     vocab: PhonemeVocab,
+    *,
+    word_counts: Counter[str] | None = None,
+    minimum_word_frequency: int = 1,
 ) -> tuple[CleanLabel | None, str | None, str | None]:
     words = extract_word_tokens(text)
     if not words:
@@ -147,9 +155,32 @@ def resolve_clean_label(
     if "h" in words:
         return None, "standalone_h", "h"
 
+    unsupported_single_letter = next(
+        (
+            word
+            for word in words
+            if len(word) == 1 and word not in ALLOWED_SINGLE_LETTER_WORDS
+        ),
+        None,
+    )
+    if unsupported_single_letter is not None:
+        return None, "unsupported_single_letter", unsupported_single_letter
+
     connector_word = next((word for word in words if "-" in word or "'" in word), None)
     if connector_word is not None:
         return None, "unresolved_connector", connector_word
+
+    if word_counts is not None and minimum_word_frequency > 1:
+        low_frequency_word = next(
+            (word for word in words if word_counts[word] < minimum_word_frequency),
+            None,
+        )
+        if low_frequency_word is not None:
+            return (
+                None,
+                "low_frequency_word",
+                f"{low_frequency_word}: count={word_counts[low_frequency_word]}",
+            )
 
     sentence_phonemes: list[str] = []
     sentence_token_ids: list[int] = []
@@ -197,17 +228,20 @@ def build_experiment_a_manifest(
     tsv_path: str | Path,
     audio_root: str | Path,
     dictionary_path: str | Path,
+    word_counts_path: str | Path,
     vocab_path: str | Path,
     output_dir: str | Path,
     *,
     num_samples: int = 128,
     seed: int = 20_260_716,
     language: str = "pt-BR",
+    minimum_word_frequency: int = 100,
     audio_column: str = "audio",
     text_column: str = "text",
     minimum_duration_seconds: float = 0.5,
     maximum_duration_seconds: float = 15.0,
     ctc_safety_margin: int = 2,
+    maximum_ctc_target_ratio: float = 0.75,
     candidate_pool_size: int = 4096,
     review_count: int = 20,
     max_rejection_examples: int = 200,
@@ -215,9 +249,10 @@ def build_experiment_a_manifest(
     tsv = Path(tsv_path).expanduser()
     root = Path(audio_root).expanduser()
     dictionary_file = Path(dictionary_path).expanduser()
+    word_counts_file = Path(word_counts_path).expanduser()
     vocab_file = Path(vocab_path).expanduser()
     destination = Path(output_dir).expanduser()
-    for path in (tsv, dictionary_file, vocab_file):
+    for path in (tsv, dictionary_file, word_counts_file, vocab_file):
         if not path.is_file():
             raise FileNotFoundError(f"required file does not exist: {path}")
     if not root.is_dir():
@@ -230,8 +265,13 @@ def build_experiment_a_manifest(
         raise ValueError("invalid duration limits")
     if ctc_safety_margin < 0:
         raise ValueError("ctc_safety_margin must be non-negative")
+    if minimum_word_frequency <= 0:
+        raise ValueError("minimum_word_frequency must be positive")
+    if not 0.0 < maximum_ctc_target_ratio <= 1.0:
+        raise ValueError("maximum_ctc_target_ratio must be in (0, 1]")
 
     dictionary = normalized_dictionary(dictionary_file)
+    word_counts = load_word_counts(word_counts_file)
     vocab = load_phoneme_vocab(vocab_file)
     if not vocab.tokens or vocab.tokens[0] != "<blank>":
         raise ValueError("CTC vocabulary must place <blank> at token ID 0")
@@ -281,7 +321,13 @@ def build_experiment_a_manifest(
                 reject("empty_text", row_number, audio_relative, text)
                 continue
 
-            label, reason, detail = resolve_clean_label(text, dictionary, vocab)
+            label, reason, detail = resolve_clean_label(
+                text,
+                dictionary,
+                vocab,
+                word_counts=word_counts,
+                minimum_word_frequency=minimum_word_frequency,
+            )
             if label is None:
                 reject(reason or "unknown_label_failure", row_number, audio_relative, text, detail)
                 continue
@@ -374,6 +420,19 @@ def build_experiment_a_manifest(
                 ),
             )
             continue
+        ctc_target_ratio = minimum_ctc_length / ctc_input_length
+        if ctc_target_ratio > maximum_ctc_target_ratio:
+            reject(
+                "ctc_alignment_too_tight",
+                candidate.row_number,
+                candidate.audio_relative,
+                candidate.text,
+                (
+                    f"minimum_target={minimum_ctc_length}, input={ctc_input_length}, "
+                    f"ratio={ctc_target_ratio:.6f}, maximum={maximum_ctc_target_ratio:.6f}"
+                ),
+            )
+            continue
 
         selected_audio_paths.add(candidate.audio_path)
         selected_records.append(
@@ -396,6 +455,7 @@ def build_experiment_a_manifest(
                 "estimated_ctc_input_length": ctc_input_length,
                 "ctc_minimum_input_length": minimum_ctc_length,
                 "ctc_safety_margin": ctc_safety_margin,
+                "ctc_target_ratio": round(ctc_target_ratio, 6),
                 "words": list(candidate.label.words),
                 "phonemes": list(candidate.label.phonemes),
                 "phoneme_token_ids": list(candidate.label.phoneme_token_ids),
@@ -419,9 +479,12 @@ def build_experiment_a_manifest(
         tsv_path=str(tsv),
         audio_root=str(root),
         dictionary_path=str(dictionary_file),
+        word_counts_path=str(word_counts_file),
         vocab_path=str(vocab_file),
         language=language,
         seed=seed,
+        minimum_word_frequency=minimum_word_frequency,
+        maximum_ctc_target_ratio=maximum_ctc_target_ratio,
         requested_samples=num_samples,
         selected_samples=len(selected_records),
         rows_scanned=rows_scanned,

@@ -19,14 +19,17 @@ def main() -> int:
     parser.add_argument("--tsv", required=True)
     parser.add_argument("--audio-root", required=True)
     parser.add_argument("--dictionary", required=True)
+    parser.add_argument("--word-counts", required=True)
     parser.add_argument("--vocab", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--num-samples", type=int, default=128)
     parser.add_argument("--seed", type=int, default=20_260_716)
     parser.add_argument("--language", default="pt-BR")
+    parser.add_argument("--minimum-word-frequency", type=int, default=100)
     parser.add_argument("--minimum-duration-seconds", type=float, default=0.5)
     parser.add_argument("--maximum-duration-seconds", type=float, default=15.0)
     parser.add_argument("--ctc-safety-margin", type=int, default=2)
+    parser.add_argument("--maximum-ctc-target-ratio", type=float, default=0.75)
     parser.add_argument("--candidate-pool-size", type=int, default=4096)
     parser.add_argument("--review-count", type=int, default=20)
     args = parser.parse_args()
@@ -36,14 +39,17 @@ def main() -> int:
             args.tsv,
             args.audio_root,
             args.dictionary,
+            args.word_counts,
             args.vocab,
             args.output_dir,
             num_samples=args.num_samples,
             seed=args.seed,
             language=args.language,
+            minimum_word_frequency=args.minimum_word_frequency,
             minimum_duration_seconds=args.minimum_duration_seconds,
             maximum_duration_seconds=args.maximum_duration_seconds,
             ctc_safety_margin=args.ctc_safety_margin,
+            maximum_ctc_target_ratio=args.maximum_ctc_target_ratio,
             candidate_pool_size=args.candidate_pool_size,
             review_count=args.review_count,
         )
