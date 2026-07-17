@@ -418,6 +418,31 @@ rare-name and code-switch uncertainty. Do not add normalization fallbacks to
 this first manifest; connector and code-switch recovery should be evaluated
 separately after the clean-label training path is proven.
 
+The corrected Experiment A manifest was regenerated and manually reviewed on
+2026-07-17. It contains 128 Brazilian Portuguese samples totaling about 7.21
+minutes, with a mean duration of about 3.38 seconds. The build reported 96,563
+lexically clean corpus rows and completed with `status: pass`. The reviewed
+samples had consistent text, word, phone, token-ID, and CTC-length fields, with
+no obvious English terms or names in the first inspection set.
+
+The Experiment A trainer is `scripts/train_experiment_a.py`. It validates the
+manifest before model loading, freezes the complete Qwen audio tower, extracts
+the 128 `ln_post` feature sequences once, caches those frozen states in CPU
+memory, and repeatedly trains only a float32 `Linear(1024, 90)` CTC head. It
+records CTC loss and greedy-decoded training PER after every epoch. Expected
+outputs under the requested run directory are:
+
+```text
+metrics.jsonl
+report.json
+ctc_head_best.pt
+ctc_head_latest.pt
+```
+
+`status: completed` means the training program ran successfully;
+`overfit_success: true` means the best training PER reached the configured
+target. These states must not be conflated.
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
