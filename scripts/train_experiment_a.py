@@ -36,6 +36,10 @@ def main() -> int:
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--max-gradient-norm", type=float, default=5.0)
     parser.add_argument("--target-per", type=float, default=0.05)
+    parser.add_argument(
+        "--initial-head-checkpoint",
+        help="Load compatible CTC Head weights; optimizer state starts fresh.",
+    )
     parser.add_argument("--seed", type=int, default=20_260_716)
     parser.add_argument("--log-every", type=int, default=5)
     args = parser.parse_args()
@@ -91,6 +95,7 @@ def main() -> int:
             target_phoneme_error_rate=args.target_per,
             seed=args.seed,
             log_every=args.log_every,
+            initial_head_checkpoint=args.initial_head_checkpoint,
         )
     except (
         ConfigError,

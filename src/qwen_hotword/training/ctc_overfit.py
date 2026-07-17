@@ -69,6 +69,7 @@ class OverfitReport:
     best_checkpoint_path: str
     latest_checkpoint_path: str
     metrics_path: str
+    initial_head_checkpoint_path: str | None
     overfit_success: bool
     status: str
 
@@ -292,6 +293,7 @@ def train_cached_ctc_head(
     target_phoneme_error_rate: float = 0.05,
     seed: int = 20_260_716,
     log_every: int = 5,
+    initial_head_checkpoint: str | Path | None = None,
 ) -> OverfitReport:
     import torch
 
@@ -315,6 +317,12 @@ def train_cached_ctc_head(
         torch.cuda.manual_seed_all(seed)
 
     head = LinearCtcHead(1024, len(vocab.tokens)).to(device=device, dtype=torch.float32)
+    initial_checkpoint_path: str | None = None
+    if initial_head_checkpoint is not None:
+        checkpoint_path = Path(initial_head_checkpoint).expanduser()
+        _load_head_checkpoint(checkpoint_path, head, vocab)
+        initial_checkpoint_path = str(checkpoint_path)
+        print(f"loaded initial CTC head: {checkpoint_path}", flush=True)
     optimizer = torch.optim.AdamW(
         head.parameters(),
         lr=learning_rate,
@@ -422,6 +430,7 @@ def train_cached_ctc_head(
         best_checkpoint_path=str(best_checkpoint_path),
         latest_checkpoint_path=str(latest_checkpoint_path),
         metrics_path=str(metrics_path),
+        initial_head_checkpoint_path=initial_checkpoint_path,
         overfit_success=best.phoneme_error_rate <= target_phoneme_error_rate,
         status="completed",
     )
@@ -557,6 +566,32 @@ def _save_checkpoint(
         },
         path,
     )
+
+
+def _load_head_checkpoint(
+    path: Path,
+    head: Any,
+    vocab: PhonemeVocab,
+) -> None:
+    import torch
+
+    if not path.is_file():
+        raise FileNotFoundError(f"initial CTC head checkpoint does not exist: {path}")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise ValueError(f"initial CTC head checkpoint is not a mapping: {path}")
+    if payload.get("input_dimension") != 1024:
+        raise ValueError("initial CTC head checkpoint input dimension is not 1024")
+    if payload.get("num_classes") != len(vocab.tokens):
+        raise ValueError("initial CTC head checkpoint class count differs from the vocabulary")
+    if payload.get("blank_id") != 0:
+        raise ValueError("initial CTC head checkpoint blank ID is not zero")
+    if payload.get("vocab_tokens") != list(vocab.tokens):
+        raise ValueError("initial CTC head checkpoint vocabulary tokens do not match")
+    state_dict = payload.get("state_dict")
+    if not isinstance(state_dict, dict):
+        raise ValueError("initial CTC head checkpoint has no state_dict")
+    head.load_state_dict(state_dict, strict=True)
 
 
 def _write_metrics(path: Path, metrics: list[EpochMetrics]) -> None:

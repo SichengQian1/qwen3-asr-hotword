@@ -443,6 +443,15 @@ ctc_head_latest.pt
 `overfit_success: true` means the best training PER reached the configured
 target. These states must not be conflated.
 
+The first 200-epoch run completed on 2026-07-17 with the encoder frozen and the
+92,250-parameter linear Head trainable. Loss fell from about 8.00 to 0.286 and
+training PER fell from about 1.331 to 0.0759. The best result occurred at the
+final epoch, so the run was still improving when the epoch cap was reached.
+This proves the basic training path converges but does not yet satisfy the 0.05
+overfit target. `--initial-head-checkpoint` can load the saved best Head for a
+continuation run; this restores Head weights only and intentionally starts a
+fresh optimizer because the original checkpoint did not store AdamW state.
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
