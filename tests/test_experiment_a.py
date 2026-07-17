@@ -31,6 +31,7 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
         ("c.wav", "Vida boa"),
         ("d.wav", "Mundo novo"),
         ("e.wav", "Boa casa"),
+        ("copula.wav", "É bom"),
         ("h.wav", "Letra h"),
         ("letter.wav", "Letra g"),
         ("connector.wav", "Bem-vindo"),
@@ -55,6 +56,7 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
         "azul\ta z u l\n"
         "vida\tv i d a\n"
         "boa\tb o a\n"
+        "é\tɛ\n"
         "mundo\tm u n d o\n"
         "novo\tn o v o\n"
         "letra\tl e t r a\n"
@@ -72,6 +74,7 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
         "azul\t200\n"
         "vida\t200\n"
         "boa\t200\n"
+        "é\t200\n"
         "mundo\t200\n"
         "novo\t200\n"
         "letra\t200\n"
@@ -106,6 +109,7 @@ def _write_fixture_files(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
                     "u",
                     "v",
                     "z",
+                    "ɛ",
                 ]
             }
         ),
@@ -145,8 +149,8 @@ def test_build_experiment_a_manifest_filters_unclean_labels(tmp_path: Path) -> N
 
     assert summary.status == "pass"
     assert summary.selected_samples == 4
-    assert summary.rows_scanned == 11
-    assert summary.lexically_clean_rows == 6
+    assert summary.rows_scanned == 12
+    assert summary.lexically_clean_rows == 7
     assert summary.rejection_counts["standalone_h"] == 1
     assert summary.rejection_counts["unsupported_single_letter"] == 1
     assert summary.rejection_counts["unresolved_connector"] == 1
@@ -184,12 +188,12 @@ def test_build_experiment_a_manifest_fails_when_clean_pool_is_too_small(
         word_counts,
         vocab,
         tmp_path / "output",
-        num_samples=6,
+        num_samples=7,
         candidate_pool_size=8,
     )
 
     assert summary.status == "fail"
-    assert summary.selected_samples == 5
+    assert summary.selected_samples == 6
     assert summary.rejection_counts["ctc_alignment_too_tight"] == 1
 
 

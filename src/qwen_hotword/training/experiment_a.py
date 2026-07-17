@@ -21,7 +21,8 @@ from qwen_hotword.phonemes.coverage import (
 from qwen_hotword.training.g2p_prep import extract_word_tokens, normalize_training_text
 from qwen_hotword.training.mfa_audit import load_mfa_dictionary, load_word_counts
 
-ALLOWED_SINGLE_LETTER_WORDS = {"a", "e", "o"}
+# Portuguese articles/conjunctions, contractions, copula, and common vocatives.
+ALLOWED_SINGLE_LETTER_WORDS = {"a", "à", "e", "é", "ê", "o", "ó", "ô"}
 
 
 @dataclass(frozen=True)

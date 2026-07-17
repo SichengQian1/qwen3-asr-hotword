@@ -411,10 +411,11 @@ excludes standalone `h`, unresolved apostrophe/hyphen forms, dictionary misses,
 ambiguous pronunciations, phone OOVs, invalid audio, and CTC-length-infeasible
 samples. Following manual review, Experiment A also requires every word to
 appear at least 100 times in the Noah corpus, rejects non-Portuguese single-letter
-tokens other than `a`, `e`, and `o`, and caps the minimum CTC target/input ratio
-at 0.75. These restrictions intentionally make the first overfit test easier and
-reduce rare-name and code-switch uncertainty. Do not add normalization fallbacks
-to this first manifest; connector and code-switch recovery should be evaluated
+tokens while retaining valid forms such as `a`, `à`, `e`, `é`, `o`, `ó`, and
+common vocalic variants, and caps the minimum CTC target/input ratio at 0.75.
+These restrictions intentionally make the first overfit test easier and reduce
+rare-name and code-switch uncertainty. Do not add normalization fallbacks to
+this first manifest; connector and code-switch recovery should be evaluated
 separately after the clean-label training path is proven.
 
 ## Coding Guidelines
