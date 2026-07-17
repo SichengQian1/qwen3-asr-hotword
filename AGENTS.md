@@ -452,6 +452,30 @@ overfit target. `--initial-head-checkpoint` can load the saved best Head for a
 continuation run; this restores Head weights only and intentionally starts a
 fresh optimizer because the original checkpoint did not store AdamW state.
 
+Experiment A reached its stricter final target on 2026-07-17. Starting from the
+previous 0.0498-PER checkpoint, a second continuation reduced training loss
+from about 0.1913 to 0.0694 and training PER to 0.00990 at continuation epoch
+194. The run stopped automatically at the configured 0.01 target and reported
+`overfit_success: true`. Experiment A is therefore complete: the frozen Qwen
+audio features plus a 92,250-parameter linear CTC Head can overfit the clean
+128-sample set. This is a training-path result, not evidence of validation-set
+generalization or hotword recall.
+
+Experiment B starts with deterministic clean-label manifests built by
+`scripts/build_experiment_b_manifests.py`. The initial targets are 8 hours of
+training data, 1 hour of validation data, and 1 hour of held-out test data.
+Each audio path is assigned to exactly one split by a stable 80/10/10 hash
+before duration-based selection, and the builder fails if any exact audio path
+overlaps across splits. It reuses Experiment A's strict label, frequency,
+duration, and CTC-feasibility rules. The Noah TSV exposes only `audio` and
+`text`, so this preliminary split is file-disjoint but cannot be claimed to be
+speaker-disjoint. Do not use the Experiment A overfit Head to initialize a
+generalization comparison if any Experiment A audio could fall into Experiment
+B validation or test data; the clean baseline should initialize a fresh Head.
+For the first build, pass the Experiment A manifest through `--exclude-manifest`
+so all 128 previously inspected and trained samples are absent from every
+Experiment B split.
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
