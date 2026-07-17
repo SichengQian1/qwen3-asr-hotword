@@ -62,6 +62,7 @@ module = [
   "phonemizer",
   "pyarrow",
   "qwen_asr",
+  "safetensors",
   "torch",
   "torch.*",
   "transformers",

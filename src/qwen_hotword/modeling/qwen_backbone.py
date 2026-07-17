@@ -62,7 +62,7 @@ def inspect_local_config(model_config: ModelConfig) -> ModelInspection:
         ) from error
 
     with init_empty_weights():
-        model: Any = AutoModel.from_config(config)  # type: ignore[no-untyped-call]
+        model: Any = AutoModel.from_config(config)
     thinker = getattr(model, "thinker", None)
     audio_tower = getattr(thinker, "audio_tower", None)
     if thinker is None or audio_tower is None:

@@ -50,6 +50,29 @@ def test_load_experiment_records_validates_training_contract(tmp_path: Path) -> 
     assert records[0].token_ids == (2, 3, 4)
 
 
+def test_load_experiment_records_accepts_expected_experiment_b_split(
+    tmp_path: Path,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    manifest_path = tmp_path / "experiment.jsonl"
+    _write_wav(audio_path)
+    _write_manifest(
+        manifest_path,
+        audio_path,
+        experiment="B",
+        split="validation",
+    )
+
+    records = load_experiment_records(
+        manifest_path,
+        num_classes=10,
+        expected_experiment="B",
+        expected_split="validation",
+    )
+
+    assert len(records) == 1
+
+
 @pytest.mark.parametrize(  # type: ignore[misc]
     ("overrides", "message"),
     [

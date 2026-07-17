@@ -476,6 +476,34 @@ For the first build, pass the Experiment A manifest through `--exclude-manifest`
 so all 128 previously inspected and trained samples are absent from every
 Experiment B split.
 
+The first Experiment B manifest build completed in the work zone on 2026-07-17:
+
+```text
+Train:      8.000742 h, 8,760 samples
+Validation: 1.000139 h, 1,071 samples
+Test:       1.001225 h, 1,085 samples
+Cross-split exact audio overlaps: 0
+Excluded Experiment A audio paths: 128
+Status: pass
+```
+
+The first ten review entries from each split were manually inspected. Their
+text, word segmentation, phoneme sequences, token IDs, and estimated CTC
+lengths were consistent enough for the preliminary generalization experiment.
+Conversational repetitions and common Brazilian Portuguese loanwords were kept
+because this phase should represent real speech rather than only sanitized
+sentences. One test sample reaches the configured CTC target/input ratio limit
+of 0.75 exactly; it remains valid under the current inclusive threshold.
+
+Experiment B training must use a fresh randomly initialized `Linear(1024, 90)`
+Head. It must load only the train and validation manifests, verify they are
+disjoint again, cache frozen `ln_post` states, and select the best checkpoint by
+validation PER with validation loss as the tie-breaker. Training PER is a
+diagnostic only. Learning-rate reduction and early stopping use validation
+metrics. The held-out test manifest must not be accepted by the training
+command; test evaluation is a separate one-time step after the best checkpoint
+is fixed.
+
 ## Coding Guidelines
 
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.

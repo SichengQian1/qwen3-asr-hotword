@@ -82,6 +82,8 @@ def load_experiment_records(
     *,
     num_classes: int,
     blank_id: int = 0,
+    expected_experiment: str = "A",
+    expected_split: str = "train",
 ) -> list[ExperimentRecord]:
     path = Path(manifest_path).expanduser()
     if not path.is_file():
@@ -102,8 +104,14 @@ def load_experiment_records(
                 raise ValueError(f"invalid JSON at {path}:{line_number}") from error
             if not isinstance(raw, dict):
                 raise ValueError(f"manifest row {line_number} must be a JSON object")
-            if raw.get("experiment") != "A" or raw.get("split") != "train":
-                raise ValueError(f"manifest row {line_number} is not Experiment A train data")
+            if (
+                raw.get("experiment") != expected_experiment
+                or raw.get("split") != expected_split
+            ):
+                raise ValueError(
+                    f"manifest row {line_number} is not Experiment "
+                    f"{expected_experiment} {expected_split} data"
+                )
 
             sample_id = _required_string(raw, "id", line_number)
             if sample_id in seen_ids:
@@ -210,17 +218,19 @@ def extract_frozen_features(
     wrapper: Any,
     *,
     encoder_batch_size: int,
+    progress_every_batches: int = 8,
+    progress_label: str = "encoder features",
 ) -> tuple[list[CachedSample], int, float]:
     import torch
 
     from qwen_hotword.modeling.audio_encoder import extract_padded_ln_post
 
-    if encoder_batch_size <= 0:
-        raise ValueError("encoder_batch_size must be positive")
+    if encoder_batch_size <= 0 or progress_every_batches <= 0:
+        raise ValueError("encoder batch size and progress interval must be positive")
     try:
         import librosa  # type: ignore[import-not-found]
     except ImportError as error:
-        raise RuntimeError("librosa is required to load Experiment A audio") from error
+        raise RuntimeError("librosa is required to load training audio") from error
 
     audio_tower = wrapper.model.thinker.audio_tower
     frozen_parameters = freeze_module(audio_tower)
@@ -270,7 +280,13 @@ def extract_frozen_features(
                     token_ids=record.token_ids,
                 )
             )
-        print(f"cached encoder features: {len(cached)}/{len(records)}", flush=True)
+        batch_number = start // encoder_batch_size + 1
+        is_last_batch = len(cached) == len(records)
+        if batch_number == 1 or batch_number % progress_every_batches == 0 or is_last_batch:
+            print(
+                f"cached {progress_label}: {len(cached)}/{len(records)}",
+                flush=True,
+            )
     return cached, frozen_parameters, time.monotonic() - started
 
 
@@ -343,7 +359,7 @@ def train_cached_ctc_head(
     history = [initial]
     _write_metrics(metrics_path, history)
     best = initial
-    _save_checkpoint(best_checkpoint_path, head, vocab, best, seed)
+    save_ctc_head_checkpoint(best_checkpoint_path, head, vocab, best, seed)
 
     generator = random.Random(seed)
     started = time.monotonic()
@@ -353,7 +369,7 @@ def train_cached_ctc_head(
         head.train()
         for start in range(0, len(indices), train_batch_size):
             batch = [samples[index] for index in indices[start : start + train_batch_size]]
-            hidden_states, input_lengths, targets, target_lengths = _collate_cached(
+            hidden_states, input_lengths, targets, target_lengths = collate_cached_samples(
                 batch,
                 device=device,
                 blank_id=blank_id,
@@ -386,7 +402,7 @@ def train_cached_ctc_head(
             best.loss,
         ):
             best = metrics
-            _save_checkpoint(best_checkpoint_path, head, vocab, best, seed)
+            save_ctc_head_checkpoint(best_checkpoint_path, head, vocab, best, seed)
         if epoch == 1 or epoch % log_every == 0 or epoch == epochs:
             print(
                 f"epoch={epoch:03d} loss={metrics.loss:.6f} "
@@ -403,7 +419,7 @@ def train_cached_ctc_head(
 
     training_seconds = time.monotonic() - started
     final = history[-1]
-    _save_checkpoint(latest_checkpoint_path, head, vocab, final, seed)
+    save_ctc_head_checkpoint(latest_checkpoint_path, head, vocab, final, seed)
     report = OverfitReport(
         manifest_path=str(Path(manifest_path)),
         vocab_path=str(Path(vocab_path)),
@@ -462,7 +478,7 @@ def evaluate_cached_samples(
     with torch.no_grad():
         for start in range(0, len(samples), batch_size):
             batch = samples[start : start + batch_size]
-            hidden_states, input_lengths, targets, target_lengths = _collate_cached(
+            hidden_states, input_lengths, targets, target_lengths = collate_cached_samples(
                 batch,
                 device=device,
                 blank_id=blank_id,
@@ -495,7 +511,7 @@ def evaluate_cached_samples(
     )
 
 
-def _collate_cached(
+def collate_cached_samples(
     samples: list[CachedSample],
     *,
     device: Any,
@@ -541,7 +557,7 @@ def _required_string(raw: dict[str, Any], key: str, line_number: int) -> str:
     return str(value)
 
 
-def _save_checkpoint(
+def save_ctc_head_checkpoint(
     path: Path,
     head: Any,
     vocab: PhonemeVocab,

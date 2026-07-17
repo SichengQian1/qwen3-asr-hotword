@@ -159,8 +159,9 @@ def coerce_record_text(row: dict[str, Any], text_column: str | None) -> str | No
         "raw_transcription",
     )
     for column in columns:
-        if column and isinstance(row.get(column), str) and row[column].strip():
-            return row[column].strip()
+        value = row.get(column) if column else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
 
 
@@ -171,7 +172,7 @@ def coerce_record_language(
 ) -> str | None:
     columns = (language_column,) if language_column else ("language", "lang", "locale")
     for column in columns:
-        if column and isinstance(row.get(column), str) and row[column].strip():
-            return row[column].strip()
+        value = row.get(column) if column else None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return default_language
-
