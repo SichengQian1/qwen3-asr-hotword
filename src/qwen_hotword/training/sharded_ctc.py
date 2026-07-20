@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from qwen_hotword.phonemes.coverage import PhonemeVocab
 from qwen_hotword.training.ctc_overfit import (
@@ -21,6 +21,7 @@ from qwen_hotword.training.ctc_overfit import (
 )
 
 SHARDED_CTC_SCHEMA_VERSION = 1
+EarlyStoppingMetric = Literal["validation_loss", "validation_per"]
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ class ShardedCtcReport:
     minimum_epochs: int
     early_stopping_patience: int
     early_stopping_min_delta: float
+    early_stopping_metric: str
     initial_validation_loss: float
     initial_validation_phoneme_error_rate: float
     best_epoch: int
@@ -366,6 +368,7 @@ def train_sharded_ctc_head(
     minimum_epochs: int = 5,
     early_stopping_patience: int = 6,
     early_stopping_min_delta: float = 0.001,
+    early_stopping_metric: EarlyStoppingMetric = "validation_loss",
     train_batch_size: int = 256,
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
@@ -389,6 +392,7 @@ def train_sharded_ctc_head(
         minimum_epochs=minimum_epochs,
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
+        early_stopping_metric=early_stopping_metric,
         train_batch_size=train_batch_size,
         learning_rate=learning_rate,
         max_gradient_norm=max_gradient_norm,
@@ -434,6 +438,7 @@ def train_sharded_ctc_head(
         minimum_epochs=minimum_epochs,
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
+        early_stopping_metric=early_stopping_metric,
         seed=seed,
     )
 
@@ -466,7 +471,7 @@ def train_sharded_ctc_head(
             if isinstance(raw_best_train, dict)
             else None
         )
-        patience_reference_per = float(state["patience_reference_per"])
+        patience_reference_value = float(state["patience_reference_value"])
         stale_epochs = _required_int(state, "stale_epochs")
         training_seconds = float(state["training_seconds"])
         resumed_from_epoch = completed_epoch
@@ -493,7 +498,10 @@ def train_sharded_ctc_head(
         best_epoch = 0
         best_train = None
         best_validation = initial_validation
-        patience_reference_per = initial_validation.phoneme_error_rate
+        patience_reference_value = _early_stopping_value(
+            initial_validation,
+            early_stopping_metric,
+        )
         stale_epochs = 0
         history = []
         start_epoch = 1
@@ -509,7 +517,7 @@ def train_sharded_ctc_head(
             best_epoch=best_epoch,
             best_train=best_train,
             best_validation=best_validation,
-            patience_reference_per=patience_reference_per,
+            patience_reference_value=patience_reference_value,
             stale_epochs=stale_epochs,
             training_seconds=training_seconds,
             history=history,
@@ -559,11 +567,12 @@ def train_sharded_ctc_head(
             best_validation = validation_metrics
             save_ctc_head_checkpoint(best_checkpoint_path, head, vocab, best_validation, seed)
 
-        if (
-            validation_metrics.phoneme_error_rate
-            < patience_reference_per - early_stopping_min_delta
-        ):
-            patience_reference_per = validation_metrics.phoneme_error_rate
+        early_stopping_value = _early_stopping_value(
+            validation_metrics,
+            early_stopping_metric,
+        )
+        if early_stopping_value < patience_reference_value - early_stopping_min_delta:
+            patience_reference_value = early_stopping_value
             stale_epochs = 0
         else:
             stale_epochs += 1
@@ -580,7 +589,7 @@ def train_sharded_ctc_head(
             best_epoch=best_epoch,
             best_train=best_train,
             best_validation=best_validation,
-            patience_reference_per=patience_reference_per,
+            patience_reference_value=patience_reference_value,
             stale_epochs=stale_epochs,
             training_seconds=training_seconds,
             history=history,
@@ -593,7 +602,8 @@ def train_sharded_ctc_head(
             f"val_PER={validation_metrics.phoneme_error_rate:.4f} "
             f"best_val_PER={best_validation.phoneme_error_rate:.4f} "
             f"lr={float(optimizer.param_groups[0]['lr']):.2e} "
-            f"stale={stale_epochs} seconds={epoch_seconds:.1f}",
+            f"early_stop={early_stopping_metric} stale={stale_epochs} "
+            f"seconds={epoch_seconds:.1f}",
             flush=True,
         )
         if epoch >= minimum_epochs and stale_epochs >= early_stopping_patience:
@@ -630,6 +640,7 @@ def train_sharded_ctc_head(
         minimum_epochs=minimum_epochs,
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
+        early_stopping_metric=early_stopping_metric,
         initial_validation_loss=initial_validation.loss,
         initial_validation_phoneme_error_rate=initial_validation.phoneme_error_rate,
         best_epoch=best_epoch,
@@ -840,6 +851,7 @@ def _validate_training_arguments(
     minimum_epochs: int,
     early_stopping_patience: int,
     early_stopping_min_delta: float,
+    early_stopping_metric: EarlyStoppingMetric,
     train_batch_size: int,
     learning_rate: float,
     max_gradient_norm: float,
@@ -862,6 +874,8 @@ def _validate_training_arguments(
         raise ValueError("early stopping patience must be positive")
     if early_stopping_min_delta < 0:
         raise ValueError("early stopping min delta cannot be negative")
+    if early_stopping_metric not in {"validation_loss", "validation_per"}:
+        raise ValueError("early stopping metric must be validation_loss or validation_per")
     if train_batch_size <= 0 or log_every_shards <= 0:
         raise ValueError("batch size and shard log interval must be positive")
     if learning_rate <= 0 or minimum_learning_rate <= 0 or max_gradient_norm <= 0:
@@ -888,6 +902,17 @@ def _training_fingerprint(
     ).hexdigest()
 
 
+def _early_stopping_value(
+    metrics: EpochMetrics,
+    metric: EarlyStoppingMetric,
+) -> float:
+    if metric == "validation_loss":
+        return metrics.loss
+    if metric == "validation_per":
+        return metrics.phoneme_error_rate
+    raise ValueError("early stopping metric must be validation_loss or validation_per")
+
+
 def _save_training_state(
     path: Path,
     *,
@@ -900,7 +925,7 @@ def _save_training_state(
     best_epoch: int,
     best_train: EpochMetrics | None,
     best_validation: EpochMetrics,
-    patience_reference_per: float,
+    patience_reference_value: float,
     stale_epochs: int,
     training_seconds: float,
     history: list[ShardedEpochMetrics],
@@ -923,7 +948,7 @@ def _save_training_state(
             "best_epoch": best_epoch,
             "best_train": best_train.to_dict() if best_train else None,
             "best_validation": best_validation.to_dict(),
-            "patience_reference_per": patience_reference_per,
+            "patience_reference_value": patience_reference_value,
             "stale_epochs": stale_epochs,
             "training_seconds": training_seconds,
             "history": [metric.to_dict() for metric in history],

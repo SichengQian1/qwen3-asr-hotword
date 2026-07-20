@@ -37,6 +37,15 @@ def main() -> int:
     parser.add_argument("--minimum-epochs", type=int, default=5)
     parser.add_argument("--early-stopping-patience", type=int, default=6)
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.001)
+    parser.add_argument(
+        "--early-stopping-metric",
+        choices=("validation_loss", "validation_per"),
+        default="validation_loss",
+        help=(
+            "Metric used to count stale epochs. Best checkpoints are always selected "
+            "by validation PER, then validation loss."
+        ),
+    )
     parser.add_argument("--train-batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -100,6 +109,7 @@ def main() -> int:
                 minimum_epochs=args.minimum_epochs,
                 early_stopping_patience=args.early_stopping_patience,
                 early_stopping_min_delta=args.early_stopping_min_delta,
+                early_stopping_metric=args.early_stopping_metric,
                 train_batch_size=args.train_batch_size,
                 learning_rate=args.learning_rate,
                 weight_decay=args.weight_decay,

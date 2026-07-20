@@ -7,9 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
-from qwen_hotword.training.ctc_overfit import CachedSample, ExperimentRecord
+from qwen_hotword.training.ctc_overfit import CachedSample, EpochMetrics, ExperimentRecord
 from qwen_hotword.training.feature_cache import cache_feature_split
 from qwen_hotword.training.sharded_ctc import (
+    _early_stopping_value,
     exclusive_training_run,
     load_disk_feature_cache,
     load_feature_shard,
@@ -187,6 +188,7 @@ def test_sharded_ctc_training_saves_and_resumes(tmp_path: Path) -> None:
     assert resumed.resumed_from_epoch == 1
     assert resumed.epochs_completed == 2
     assert resumed.test_set_used is False
+    assert resumed.early_stopping_metric == "validation_loss"
     assert (output / "ctc_head_best.pt").is_file()
     assert (output / "ctc_head_latest.pt").is_file()
     assert (output / "training_state_latest.pt").is_file()
@@ -201,3 +203,16 @@ def test_training_lock_rejects_duplicate_process(tmp_path: Path) -> None:
         exclusive_training_run(output),
     ):
         raise AssertionError("duplicate lock must not be acquired")
+
+
+def test_early_stopping_metric_is_explicit() -> None:
+    metrics = EpochMetrics(
+        epoch=1,
+        loss=0.75,
+        phoneme_error_rate=0.25,
+        phoneme_errors=25,
+        reference_phonemes=100,
+    )
+
+    assert _early_stopping_value(metrics, "validation_loss") == 0.75
+    assert _early_stopping_value(metrics, "validation_per") == 0.25
