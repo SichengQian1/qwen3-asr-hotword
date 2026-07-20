@@ -485,6 +485,28 @@ process, process shards sequentially, and never hold the complete corpus in
 host or GPU memory. This changes throughput only; the feature format and model
 behavior remain the same as a multi-GPU extraction.
 
+The formal frozen-encoder feature cache completed successfully on physical GPU
+5 on 2026-07-20. Physical GPU 5 was exposed as logical `cuda:0`. The sealed test
+split was not read or cached:
+
+```text
+Train:      234,181 samples, 458 shards, 14,741,705 frames, 30,289,466,690 bytes
+Validation:   4,835 samples,  10 shards,    303,471 frames,    625,356,770 bytes
+Tap/dtype:  thinker.audio_tower.ln_post / bfloat16
+Encoder:    frozen, 317,477,504 parameters
+Status:     pass
+Test used:  false
+```
+
+Formal linear-Head training must use `scripts/train_full_ctc.py`. It validates
+the SHA256 identity of every feature shard before the first run, streams one
+shard at a time instead of loading the 30.9 GB cache into memory, and trains only
+the float32 `Linear(1024, 90)` Head. It saves latest and best Head checkpoints,
+optimizer/scheduler state, metrics, and a report after every epoch. Reusing the
+same command with `--resume` continues at the next epoch. Checkpoint selection
+and early stopping use validation PER with validation loss as the tie-breaker;
+the trainer intentionally has no test-manifest argument.
+
 The first real-data feasibility run is Experiment A. It intentionally uses only
 128 high-confidence Portuguese samples to test whether the frozen Qwen3-ASR
 audio encoder plus linear CTC Head can overfit a tiny dataset. The first pass

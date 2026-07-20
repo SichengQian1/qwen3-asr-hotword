@@ -30,6 +30,7 @@ eval = [
 workzone = [
   "datasets>=3,<5",
   "jiwer>=3,<5",
+  "rapidfuzz>=3,<4",
   "tensorboard>=2.17,<3",
 ]
 
