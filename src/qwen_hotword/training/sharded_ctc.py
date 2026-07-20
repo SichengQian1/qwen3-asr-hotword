@@ -713,7 +713,7 @@ def _train_cache_epoch(
                 target_lengths,
                 blank_id=blank_id,
             )
-            computation.loss.backward()  # type: ignore[no-untyped-call]
+            computation.loss.backward()
             torch.nn.utils.clip_grad_norm_(head.parameters(), max_gradient_norm)
             optimizer.step()
             errors, references = _batch_error_counts(

@@ -63,6 +63,8 @@ module = [
   "phonemizer",
   "pyarrow",
   "qwen_asr",
+  "rapidfuzz",
+  "rapidfuzz.*",
   "safetensors",
   "torch",
   "torch.*",
