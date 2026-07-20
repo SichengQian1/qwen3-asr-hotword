@@ -404,6 +404,45 @@ output directory and should not be committed:
 outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict
 ```
 
+The full-corpus CTC manifest builder was added on 2026-07-17 for the weekend
+preprocessing run:
+
+```text
+Script:
+  scripts/build_full_training_manifest.py
+Intended output directory in the work zone:
+  outputs/noah_pt_full_500h
+Default shard size:
+  5,000 source rows
+Default metadata workers:
+  16 CPU threads
+```
+
+This builder must retain every source TSV row. A row is written to exactly one
+of the following manifests:
+
+```text
+train_ready.jsonl
+  Exact dictionary/vocabulary coverage, readable audio, and physically feasible
+  CTC length.
+
+needs_review.jsonl
+  Complete source and partial/resolved label data plus explicit issue reasons.
+```
+
+Standalone `h`, words containing `-` or `'`, missing dictionary entries, OOV
+phones, invalid/missing audio, and infeasible CTC lengths are review reasons,
+not grounds for silently dropping a row. The `h` and connector normalization
+policies are intentionally deferred until after this full pass. The build is
+atomically sharded and resumable; rerunning the same command skips completed
+shards. Do not add the Experiment A/B low-frequency, maximum-duration, or 0.75
+CTC-ratio sampling filters to this full-corpus pass.
+
+The weekend pass creates reusable manifests and audio/label metadata only. It
+must not precompute Qwen encoder hidden states, because those features bind the
+dataset to a particular encoder checkpoint and training policy. This job is
+CPU/storage work and does not require an H200.
+
 The first real-data feasibility run is Experiment A. It intentionally uses only
 128 high-confidence Portuguese samples to test whether the frozen Qwen3-ASR
 audio encoder plus linear CTC Head can overfit a tiny dataset. The first pass
