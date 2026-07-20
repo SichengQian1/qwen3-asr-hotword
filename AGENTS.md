@@ -443,6 +443,45 @@ must not precompute Qwen encoder hidden states, because those features bind the
 dataset to a particular encoder checkpoint and training policy. This job is
 CPU/storage work and does not require an H200.
 
+The full Noah manifest build completed successfully in the work zone on
+2026-07-20:
+
+```text
+Source records/audio: 366,508 / 496.7013 h
+Training-ready:        243,876 / 326.8718 h
+Needs review:          122,632
+Completed shards:      74
+Status:                pass
+```
+
+The first formal training dataset is derived only from `train_ready.jsonl` by
+`scripts/build_full_training_splits.py`. It uses the existing stable
+`split_hash` field to make a deterministic 96/2/2 train/validation/test split,
+and writes compact records under a new output directory. It must reject
+duplicate IDs/audio paths, invalid CTC labels, cross-split overlap, and
+accidental overwrite. The generated `split_config.json` and
+`split_summary.json` record source/output SHA256 values so the exact dataset can
+be reproduced and audited. The test manifest is sealed: training and
+hyperparameter selection may read only train and validation; test is evaluated
+once after the checkpoint and decoding policy are fixed.
+
+The split builder is CPU/storage work and requires no GPU. The next full-corpus
+encoder-feature stage must not use Experiment B's all-in-memory cache pattern.
+It should write resumable feature shards to persistent storage, record the
+Qwen checkpoint/tap/dtype metadata, and validate every shard before reuse.
+Current resource planning for that stage is:
+
+```text
+Parallel feature extraction: 4 x H200, at least 40 GiB free per GPU
+Preferred allocation:        exclusive access to those four GPUs
+Persistent free storage:     80-100 GiB reserved
+Linear CTC Head training:    1 x H200, 20-30 GiB free is sufficient
+```
+
+These are throughput and operational-isolation requirements, not model-memory
+minimums. A single H200 can perform extraction more slowly if needed, but the
+feature format and resulting model behavior must remain identical.
+
 The first real-data feasibility run is Experiment A. It intentionally uses only
 128 high-confidence Portuguese samples to test whether the frozen Qwen3-ASR
 audio encoder plus linear CTC Head can overfit a tiny dataset. The first pass
