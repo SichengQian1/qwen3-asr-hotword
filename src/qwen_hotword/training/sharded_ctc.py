@@ -235,6 +235,13 @@ def load_disk_feature_cache(
                 sample_ids=tuple(sample_ids),
             )
         )
+        if verify_sha256 and (
+            position == 0 or (position + 1) % 50 == 0 or position + 1 == shard_count
+        ):
+            print(
+                f"verified {expected_split} feature shards: {position + 1}/{shard_count}",
+                flush=True,
+            )
     if expected_record_start != sample_count or len(set(all_sample_ids)) != sample_count:
         raise ValueError(f"feature cache sample coverage is invalid: {root}")
     sample_id_sha256 = _strings_sha256(all_sample_ids)

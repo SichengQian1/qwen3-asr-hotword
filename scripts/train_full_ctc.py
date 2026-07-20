@@ -51,44 +51,44 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        import torch
-
-        if args.device.startswith("cuda") and not torch.cuda.is_available():
-            raise RuntimeError("CUDA training was requested but CUDA is unavailable")
-        vocab = load_phoneme_vocab(args.vocab)
-        verify_sha256 = not args.skip_cache_sha256_verification
-        train_cache = load_disk_feature_cache(
-            args.train_cache,
-            expected_split="train",
-            source_manifest_path=args.train_manifest,
-            vocab_path=args.vocab,
-            verify_sha256=verify_sha256,
-        )
-        validation_cache = load_disk_feature_cache(
-            args.validation_cache,
-            expected_split="validation",
-            source_manifest_path=args.validation_manifest,
-            vocab_path=args.vocab,
-            verify_sha256=verify_sha256,
-        )
-        print(
-            json.dumps(
-                {
-                    "stage": "feature_cache_validation",
-                    "status": "pass",
-                    "train_samples": train_cache.sample_count,
-                    "validation_samples": validation_cache.sample_count,
-                    "train_shards": train_cache.shard_count,
-                    "validation_shards": validation_cache.shard_count,
-                    "cache_sha256_verified": verify_sha256,
-                    "device": args.device,
-                    "test_set_used": False,
-                },
-                indent=2,
-            ),
-            flush=True,
-        )
         with exclusive_training_run(args.output_dir):
+            import torch
+
+            if args.device.startswith("cuda") and not torch.cuda.is_available():
+                raise RuntimeError("CUDA training was requested but CUDA is unavailable")
+            vocab = load_phoneme_vocab(args.vocab)
+            verify_sha256 = not args.skip_cache_sha256_verification
+            train_cache = load_disk_feature_cache(
+                args.train_cache,
+                expected_split="train",
+                source_manifest_path=args.train_manifest,
+                vocab_path=args.vocab,
+                verify_sha256=verify_sha256,
+            )
+            validation_cache = load_disk_feature_cache(
+                args.validation_cache,
+                expected_split="validation",
+                source_manifest_path=args.validation_manifest,
+                vocab_path=args.vocab,
+                verify_sha256=verify_sha256,
+            )
+            print(
+                json.dumps(
+                    {
+                        "stage": "feature_cache_validation",
+                        "status": "pass",
+                        "train_samples": train_cache.sample_count,
+                        "validation_samples": validation_cache.sample_count,
+                        "train_shards": train_cache.shard_count,
+                        "validation_shards": validation_cache.shard_count,
+                        "cache_sha256_verified": verify_sha256,
+                        "device": args.device,
+                        "test_set_used": False,
+                    },
+                    indent=2,
+                ),
+                flush=True,
+            )
             report = train_sharded_ctc_head(
                 train_cache,
                 validation_cache,
