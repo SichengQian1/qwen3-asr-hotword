@@ -469,18 +469,21 @@ The split builder is CPU/storage work and requires no GPU. The next full-corpus
 encoder-feature stage must not use Experiment B's all-in-memory cache pattern.
 It should write resumable feature shards to persistent storage, record the
 Qwen checkpoint/tap/dtype metadata, and validate every shard before reuse.
-Current resource planning for that stage is:
+The work zone can currently allocate one H200 to this project. Current resource
+planning for that stage is therefore:
 
 ```text
-Parallel feature extraction: 4 x H200, at least 40 GiB free per GPU
-Preferred allocation:        exclusive access to those four GPUs
+Feature extraction:          1 x H200, at least 30-40 GiB free
+Preferred allocation:       exclusive access to that GPU
 Persistent free storage:     80-100 GiB reserved
 Linear CTC Head training:    1 x H200, 20-30 GiB free is sufficient
 ```
 
-These are throughput and operational-isolation requirements, not model-memory
-minimums. A single H200 can perform extraction more slowly if needed, but the
-feature format and resulting model behavior must remain identical.
+Use `CUDA_VISIBLE_DEVICES=<physical GPU>` so the selected physical card appears
+as logical `cuda:0` inside the process. The feature cache must run as one GPU
+process, process shards sequentially, and never hold the complete corpus in
+host or GPU memory. This changes throughput only; the feature format and model
+behavior remain the same as a multi-GPU extraction.
 
 The first real-data feasibility run is Experiment A. It intentionally uses only
 128 high-confidence Portuguese samples to test whether the frozen Qwen3-ASR
