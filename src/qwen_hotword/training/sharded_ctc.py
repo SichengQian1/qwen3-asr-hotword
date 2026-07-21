@@ -807,18 +807,20 @@ def _batch_error_counts(
     *,
     blank_id: int,
 ) -> tuple[int, int]:
-    from rapidfuzz.distance import Levenshtein
+    from qwen_hotword.training.edit_distance import sequence_edit_distance
 
     predictions = logits.argmax(dim=-1).detach().cpu()
     errors = 0
     references = 0
     for row, sample in enumerate(samples):
         input_length = int(input_lengths[row].item())
-        hypothesis = collapse_ctc_ids(
-            predictions[row, :input_length].tolist(),
-            blank_id=blank_id,
+        hypothesis = tuple(
+            collapse_ctc_ids(
+                predictions[row, :input_length].tolist(),
+                blank_id=blank_id,
+            )
         )
-        errors += int(Levenshtein.distance(sample.token_ids, hypothesis))
+        errors += sequence_edit_distance(sample.token_ids, hypothesis)
         references += len(sample.token_ids)
     return errors, references
 
