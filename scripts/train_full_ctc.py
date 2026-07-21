@@ -22,7 +22,7 @@ DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Train the formal linear CTC head from completed train/validation feature "
+            "Train a formal CTC Head from completed train/validation feature "
             "shards. The sealed test manifest is intentionally not accepted."
         )
     )
@@ -55,6 +55,16 @@ def main() -> int:
     parser.add_argument("--minimum-learning-rate", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=20_260_720)
     parser.add_argument("--log-every-shards", type=int, default=25)
+    parser.add_argument(
+        "--head-type",
+        choices=("linear", "temporal_upsample"),
+        default="linear",
+        help="Keep linear for the baseline; use temporal_upsample for the new Head experiment.",
+    )
+    parser.add_argument("--head-hidden-dimension", type=int, default=512)
+    parser.add_argument("--head-kernel-size", type=int, default=5)
+    parser.add_argument("--head-dropout", type=float, default=0.1)
+    parser.add_argument("--head-time-upsampling-factor", type=int, default=2)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--skip-cache-sha256-verification", action="store_true")
     args = parser.parse_args()
@@ -120,6 +130,11 @@ def main() -> int:
                 seed=args.seed,
                 log_every_shards=args.log_every_shards,
                 resume=args.resume,
+                head_type=args.head_type,
+                head_hidden_dimension=args.head_hidden_dimension,
+                head_kernel_size=args.head_kernel_size,
+                head_dropout=args.head_dropout,
+                head_time_upsampling_factor=args.head_time_upsampling_factor,
             )
     except (FileNotFoundError, KeyError, OSError, RuntimeError, ValueError) as error:
         print(f"FULL CTC TRAINING FAILED: {type(error).__name__}: {error}", file=sys.stderr)

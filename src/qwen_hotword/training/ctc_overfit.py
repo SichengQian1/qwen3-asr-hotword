@@ -495,7 +495,7 @@ def evaluate_cached_samples(
             sample_count += len(batch)
             predictions = computation.logits.argmax(dim=-1).cpu()
             for row, sample in enumerate(batch):
-                input_length = int(input_lengths[row].item())
+                input_length = int(computation.input_lengths[row].item())
                 hypothesis = collapse_ctc_ids(
                     predictions[row, :input_length].tolist(),
                     blank_id=blank_id,
@@ -566,12 +566,19 @@ def save_ctc_head_checkpoint(
 ) -> None:
     import torch
 
+    from qwen_hotword.modeling.ctc_head import ctc_head_config
+
+    head_config = ctc_head_config(head)
+    if head_config["num_classes"] != len(vocab.tokens):
+        raise ValueError("CTC Head class count differs from the checkpoint vocabulary")
+
     torch.save(
         {
             "schema_version": 1,
-            "head_type": "LinearCtcHead",
-            "input_dimension": 1024,
-            "num_classes": len(vocab.tokens),
+            "head_type": head_config["head_type"],
+            "input_dimension": head_config["input_dimension"],
+            "num_classes": head_config["num_classes"],
+            "head_config": head_config,
             "blank_id": 0,
             "vocab_tokens": list(vocab.tokens),
             "epoch_metrics": metrics.to_dict(),
@@ -591,6 +598,11 @@ def _load_head_checkpoint(
 ) -> None:
     import torch
 
+    from qwen_hotword.modeling.ctc_head import (
+        build_ctc_head_from_checkpoint,
+        ctc_head_config,
+    )
+
     if not path.is_file():
         raise FileNotFoundError(f"initial CTC head checkpoint does not exist: {path}")
     payload = torch.load(path, map_location="cpu", weights_only=True)
@@ -604,6 +616,9 @@ def _load_head_checkpoint(
         raise ValueError("initial CTC head checkpoint blank ID is not zero")
     if payload.get("vocab_tokens") != list(vocab.tokens):
         raise ValueError("initial CTC head checkpoint vocabulary tokens do not match")
+    checkpoint_head = build_ctc_head_from_checkpoint(payload)
+    if ctc_head_config(checkpoint_head) != ctc_head_config(head):
+        raise ValueError("initial CTC head checkpoint structure does not match the requested Head")
     state_dict = payload.get("state_dict")
     if not isinstance(state_dict, dict):
         raise ValueError("initial CTC head checkpoint has no state_dict")

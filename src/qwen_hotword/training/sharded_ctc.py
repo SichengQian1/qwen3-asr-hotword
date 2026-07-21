@@ -81,6 +81,7 @@ class ShardedCtcReport:
     validation_feature_bytes: int
     num_classes: int
     blank_id: int
+    head_config: dict[str, object]
     encoder_frozen_parameters: int
     ctc_trainable_parameters: int
     train_batch_size: int
@@ -379,10 +380,15 @@ def train_sharded_ctc_head(
     seed: int = 20_260_720,
     log_every_shards: int = 25,
     resume: bool = False,
+    head_type: str = "linear",
+    head_hidden_dimension: int = 512,
+    head_kernel_size: int = 5,
+    head_dropout: float = 0.1,
+    head_time_upsampling_factor: int = 2,
 ) -> ShardedCtcReport:
     import torch
 
-    from qwen_hotword.modeling.ctc_head import LinearCtcHead
+    from qwen_hotword.modeling.ctc_head import build_ctc_head, ctc_head_config
 
     _validate_training_arguments(
         train_cache,
@@ -409,7 +415,16 @@ def train_sharded_ctc_head(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    head = LinearCtcHead(1024, len(vocab.tokens)).to(device=device, dtype=torch.float32)
+    head = build_ctc_head(
+        head_type=head_type,
+        input_dimension=1024,
+        num_classes=len(vocab.tokens),
+        hidden_dimension=head_hidden_dimension,
+        kernel_size=head_kernel_size,
+        dropout=head_dropout,
+        time_upsampling_factor=head_time_upsampling_factor,
+    ).to(device=device, dtype=torch.float32)
+    head_configuration = ctc_head_config(head)
     optimizer = torch.optim.AdamW(head.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
@@ -424,22 +439,29 @@ def train_sharded_ctc_head(
     latest_checkpoint_path = destination / "ctc_head_latest.pt"
     training_state_path = destination / "training_state_latest.pt"
     metrics_path = destination / "metrics.jsonl"
+    fingerprint_hyperparameters: dict[str, object] = {
+        "train_batch_size": train_batch_size,
+        "learning_rate": learning_rate,
+        "weight_decay": weight_decay,
+        "max_gradient_norm": max_gradient_norm,
+        "scheduler_patience": scheduler_patience,
+        "scheduler_factor": scheduler_factor,
+        "minimum_learning_rate": minimum_learning_rate,
+        "minimum_epochs": minimum_epochs,
+        "early_stopping_patience": early_stopping_patience,
+        "early_stopping_min_delta": early_stopping_min_delta,
+        "early_stopping_metric": early_stopping_metric,
+        "seed": seed,
+    }
+    # Preserve the fingerprint of existing linear-Head runs so their training
+    # state remains resumable after this feature was added.
+    if head_configuration["head_type"] != "linear":
+        fingerprint_hyperparameters["head_config"] = head_configuration
     run_fingerprint = _training_fingerprint(
         train_cache,
         validation_cache,
         vocab,
-        train_batch_size=train_batch_size,
-        learning_rate=learning_rate,
-        weight_decay=weight_decay,
-        max_gradient_norm=max_gradient_norm,
-        scheduler_patience=scheduler_patience,
-        scheduler_factor=scheduler_factor,
-        minimum_learning_rate=minimum_learning_rate,
-        minimum_epochs=minimum_epochs,
-        early_stopping_patience=early_stopping_patience,
-        early_stopping_min_delta=early_stopping_min_delta,
-        early_stopping_metric=early_stopping_metric,
-        seed=seed,
+        **fingerprint_hyperparameters,
     )
 
     history: list[ShardedEpochMetrics]
@@ -450,6 +472,11 @@ def train_sharded_ctc_head(
         state = torch.load(training_state_path, map_location=device, weights_only=True)
         if not isinstance(state, dict) or state.get("run_fingerprint") != run_fingerprint:
             raise ValueError("training state does not match the requested cache or hyperparameters")
+        saved_head_config = state.get("head_config")
+        if saved_head_config is not None and saved_head_config != head_configuration:
+            raise ValueError("training state CTC Head structure does not match the requested Head")
+        if saved_head_config is None and head_configuration["head_type"] != "linear":
+            raise ValueError("training state has no CTC Head structure metadata")
         completed_epoch = _required_int(state, "completed_epoch")
         if completed_epoch > epochs:
             raise ValueError("requested epochs are fewer than the resumed completed epoch")
@@ -629,6 +656,7 @@ def train_sharded_ctc_head(
         validation_feature_bytes=validation_cache.feature_bytes,
         num_classes=len(vocab.tokens),
         blank_id=blank_id,
+        head_config=head_configuration,
         encoder_frozen_parameters=train_cache.encoder_frozen_parameters,
         ctc_trainable_parameters=sum(parameter.numel() for parameter in head.parameters()),
         train_batch_size=train_batch_size,
@@ -694,7 +722,7 @@ def _train_cache_epoch(
     total_errors = 0
     total_reference = 0
     for shard_position, descriptor in enumerate(descriptors, start=1):
-        samples = load_feature_shard(descriptor, num_classes=head.projection.out_features)
+        samples = load_feature_shard(descriptor, num_classes=head.num_classes)
         indices = list(range(len(samples)))
         generator.shuffle(indices)
         for start in range(0, len(indices), batch_size):
@@ -718,7 +746,7 @@ def _train_cache_epoch(
             optimizer.step()
             errors, references = _batch_error_counts(
                 computation.logits,
-                input_lengths,
+                computation.input_lengths,
                 batch,
                 blank_id=blank_id,
             )
@@ -766,7 +794,7 @@ def _evaluate_cache(
     total_reference = 0
     with torch.no_grad():
         for descriptor in cache.shards:
-            samples = load_feature_shard(descriptor, num_classes=head.projection.out_features)
+            samples = load_feature_shard(descriptor, num_classes=head.num_classes)
             for start in range(0, len(samples), batch_size):
                 batch = samples[start : start + batch_size]
                 hidden_states, input_lengths, targets, target_lengths = (
@@ -782,7 +810,7 @@ def _evaluate_cache(
                 )
                 errors, references = _batch_error_counts(
                     computation.logits,
-                    input_lengths,
+                    computation.input_lengths,
                     batch,
                     blank_id=blank_id,
                 )
@@ -934,6 +962,8 @@ def _save_training_state(
 ) -> None:
     import torch
 
+    from qwen_hotword.modeling.ctc_head import ctc_head_config
+
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.unlink(missing_ok=True)
     torch.save(
@@ -941,6 +971,7 @@ def _save_training_state(
             "schema_version": SHARDED_CTC_SCHEMA_VERSION,
             "run_fingerprint": run_fingerprint,
             "completed_epoch": completed_epoch,
+            "head_config": ctc_head_config(head),
             "head_state_dict": {
                 key: value.detach().cpu() for key, value in head.state_dict().items()
             },

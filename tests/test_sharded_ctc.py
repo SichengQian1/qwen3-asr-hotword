@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
+from qwen_hotword.training.ctc_diagnostics import diagnose_ctc_checkpoint
 from qwen_hotword.training.ctc_overfit import CachedSample, EpochMetrics, ExperimentRecord
 from qwen_hotword.training.feature_cache import cache_feature_split
 from qwen_hotword.training.sharded_ctc import (
@@ -57,6 +58,7 @@ def _fake_extractor(
     **_kwargs: object,
 ) -> tuple[list[CachedSample], int, float]:
     torch = pytest.importorskip("torch")
+
     samples = []
     for index, record in enumerate(records):
         hidden = torch.zeros((6, 1024), dtype=torch.float32)
@@ -137,7 +139,11 @@ def test_disk_cache_loader_rejects_corrupted_shard(tmp_path: Path) -> None:
         )
 
 
-def test_sharded_ctc_training_saves_and_resumes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("head_type", ["linear", "temporal_upsample"])
+def test_sharded_ctc_training_saves_and_resumes(
+    tmp_path: Path,
+    head_type: str,
+) -> None:
     torch = pytest.importorskip("torch")
     train_dir, validation_dir, train_manifest, validation_manifest, vocab_path = (
         _build_cache_pair(tmp_path)
@@ -164,6 +170,11 @@ def test_sharded_ctc_training_saves_and_resumes(tmp_path: Path) -> None:
         "train_batch_size": 2,
         "learning_rate": 0.01,
         "log_every_shards": 1,
+        "head_type": head_type,
+        "head_hidden_dimension": 8,
+        "head_kernel_size": 3,
+        "head_dropout": 0.0,
+        "head_time_upsampling_factor": 2,
     }
 
     first = train_sharded_ctc_head(
@@ -189,10 +200,21 @@ def test_sharded_ctc_training_saves_and_resumes(tmp_path: Path) -> None:
     assert resumed.epochs_completed == 2
     assert resumed.test_set_used is False
     assert resumed.early_stopping_metric == "validation_loss"
+    assert resumed.head_config["head_type"] == head_type
     assert (output / "ctc_head_best.pt").is_file()
     assert (output / "ctc_head_latest.pt").is_file()
     assert (output / "training_state_latest.pt").is_file()
     assert len((output / "metrics.jsonl").read_text(encoding="utf-8").splitlines()) == 2
+    diagnostics = diagnose_ctc_checkpoint(
+        output / "ctc_head_best.pt",
+        validation_cache,
+        vocab,
+        device=torch.device("cpu"),
+        batch_size=2,
+    )
+    assert diagnostics["head_config"]["head_type"] == head_type
+    expected_factor = 2 if head_type == "temporal_upsample" else 1
+    assert diagnostics["validation"]["input_frames"] == 12 * expected_factor
 
 
 def test_training_lock_rejects_duplicate_process(tmp_path: Path) -> None:

@@ -8,10 +8,7 @@ from typing import Any
 from qwen_hotword.phonemes.coverage import PhonemeVocab
 from qwen_hotword.training.ctc_overfit import CachedSample, collapse_ctc_ids
 from qwen_hotword.training.edit_distance import sequence_editops
-from qwen_hotword.training.sharded_ctc import (
-    DiskFeatureCache,
-    load_feature_shard,
-)
+from qwen_hotword.training.sharded_ctc import DiskFeatureCache, load_feature_shard
 
 
 @dataclass
@@ -30,6 +27,8 @@ class ErrorAccumulator:
         return self.substitutions + self.deletions + self.insertions
 
     def to_dict(self) -> dict[str, object]:
+        if self.reference_tokens <= 0 or self.input_frames <= 0:
+            raise ValueError("cannot summarize empty CTC diagnostic metrics")
         result = asdict(self)
         result.update(
             {
@@ -62,16 +61,22 @@ def diagnose_ctc_checkpoint(
 ) -> dict[str, object]:
     import torch
 
-    from qwen_hotword.modeling.ctc_head import LinearCtcHead, compute_ctc
+    from qwen_hotword.modeling.ctc_head import (
+        build_ctc_head_from_checkpoint,
+        compute_ctc,
+        ctc_head_config,
+    )
 
     if batch_size <= 0:
         raise ValueError("diagnostic batch size must be positive")
     checkpoint = Path(checkpoint_path).expanduser()
     payload = _load_checkpoint(checkpoint, vocab)
-    head = LinearCtcHead(1024, len(vocab.tokens)).to(
-        device=device,
-        dtype=torch.float32,
-    )
+    head = build_ctc_head_from_checkpoint(payload)
+    if head.input_dimension != 1024 or head.num_classes != len(vocab.tokens):
+        raise ValueError(
+            "CTC Head structure metadata does not match the feature/vocabulary contract"
+        )
+    head = head.to(device=device, dtype=torch.float32)
     head.load_state_dict(payload["state_dict"], strict=True)
     head.eval()
 
@@ -85,14 +90,12 @@ def diagnose_ctc_checkpoint(
     loss_sum = 0.0
     with torch.no_grad():
         for descriptor in cache.shards:
-            samples = load_feature_shard(
-                descriptor,
-                num_classes=len(vocab.tokens),
-            )
+            samples = load_feature_shard(descriptor, num_classes=len(vocab.tokens))
             for start in range(0, len(samples), batch_size):
                 batch = samples[start : start + batch_size]
-                hidden_states, input_lengths, targets, target_lengths = (
-                    _collate(batch, device=device)
+                hidden_states, input_lengths, targets, target_lengths = _collate(
+                    batch,
+                    device=device,
                 )
                 computation = compute_ctc(
                     head,
@@ -105,14 +108,11 @@ def diagnose_ctc_checkpoint(
                 loss_sum += float(computation.loss.item()) * len(batch)
                 predictions = computation.logits.argmax(dim=-1).detach().cpu()
                 for row, sample in enumerate(batch):
-                    input_length = int(input_lengths[row].item())
+                    input_length = int(computation.input_lengths[row].item())
                     raw_prediction = predictions[row, :input_length].tolist()
                     hypothesis = tuple(collapse_ctc_ids(raw_prediction, blank_id=0))
                     bucket = buckets[
-                        ctc_pressure_bucket(
-                            sample.token_ids,
-                            input_length=input_length,
-                        )
+                        ctc_pressure_bucket(sample.token_ids, input_length=input_length)
                     ]
                     _accumulate_errors(
                         detailed,
@@ -129,6 +129,7 @@ def diagnose_ctc_checkpoint(
         raise RuntimeError("diagnostic did not consume the complete validation cache")
     return {
         "checkpoint_path": str(checkpoint),
+        "head_config": ctc_head_config(head),
         "checkpoint_epoch_metrics": payload.get("epoch_metrics"),
         "validation_loss": loss_sum / total.sample_count,
         "validation": total.to_dict(),
@@ -139,10 +140,7 @@ def diagnose_ctc_checkpoint(
         },
         "top_deletions": _top_token_counts(detailed.deleted_tokens, vocab),
         "top_insertions": _top_token_counts(detailed.inserted_tokens, vocab),
-        "top_substitutions": _top_substitution_counts(
-            detailed.substituted_tokens,
-            vocab,
-        ),
+        "top_substitutions": _top_substitution_counts(detailed.substituted_tokens, vocab),
     }
 
 
@@ -150,8 +148,7 @@ def ctc_pressure_bucket(token_ids: tuple[int, ...], *, input_length: int) -> str
     if input_length <= 0 or not token_ids:
         raise ValueError("CTC pressure requires positive input and target lengths")
     minimum_length = len(token_ids) + sum(
-        left == right
-        for left, right in zip(token_ids, token_ids[1:], strict=False)
+        left == right for left, right in zip(token_ids, token_ids[1:], strict=False)
     )
     ratio = minimum_length / input_length
     if ratio <= 0.50:
@@ -175,10 +172,7 @@ def _accumulate_errors(
     substitutions = 0
     deletions = 0
     insertions = 0
-    for tag, source_position, destination_position in sequence_editops(
-        reference,
-        hypothesis,
-    ):
+    for tag, source_position, destination_position in sequence_editops(reference, hypothesis):
         if tag == "replace":
             substitutions += 1
             detailed.substituted_tokens[
