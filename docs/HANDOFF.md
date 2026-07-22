@@ -1,6 +1,124 @@
 # 工作交接记录
 
-## 1. 当前目标
+## 0. 2026-07-22 最新状态（后续交接以本节为准）
+
+### 当前目标与已确认决策
+
+时间上采样冻结 Encoder CTC Head 已完成正式训练和 validation 诊断。
+用户已确认：
+
+- 部署时只使用 `time_upsampling_factor=2` 的新 Head 时间轴。
+- 原始 1× 线性 Head 只作历史对照和研究分析。
+- 暂不修改 CTC 压力分桶报告，不让该报告阻塞产品路径。
+- 当前进入 phoneme-space hotword scoring 和误触发控制阶段。
+- 领导尚未提供正式热词表，先从 formal validation 文本和 Noah MFA 词典构建
+  可复现的 pt-BR 模拟热词表，用于打通评分链路。
+- 本阶段仍不读取封存 test 集。模拟 validation 结果只用于开发和阈值初调，
+  不得宣称为最终泛化结论。
+
+### 工作区已完成的新 Head 实验
+
+2026-07-21 工作区完整训练结果：
+
+```text
+run:              run_temporal_upsample_ctc_h512_k5_lr3e4_v1
+head:             temporal_upsample, hidden=512, kernel=5, dropout=0.1, 2×
+trainable params: 838,746
+best epoch:       24
+train loss/PER:   0.246010 / 0.066503
+validation loss:  0.305222
+validation PER:   0.067645
+early stop:       true, validation_loss patience=6
+test used:        false
+status:           completed
+```
+
+与旧线性 Head 的 validation 诊断对比：
+
+```text
+linear best:    PER 0.293637, deletion 52,016, substitution 16,052,
+                insertion 2,636, prediction/reference length 0.7949
+temporal 2×: PER 0.067645, deletion 6,812,  substitution 6,557,
+                insertion 2,919, prediction/reference length 0.9838
+```
+
+这证明新 Head 的时间对齐能力明显更强，并已达到进入热词评分阶段的标准。
+
+### 本轮已实现（待工作区运行）
+
+- `src/qwen_hotword/hotwords/registry.py`
+  - 定义可序列化的热词条目。
+  - 校验热词 ID、语种、词面、MFA 发音、phoneme token 与 token ID 一致性。
+  - 拒绝 blank、越界 ID、重复 ID 和重复发音。
+- `src/qwen_hotword/hotwords/simulation.py`
+  - 只接受 `split=validation` 记录。
+  - 从 1–2 词 validation 短语构造确定性 pt-BR 模拟热词表。
+  - 用 Noah MFA 词典和当前 v0.2 词表生成精确 phoneme token IDs。
+  - 生成 positive-confusable 和 negative 验证 case，每条 case 有自己的在线
+    active hotword 集合。
+- `src/qwen_hotword/hotwords/scoring.py`
+  - 在 Head 有效时间轴上做 CTC greedy collapse。
+  - 用局部音素编辑距离和 posterior confidence 对热词排序。
+  - 支持 score threshold、最大 edit ratio、最低 posterior、top-k 和 top-1
+    margin 歧义抑制。
+- `src/qwen_hotword/hotwords/evaluation.py`
+  - 强制 checkpoint 必须是 2× `TemporalUpsampleCtcHead`。
+  - 只从 validation feature cache 取模拟 case，不读 test。
+  - 输出 precision、recall、F1、positive case hit/top-1 accuracy、negative case
+    false-positive rate 和阈值扫描。
+  - 默认控制目标是 precision >= 0.90 且 negative-case FPR <= 0.03；未达标时
+    会显式写 `meets_control_targets: false`。
+- 新 CLI：
+  - `scripts/build_simulated_hotwords.py`
+  - `scripts/evaluate_hotword_scoring.py`
+- 新测试：
+  - `tests/test_hotword_scoring.py`
+  - `tests/test_simulated_hotwords.py`
+
+### 本轮本地测试
+
+2026-07-22 实际结果：
+
+```text
+Ruff（本轮相关文件）: pass
+Pytest 定向:                 pass, 6 tests
+Pytest 全仓库:             pass, 91 tests
+CLI --help smoke:              pass
+git diff --check:              pass
+Mypy src/qwen_hotword:         11 existing errors, 0 in new hotword modules
+```
+
+Mypy 的 11 个既有错误集中在 `qwen_backbone.py`、`ctc_head.py` 和四个训练器的
+Torch 类型注解；本轮未扩大范围修改它们。
+
+### 下一步（当前最高优先级）
+
+1. 在工作区从 formal validation manifest 生成 50 个模拟热词和 200 个
+   validation-only case。
+2. 人工快速查看 `simulated_hotwords.jsonl` 的词面和发音是否合理。
+3. 在 GPU 5 上用新 Head best checkpoint 运行 hotword threshold sweep。
+4. 将 `hotword_scoring_report.json` 和必要的失败 case 发回分析。
+5. 根据报告固定第一版阈值与误触发策略，再接入可在线 reload 的正式
+   hotword registry 和 Qwen prompt injection。
+
+### 工作树与保留修改
+
+本轮开始时实际本地基线为 `main@33fe87a`，用户已确认继续在 `main`
+工作。本地 `main` 与 GitHub 发布分支历史仍不同步；发布时应继续采用隔离
+worktree，将本阶段独立 commit 移植到 `origin/codex/g2p-coverage-scan`，不应强推
+本地 `main`。
+
+以下是其他任务/用户的未提交修改，必须继续保留，不得纳入本阶段 commit：
+
+- `docs/PHONEME_VOCAB.md`
+- `docs/WORKZONE_RUNBOOK.md`
+- `scripts/scan_g2p_coverage.py`
+- `tests/test_g2p_coverage.py`
+- `tests/test_phoneme_vocab.py`
+- `configs/phonemes/en_es_ptbr_fr_id_precision_ipa_vocab.v0.3.json`
+- `work/`
+
+## 1. 上一阶段目标（历史记录）
 
 在 Qwen3-ASR-1.7B Audio Encoder 保持冻结、复用既有 `ln_post` BF16 特征缓存的
 前提下，将正式分片 CTC 训练链路从仅支持线性 Head 扩展为可选的时间上采样
