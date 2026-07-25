@@ -1,5 +1,64 @@
 # 工作交接记录
 
+## 0.1 2026-07-25 sealed test PER 一次性评估（当前最高优先级）
+
+用户已明确要求获取当前固定 CTC 模型的正式 test PER，因此允许首次打开此前
+封存的 `full_ctc_test.jsonl`。此次评估必须保持以下冻结条件：
+
+```text
+checkpoint:
+  outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/
+  ctc_head_best.pt
+
+Head:
+  temporal_upsample, hidden=512, kernel=5, dropout=0.1, time axis=2x
+
+decode:
+  greedy argmax CTC collapse, blank_id=0
+```
+
+不得根据 test PER 重新选择 checkpoint、调整 Head、修改解码策略或调参。后续若有
+新模型版本，必须建立新的正式评估版本和新的独立测试协议，不能反复使用本次结果
+进行开发。
+
+本轮新增：
+
+- `src/qwen_hotword/training/sealed_test.py`
+  - 直接对 test 音频分块提取冻结的 `ln_post` 特征并立即评估。
+  - 不写 test feature cache，不保留可用于反复调参的测试特征。
+  - 只接受文件名为 `ctc_head_best.pt` 的 2x temporal checkpoint。
+  - 记录 test PER、loss、substitution/deletion/insertion、预测/参考长度比、
+    blank ratio、高频错误以及 manifest/vocab/model/checkpoint SHA256。
+  - 报告已存在时拒绝覆盖。
+- `scripts/evaluate_sealed_ctc_test.py`
+  - 必须显式传 `--acknowledge-sealed-test-evaluation`。
+  - 只接受 `experiment=full-ctc-v1, split=test` manifest。
+  - 输出明确标记 `test_set_used=true`、`one_time_evaluation=true` 和
+    `checkpoint_selection_or_tuning_permitted=false`。
+- `tests/test_sealed_test.py`
+  - 覆盖 2x temporal best checkpoint 的一次性流式评估。
+  - 覆盖报告防覆盖和 latest checkpoint 拒绝。
+
+本地实际验证：
+
+```text
+Ruff（本轮文件）: pass
+Mypy sealed_test.py: pass
+Pytest 定向: pass, 2 tests
+Pytest 全仓库: pass, 97 tests
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+工作区尚未运行，因此 HANDOFF 中暂时没有正式 test PER。下一步必须在 GPU 5
+执行一次评估，并保存：
+
+```text
+outputs/noah_pt_full_training_v1/
+  run_temporal_upsample_ctc_h512_k5_lr3e4_v1/
+  sealed_test_per_v1.json
+```
+
 ## 0. 2026-07-22 最新状态（后续交接以本节为准）
 
 ### 当前目标与已确认决策
