@@ -28,6 +28,16 @@ def _parse_thresholds(value: str) -> tuple[float, ...]:
     return thresholds
 
 
+def _parse_ranking_ks(value: str) -> tuple[int, ...]:
+    try:
+        ks = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("ranking ks must be comma-separated integers") from error
+    if not ks or any(k <= 0 for k in ks) or len(set(ks)) != len(ks):
+        raise argparse.ArgumentTypeError("ranking ks must be unique positive integers")
+    return ks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -50,6 +60,11 @@ def main() -> int:
         default=_parse_thresholds("0.50,0.55,0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95"),
     )
     parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument(
+        "--ranking-ks",
+        type=_parse_ranking_ks,
+        default=_parse_ranking_ks("1,3,5"),
+    )
     parser.add_argument("--minimum-phonemes", type=int, default=4)
     parser.add_argument("--maximum-edit-ratio", type=float, default=0.35)
     parser.add_argument("--posterior-weight", type=float, default=0.25)
@@ -99,6 +114,7 @@ def main() -> int:
             maximum_negative_case_false_positive_rate=(
                 args.maximum_negative_case_false_positive_rate
             ),
+            ranking_ks=args.ranking_ks,
         )
     except (FileNotFoundError, KeyError, OSError, RuntimeError, ValueError) as error:
         print(f"HOTWORD SCORING FAILED: {type(error).__name__}: {error}", file=sys.stderr)

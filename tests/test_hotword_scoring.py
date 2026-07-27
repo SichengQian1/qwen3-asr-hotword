@@ -6,6 +6,7 @@ import pytest
 
 from qwen_hotword.hotwords.evaluation import (
     HotwordCaseScore,
+    evaluate_hotword_ranking,
     evaluate_hotword_threshold,
 )
 from qwen_hotword.hotwords.registry import HotwordEntry, load_hotword_table
@@ -162,6 +163,44 @@ def test_threshold_metrics_count_positive_hits_and_negative_false_alarms() -> No
     assert loose.negative_case_false_positive_rate == 1.0
     assert strict.recall == strict.precision == 1.0
     assert strict.negative_case_false_positive_rate == 0.0
+
+
+def test_ranking_recall_reports_top1_top3_and_top5_without_threshold() -> None:
+    cases = [
+        HotwordCaseScore(
+            case_id=f"case-{index}",
+            sample_id=f"sample-{index}",
+            case_type="positive_confusable",
+            active_hotword_ids=("a", "b", "c", "d", "e"),
+            expected_hotword_ids=(expected,),
+            effective_time_steps=20,
+            decoded_token_count=8,
+            ranked_matches=tuple(
+                _match(hotword_id, 1.0 - rank * 0.1)
+                for rank, hotword_id in enumerate(ranking)
+            ),
+        )
+        for index, (expected, ranking) in enumerate(
+            (
+                ("a", ("a", "b", "c", "d", "e")),
+                ("b", ("a", "b", "c", "d", "e")),
+                ("e", ("a", "b", "c", "d", "e")),
+            )
+        )
+    ]
+
+    metrics = evaluate_hotword_ranking(cases, ks=(1, 3, 5))
+
+    assert [item.recall_at_k for item in metrics] == [
+        pytest.approx(1 / 3),
+        pytest.approx(2 / 3),
+        1.0,
+    ]
+    assert [item.positive_case_hit_rate_at_k for item in metrics] == [
+        pytest.approx(1 / 3),
+        pytest.approx(2 / 3),
+        1.0,
+    ]
 
 
 def test_hotword_loader_rejects_out_of_range_ids_cleanly(tmp_path: Path) -> None:

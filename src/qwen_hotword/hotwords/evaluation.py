@@ -66,6 +66,66 @@ class HotwordThresholdMetrics:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class HotwordRankingMetrics:
+    k: int
+    positive_cases: int
+    expected_hotwords: int
+    retrieved_expected_hotwords: int
+    positive_case_hits: int
+    recall_at_k: float
+    positive_case_hit_rate_at_k: float
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def evaluate_hotword_ranking(
+    case_scores: list[HotwordCaseScore],
+    *,
+    ks: tuple[int, ...] = (1, 3, 5),
+    expected_hotword_ids: set[str] | None = None,
+) -> list[HotwordRankingMetrics]:
+    if not ks or any(k <= 0 for k in ks) or len(set(ks)) != len(ks):
+        raise ValueError("ranking ks must contain unique positive values")
+    results: list[HotwordRankingMetrics] = []
+    for k in sorted(ks):
+        positive_cases = 0
+        expected_total = 0
+        retrieved_total = 0
+        positive_case_hits = 0
+        for case in case_scores:
+            expected = set(case.expected_hotword_ids)
+            if expected_hotword_ids is not None:
+                expected.intersection_update(expected_hotword_ids)
+            if not expected:
+                continue
+            positive_cases += 1
+            expected_total += len(expected)
+            ranked_ids = {
+                match.hotword_id for match in case.ranked_matches[:k]
+            }
+            retrieved = len(expected & ranked_ids)
+            retrieved_total += retrieved
+            if retrieved:
+                positive_case_hits += 1
+        results.append(
+            HotwordRankingMetrics(
+                k=k,
+                positive_cases=positive_cases,
+                expected_hotwords=expected_total,
+                retrieved_expected_hotwords=retrieved_total,
+                positive_case_hits=positive_case_hits,
+                recall_at_k=_safe_ratio(retrieved_total, expected_total),
+                positive_case_hit_rate_at_k=_safe_ratio(
+                    positive_case_hits,
+                    positive_cases,
+                ),
+            )
+        )
+    return results
+
+
 def evaluate_hotword_threshold(
     case_scores: list[HotwordCaseScore],
     *,
@@ -175,6 +235,7 @@ def evaluate_hotword_scoring(
     minimum_top1_margin: float = 0.03,
     target_precision: float = 0.90,
     maximum_negative_case_false_positive_rate: float = 0.03,
+    ranking_ks: tuple[int, ...] = (1, 3, 5),
 ) -> dict[str, object]:
     import torch
     from torch.nn.utils.rnn import pad_sequence
@@ -193,6 +254,12 @@ def evaluate_hotword_scoring(
         raise ValueError("threshold sweep values must be non-empty and within [0, 1]")
     if len(set(thresholds)) != len(thresholds):
         raise ValueError("threshold sweep values must be unique")
+    if (
+        not ranking_ks
+        or any(k <= 0 for k in ranking_ks)
+        or len(set(ranking_ks)) != len(ranking_ks)
+    ):
+        raise ValueError("ranking ks must contain unique positive values")
     for name, value in (
         ("target_precision", target_precision),
         (
@@ -299,6 +366,41 @@ def evaluate_hotword_scoring(
         )
     scores.sort(key=lambda item: item.case_id)
 
+    ranking_metrics = evaluate_hotword_ranking(scores, ks=ranking_ks)
+    length_groups = {
+        "phonemes_4_7": {
+            entry.hotword_id
+            for entry in hotwords
+            if 4 <= len(entry.token_ids) <= 7
+        },
+        "phonemes_8_12": {
+            entry.hotword_id
+            for entry in hotwords
+            if 8 <= len(entry.token_ids) <= 12
+        },
+        "phonemes_13_18": {
+            entry.hotword_id
+            for entry in hotwords
+            if 13 <= len(entry.token_ids) <= 18
+        },
+        "phonemes_19_24": {
+            entry.hotword_id
+            for entry in hotwords
+            if 19 <= len(entry.token_ids) <= 24
+        },
+    }
+    ranking_by_length = {
+        name: [
+            metrics.to_dict()
+            for metrics in evaluate_hotword_ranking(
+                scores,
+                ks=ranking_ks,
+                expected_hotword_ids=hotword_ids,
+            )
+        ]
+        for name, hotword_ids in length_groups.items()
+        if hotword_ids
+    }
     sweep = [
         evaluate_hotword_threshold(
             scores,
@@ -355,6 +457,15 @@ def evaluate_hotword_scoring(
             "maximum_negative_case_false_positive_rate": (
                 maximum_negative_case_false_positive_rate
             ),
+        },
+        "ranking_metrics": {
+            "definition": (
+                "expected hotword occurrences found in the first K scored active "
+                "candidates; no score threshold or ambiguity suppression is applied"
+            ),
+            "threshold_applied": False,
+            "overall": [metrics.to_dict() for metrics in ranking_metrics],
+            "by_phoneme_length": ranking_by_length,
         },
         "threshold_sweep": [metrics.to_dict() for metrics in sweep],
         "recommended_operating_point": {

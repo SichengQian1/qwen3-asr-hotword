@@ -59,6 +59,57 @@ class SimulatedHotwordSummary:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class HotwordLengthBucket:
+    name: str
+    minimum_phonemes: int
+    maximum_phonemes: int
+    count: int
+
+    def validate(self) -> None:
+        if (
+            not self.name
+            or self.minimum_phonemes <= 0
+            or self.maximum_phonemes < self.minimum_phonemes
+            or self.count <= 0
+        ):
+            raise ValueError(f"invalid hotword length bucket: {self}")
+
+
+@dataclass(frozen=True)
+class StratifiedHotwordSummary:
+    asset_version: str
+    validation_manifest_path: str
+    validation_manifest_sha256: str
+    dictionary_path: str
+    vocab_path: str
+    excluded_hotword_table_path: str | None
+    output_dir: str
+    hotword_table_path: str
+    cases_path: str
+    validation_records: int
+    candidate_phrases: int
+    eligible_candidates: int
+    excluded_previous_hotwords: int
+    selected_hotwords: int
+    length_bucket_counts: dict[str, int]
+    frequency_bucket_counts: dict[str, int]
+    single_word_hotwords: int
+    phrase_hotwords: int
+    hotwords_with_multiple_validation_occurrences: int
+    covered_hotwords_in_positive_cases: int
+    positive_cases: int
+    negative_cases: int
+    active_hotwords_per_case: int
+    speaker_disjoint_verified: bool
+    test_set_used: bool
+    seed: int
+    status: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
 @dataclass
 class _PhraseCandidate:
     words: tuple[str, ...]
@@ -174,6 +225,163 @@ def build_simulated_hotword_assets(
         status="pass",
     )
     _write_json(destination / "simulated_hotword_summary.json", summary.to_dict())
+    return summary
+
+
+def build_stratified_hotword_assets(
+    validation_manifest_path: str | Path,
+    dictionary_path: str | Path,
+    vocab_path: str | Path,
+    output_dir: str | Path,
+    *,
+    length_buckets: tuple[HotwordLengthBucket, ...] = (
+        HotwordLengthBucket("phonemes_4_7", 4, 7, 30),
+        HotwordLengthBucket("phonemes_8_12", 8, 12, 40),
+        HotwordLengthBucket("phonemes_13_18", 13, 18, 20),
+        HotwordLengthBucket("phonemes_19_24", 19, 24, 10),
+    ),
+    exclude_hotword_table_path: str | Path | None = None,
+    case_count: int = 500,
+    active_hotwords_per_case: int = 100,
+    positive_ratio: float = 0.5,
+    min_words: int = 1,
+    max_words: int = 2,
+    max_occurrences: int = 200,
+    seed: int = 20_260_727,
+) -> StratifiedHotwordSummary:
+    from qwen_hotword.hotwords.registry import load_hotword_table
+
+    if not length_buckets:
+        raise ValueError("at least one length bucket is required")
+    for bucket in length_buckets:
+        bucket.validate()
+    for left, right in zip(length_buckets, length_buckets[1:], strict=False):
+        if left.maximum_phonemes >= right.minimum_phonemes:
+            raise ValueError("hotword length buckets must be ordered and non-overlapping")
+    hotword_count = sum(bucket.count for bucket in length_buckets)
+    if case_count <= 1 or active_hotwords_per_case < 5:
+        raise ValueError("case count must exceed one and active candidates must be at least five")
+    if active_hotwords_per_case > hotword_count:
+        raise ValueError("active candidates cannot exceed the stratified hotword count")
+    if not 0.0 < positive_ratio < 1.0:
+        raise ValueError("positive_ratio must be between zero and one")
+    if min_words <= 0 or max_words < min_words or max_occurrences <= 0:
+        raise ValueError("stratified candidate bounds are invalid")
+
+    manifest = Path(validation_manifest_path).expanduser()
+    dictionary_file = Path(dictionary_path).expanduser()
+    vocab_file = Path(vocab_path).expanduser()
+    destination = Path(output_dir).expanduser()
+    for path in (manifest, dictionary_file, vocab_file):
+        if not path.is_file():
+            raise FileNotFoundError(f"required stratified hotword input does not exist: {path}")
+    if destination.exists() and any(destination.iterdir()):
+        raise FileExistsError(
+            f"stratified hotword output must be a new empty directory: {destination}"
+        )
+
+    records = _load_validation_records(manifest)
+    vocab = load_phoneme_vocab(vocab_file)
+    dictionary = load_mfa_dictionary(dictionary_file)
+    candidates = _collect_phrase_candidates(
+        records,
+        min_words=min_words,
+        max_words=max_words,
+        max_occurrences=max_occurrences,
+    )
+    eligible = _build_entries(
+        candidates,
+        dictionary,
+        vocab,
+        min_phonemes=min(bucket.minimum_phonemes for bucket in length_buckets),
+        max_phonemes=max(bucket.maximum_phonemes for bucket in length_buckets),
+    )
+
+    excluded_entries: list[HotwordEntry] = []
+    excluded_path: Path | None = None
+    if exclude_hotword_table_path is not None:
+        excluded_path = Path(exclude_hotword_table_path).expanduser()
+        excluded_entries = load_hotword_table(excluded_path, vocab=vocab, blank_id=0)
+    excluded_surfaces = {
+        (entry.language, entry.normalized) for entry in excluded_entries
+    }
+    excluded_pronunciations = {
+        (entry.language, entry.token_ids) for entry in excluded_entries
+    }
+    eligible = [
+        entry
+        for entry in eligible
+        if (entry.language, entry.normalized) not in excluded_surfaces
+        and (entry.language, entry.token_ids) not in excluded_pronunciations
+    ]
+    selected = _stratified_select(
+        eligible,
+        length_buckets=length_buckets,
+        seed=seed,
+    )
+    cases = _build_coverage_cases(
+        records,
+        selected,
+        case_count=case_count,
+        active_hotwords_per_case=active_hotwords_per_case,
+        positive_ratio=positive_ratio,
+        seed=seed,
+    )
+    covered_ids = {
+        hotword_id
+        for case in cases
+        for hotword_id in case.expected_hotword_ids
+    }
+    if covered_ids != {entry.hotword_id for entry in selected}:
+        raise RuntimeError("stratified positive cases do not cover every selected hotword")
+    if not any(not case.expected_hotword_ids for case in cases):
+        raise RuntimeError("stratified hotword cases contain no negative examples")
+
+    destination.mkdir(parents=True, exist_ok=True)
+    table_path = destination / "stratified_hotwords_v2.jsonl"
+    cases_path = destination / "stratified_hotword_cases_v2.jsonl"
+    summary_path = destination / "stratified_hotword_summary_v2.json"
+    write_hotword_table(table_path, selected)
+    _write_jsonl(cases_path, [case.to_dict() for case in cases])
+    positive_cases = sum(bool(case.expected_hotword_ids) for case in cases)
+    summary = StratifiedHotwordSummary(
+        asset_version="simulated-hotwords-v2-stratified",
+        validation_manifest_path=str(manifest),
+        validation_manifest_sha256=_sha256_file(manifest),
+        dictionary_path=str(dictionary_file),
+        vocab_path=str(vocab_file),
+        excluded_hotword_table_path=str(excluded_path) if excluded_path else None,
+        output_dir=str(destination),
+        hotword_table_path=str(table_path),
+        cases_path=str(cases_path),
+        validation_records=len(records),
+        candidate_phrases=len(candidates),
+        eligible_candidates=len(eligible),
+        excluded_previous_hotwords=len(excluded_entries),
+        selected_hotwords=len(selected),
+        length_bucket_counts={
+            bucket.name: sum(
+                bucket.minimum_phonemes <= len(entry.token_ids) <= bucket.maximum_phonemes
+                for entry in selected
+            )
+            for bucket in length_buckets
+        },
+        frequency_bucket_counts=_frequency_bucket_counts(selected),
+        single_word_hotwords=sum(len(entry.words) == 1 for entry in selected),
+        phrase_hotwords=sum(len(entry.words) > 1 for entry in selected),
+        hotwords_with_multiple_validation_occurrences=sum(
+            entry.validation_occurrences >= 2 for entry in selected
+        ),
+        covered_hotwords_in_positive_cases=len(covered_ids),
+        positive_cases=positive_cases,
+        negative_cases=len(cases) - positive_cases,
+        active_hotwords_per_case=active_hotwords_per_case,
+        speaker_disjoint_verified=False,
+        test_set_used=False,
+        seed=seed,
+        status="pass",
+    )
+    _write_json(summary_path, summary.to_dict())
     return summary
 
 
@@ -365,6 +573,140 @@ def _balanced_select(
     return selected
 
 
+def _stratified_select(
+    entries: list[HotwordEntry],
+    *,
+    length_buckets: tuple[HotwordLengthBucket, ...],
+    seed: int,
+) -> list[HotwordEntry]:
+    rng = random.Random(seed)
+    selected_entries: list[HotwordEntry] = []
+    seen_pronunciations: set[tuple[str, tuple[int, ...]]] = set()
+    for bucket in length_buckets:
+        available = [
+            entry
+            for entry in entries
+            if bucket.minimum_phonemes
+            <= len(entry.token_ids)
+            <= bucket.maximum_phonemes
+        ]
+        frequency_groups = {
+            "high": [entry for entry in available if entry.validation_occurrences >= 6],
+            "medium": [
+                entry for entry in available if 2 <= entry.validation_occurrences <= 5
+            ],
+            "low": [entry for entry in available if entry.validation_occurrences == 1],
+        }
+        for values in frequency_groups.values():
+            rng.shuffle(values)
+            values.sort(key=lambda entry: -entry.validation_occurrences)
+        high_target = bucket.count // 4
+        medium_target = bucket.count // 2
+        targets = {
+            "high": high_target,
+            "medium": medium_target,
+            "low": bucket.count - high_target - medium_target,
+        }
+        bucket_selected: list[HotwordEntry] = []
+        for frequency_name in ("high", "medium", "low"):
+            _take_unique_entries(
+                frequency_groups[frequency_name],
+                bucket_selected,
+                seen_pronunciations,
+                count=targets[frequency_name],
+            )
+        already_selected = {
+            (entry.language, entry.normalized) for entry in bucket_selected
+        }
+        remaining = [
+            entry
+            for entry in available
+            if (entry.language, entry.normalized) not in already_selected
+        ]
+        rng.shuffle(remaining)
+        remaining.sort(
+            key=lambda entry: (
+                _frequency_fill_priority(entry.validation_occurrences),
+                -entry.validation_occurrences,
+            )
+        )
+        _take_unique_entries(
+            remaining,
+            bucket_selected,
+            seen_pronunciations,
+            count=bucket.count - len(bucket_selected),
+        )
+        if len(bucket_selected) != bucket.count:
+            available_unique = len(
+                {
+                    (entry.language, entry.token_ids)
+                    for entry in available
+                }
+            )
+            raise ValueError(
+                f"length bucket {bucket.name} requested {bucket.count} hotwords "
+                f"but only selected {len(bucket_selected)} from "
+                f"{available_unique} unique pronunciations"
+            )
+        selected_entries.extend(bucket_selected)
+
+    return [
+        HotwordEntry(
+            hotword_id=f"sim_v2_hw_ptbr_{index:04d}",
+            language=entry.language,
+            surface=entry.surface,
+            normalized=entry.normalized,
+            words=entry.words,
+            pronunciation=entry.pronunciation,
+            phoneme_tokens=entry.phoneme_tokens,
+            token_ids=entry.token_ids,
+            source="simulated_v2_stratified_from_validation_manifest_and_mfa",
+            validation_occurrences=entry.validation_occurrences,
+        )
+        for index, entry in enumerate(selected_entries, start=1)
+    ]
+
+
+def _take_unique_entries(
+    candidates: list[HotwordEntry],
+    selected: list[HotwordEntry],
+    seen_pronunciations: set[tuple[str, tuple[int, ...]]],
+    *,
+    count: int,
+) -> None:
+    if count <= 0:
+        return
+    initial_count = len(selected)
+    for entry in candidates:
+        key = (entry.language, entry.token_ids)
+        if key in seen_pronunciations:
+            continue
+        seen_pronunciations.add(key)
+        selected.append(entry)
+        if len(selected) - initial_count == count:
+            return
+
+
+def _frequency_fill_priority(occurrences: int) -> int:
+    if 2 <= occurrences <= 5:
+        return 0
+    if occurrences >= 6:
+        return 1
+    return 2
+
+
+def _frequency_bucket_counts(entries: list[HotwordEntry]) -> dict[str, int]:
+    return {
+        "occurrences_1": sum(entry.validation_occurrences == 1 for entry in entries),
+        "occurrences_2_5": sum(
+            2 <= entry.validation_occurrences <= 5 for entry in entries
+        ),
+        "occurrences_6_plus": sum(
+            entry.validation_occurrences >= 6 for entry in entries
+        ),
+    }
+
+
 def _build_cases(
     records: list[_ManifestRecord],
     entries: list[HotwordEntry],
@@ -421,6 +763,126 @@ def _build_cases(
                 case_type="negative",
                 language=record.language,
                 active_hotword_ids=tuple(available[:active_hotwords_per_case]),
+                expected_hotword_ids=(),
+            )
+        )
+    rng.shuffle(cases)
+    return cases
+
+
+def _build_coverage_cases(
+    records: list[_ManifestRecord],
+    entries: list[HotwordEntry],
+    *,
+    case_count: int,
+    active_hotwords_per_case: int,
+    positive_ratio: float,
+    seed: int,
+) -> list[SimulatedHotwordCase]:
+    rng = random.Random(seed)
+    expected_by_sample: dict[str, tuple[str, ...]] = {}
+    record_by_id = {record.sample_id: record for record in records}
+    for record in records:
+        matches = tuple(
+            entry.hotword_id
+            for entry in entries
+            if entry.language == record.language
+            and contains_token_sequence(list(record.words), entry.words)
+        )
+        expected_by_sample[record.sample_id] = matches[:active_hotwords_per_case]
+
+    positive_ids = [
+        sample_id
+        for sample_id, expected in expected_by_sample.items()
+        if expected
+    ]
+    negative_ids = [
+        sample_id
+        for sample_id, expected in expected_by_sample.items()
+        if not expected
+    ]
+    uncovered = {entry.hotword_id for entry in entries}
+    selected_positive_ids: list[str] = []
+    selected_positive_set: set[str] = set()
+    while uncovered:
+        candidates = [
+            sample_id
+            for sample_id in positive_ids
+            if sample_id not in selected_positive_set
+            and uncovered.intersection(expected_by_sample[sample_id])
+        ]
+        if not candidates:
+            raise RuntimeError(
+                f"no validation sample covers {len(uncovered)} selected hotwords"
+            )
+        rng.shuffle(candidates)
+        candidates.sort(
+            key=lambda sample_id: (
+                -len(uncovered.intersection(expected_by_sample[sample_id])),
+                -len(expected_by_sample[sample_id]),
+            )
+        )
+        chosen = candidates[0]
+        selected_positive_ids.append(chosen)
+        selected_positive_set.add(chosen)
+        uncovered.difference_update(expected_by_sample[chosen])
+
+    positive_target = min(round(case_count * positive_ratio), len(positive_ids))
+    positive_target = max(positive_target, len(selected_positive_ids))
+    remaining_positive_ids = [
+        sample_id
+        for sample_id in positive_ids
+        if sample_id not in selected_positive_set
+    ]
+    rng.shuffle(remaining_positive_ids)
+    selected_positive_ids.extend(
+        remaining_positive_ids[
+            : max(0, positive_target - len(selected_positive_ids))
+        ]
+    )
+    negative_target = min(case_count - len(selected_positive_ids), len(negative_ids))
+    rng.shuffle(negative_ids)
+    selected_negative_ids = negative_ids[:negative_target]
+
+    cases: list[SimulatedHotwordCase] = []
+    entry_by_id = {entry.hotword_id: entry for entry in entries}
+    for sample_id in selected_positive_ids:
+        record = record_by_id[sample_id]
+        expected = expected_by_sample[sample_id]
+        active = _active_hotwords(
+            expected,
+            entries,
+            entry_by_id,
+            count=active_hotwords_per_case,
+            rng=rng,
+        )
+        cases.append(
+            SimulatedHotwordCase(
+                case_id=f"sim_v2_positive_{len(cases) + 1:05d}",
+                sample_id=sample_id,
+                case_type="positive_confusable",
+                language=record.language,
+                active_hotword_ids=active,
+                expected_hotword_ids=expected,
+            )
+        )
+    for sample_id in selected_negative_ids:
+        record = record_by_id[sample_id]
+        available = [
+            entry.hotword_id
+            for entry in entries
+            if entry.language == record.language
+        ]
+        rng.shuffle(available)
+        cases.append(
+            SimulatedHotwordCase(
+                case_id=f"sim_v2_negative_{len(cases) + 1:05d}",
+                sample_id=sample_id,
+                case_type="negative",
+                language=record.language,
+                active_hotword_ids=tuple(
+                    available[:active_hotwords_per_case]
+                ),
                 expected_hotword_ids=(),
             )
         )

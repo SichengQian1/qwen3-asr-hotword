@@ -1,6 +1,64 @@
 # 工作交接记录
 
-## 0.1 2026-07-25 sealed test PER 一次性评估（当前最高优先级）
+## 0.2 2026-07-27 v2 分层模拟热词与 Recall@K（当前最高优先级）
+
+用户确认 v1 的 50 个 validation 模拟热词只完成了链路 smoke test，不能作为
+正式热词评估集。v1 的主要偏差是全部热词仅出现一次、音素长度为 14–24，
+缺少短词、中等长度词和较高频词。
+
+本轮新增独立 v2，不覆盖 v1：
+
+- `scripts/build_stratified_hotwords.py`
+- `build_stratified_hotword_assets` in
+  `src/qwen_hotword/hotwords/simulation.py`
+- `evaluate_hotword_ranking` and length-bucket Recall@K in
+  `src/qwen_hotword/hotwords/evaluation.py`
+- `--ranking-ks` in `scripts/evaluate_hotword_scoring.py`
+
+v2 固定构造 100 个热词：
+
+```text
+4–7 phonemes:   30
+8–12 phonemes:  40
+13–18 phonemes: 20
+19–24 phonemes: 10
+```
+
+每个长度桶混合 occurrence=1、occurrence=2–5 和 occurrence>=6 的候选；不足时
+从同长度桶其他频率候选补齐。可通过 `--exclude-hotwords` 排除 v1 的词面和完全
+相同发音。v2 输出目录必须为空，任何已有结果都拒绝覆盖。
+
+case 构造会先做 coverage selection，保证 100 个热词都至少进入一个正例 case；
+默认生成 500 个 case。每条 case 激活完整 100 词 registry，因此 Recall@1、
+Recall@3 和 Recall@5 是在全部 100 个候选上的真实排序指标，不是从较小随机
+候选集计算。报告同时输出整体 Recall@K 和四个音素长度桶的 Recall@K。该排名
+指标不加 score threshold；原 threshold sweep、Precision 和负例 FPR 报告继续
+保留并与排序能力分开解释。
+
+当前数据仍不能保证人名/品牌类别或 speaker-disjoint，因为 formal validation
+manifest 没有实体类别和 speaker ID。v2 是普通难度的代表性开发集，不是最终
+业务验收集；仍不读取已经消耗的 formal CTC test 集。
+
+本地实际验证：
+
+```text
+Ruff（本轮文件）: pass
+Mypy（本轮两个模块，skip imports）: pass
+Pytest 定向: pass, 8 tests
+Pytest 全仓库: pass, 99 tests
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+工作区下一步：
+
+1. 在新目录 `simulated_hotword_eval_v2_stratified_100` 构建 v2。
+2. 人工查看 100 词表和 summary 的长度/频率分布。
+3. 用固定 2x temporal best Head 评估全部 500 个 validation case。
+4. 返回 `stratified_hotword_summary_v2.json` 和
+   `hotword_scoring_report.json`，重点读取整体及分长度 Recall@1/3/5。
+
+## 0.1 2026-07-25 sealed test PER 一次性评估（已完成）
 
 用户已明确要求获取当前固定 CTC 模型的正式 test PER，因此允许首次打开此前
 封存的 `full_ctc_test.jsonl`。此次评估必须保持以下冻结条件：
@@ -50,14 +108,26 @@ CLI --help smoke: pass
 git diff --check: pass
 ```
 
-工作区尚未运行，因此 HANDOFF 中暂时没有正式 test PER。下一步必须在 GPU 5
-执行一次评估，并保存：
+工作区已于 2026-07-25 在 GPU 5 完成唯一一次正式评估：
 
 ```text
-outputs/noah_pt_full_training_v1/
-  run_temporal_upsample_ctc_h512_k5_lr3e4_v1/
-  sealed_test_per_v1.json
+test samples:       4,860
+test loss:          0.309711
+test PER:           0.0677893 (6.7789%)
+validation PER:     0.0676448 (6.7645%)
+val-test gap:       0.0144 percentage points
+sub/del/ins:        6,510 / 6,646 / 3,256
+prediction/reference length ratio: 0.9860
+blank frame ratio:  0.4038
+status:             pass
 ```
+
+checkpoint SHA256:
+`abaadac43c40daf8e2eee339653c64bfafa44fd0267eb7930449bd8d927de774`。
+test manifest SHA256:
+`a00f111643d75a33884a73ab7e21f520e7dd4e744f56b09a41c51b20da10dedf`。
+Test 与 validation 几乎一致，没有明显过拟合。该 test 已消耗，不得再用于当前
+checkpoint 或解码策略的选择和调参。
 
 ## 0. 2026-07-22 最新状态（后续交接以本节为准）
 
@@ -339,12 +409,10 @@ PYTHONPATH=src python scripts/train_full_ctc.py \
 
 ## 7. 已知风险与已确认决策
 
-- 2026-07-21 用户最终确认继续以原工区流程发布 CTC 训练更新：代码接到
-  `codex/g2p-coverage-scan`，工区使用 `git pull origin codex/g2p-coverage-scan`。
-- GitHub `origin/main` 与 CTC 训练历史从 `d7907d3` 后分叉；本轮不合并或强制
-  覆盖远端 `main`。
-- 开发工作树仍可包含其他任务修改，但每次发布必须显式限制提交范围，
-  不应整体提交、rebase 或整理无关未提交修改。
+- 2026-07-21 用户已确认：本项目后续直接在 `main` 分支继续更新，不再为冻结
+  Encoder + 时间上采样 CTC Head 阶段单独创建 `codex/` 分支。
+- 当前工作树混有其他任务修改。分支归属虽已确认，但未明确提交范围前仍不应
+  整体提交、rebase 或整理其他未提交修改。
 - 上采样会提高 Head 中间 activation 和训练时间；需用 H200 smoke test 确认
   `train_batch_size=256` 是否仍合适，必要时只调低 Head 训练 batch size。
 - 上采样能增加对齐路径，但不能自动解决 G2P/标签噪声或声学表征不足；必须以
@@ -365,5 +433,5 @@ PYTHONPATH=src python scripts/train_full_ctc.py \
 9. `tests/test_sharded_ctc.py`
 10. `tests/test_ctc_diagnostics.py`
 
-开始下一步前应再执行 `git status --short --branch`。工区训练以
-`origin/codex/g2p-coverage-scan` 为发布基线，不从 `origin/main` 拉取本阶段 CTC 更新。
+开始下一步前应再执行 `git status --short --branch`。后续保留在 `main` 分支；
+不需要再询问是否创建新的 `codex/` 分支。
