@@ -26,6 +26,11 @@ from qwen_hotword.training.experiment_a import (
 )
 from qwen_hotword.training.g2p_prep import extract_word_tokens, normalize_training_text
 
+DEFAULT_DATASET = "noah_pt_full_500h"
+DEFAULT_ID_PREFIX = "noah_pt_row"
+DEFAULT_SPLIT = "unsplit"
+ALLOWED_SPLITS = {"train", "validation", "test", DEFAULT_SPLIT}
+
 
 @dataclass(frozen=True)
 class SourceRow:
@@ -50,6 +55,9 @@ class FullManifestSummary:
     dictionary_path: str
     vocab_path: str
     language: str
+    dataset: str
+    id_prefix: str
+    split: str
     shard_size: int
     workers: int
     source_records: int
@@ -150,6 +158,9 @@ def build_full_training_manifest(
     output_dir: str | Path,
     *,
     language: str = "pt-BR",
+    dataset: str = DEFAULT_DATASET,
+    id_prefix: str = DEFAULT_ID_PREFIX,
+    split: str = DEFAULT_SPLIT,
     audio_column: str = "audio",
     text_column: str = "text",
     shard_size: int = 5_000,
@@ -168,6 +179,14 @@ def build_full_training_manifest(
         raise FileNotFoundError(f"audio root does not exist: {root}")
     if shard_size <= 0 or workers <= 0:
         raise ValueError("shard_size and workers must be positive")
+    dataset = dataset.strip()
+    id_prefix = id_prefix.strip()
+    if not dataset:
+        raise ValueError("dataset must be non-empty")
+    if not id_prefix or any(character.isspace() for character in id_prefix):
+        raise ValueError("id_prefix must be non-empty and contain no whitespace")
+    if split not in ALLOWED_SPLITS:
+        raise ValueError(f"split must be one of {sorted(ALLOWED_SPLITS)}")
 
     dictionary = normalized_dictionary(dictionary_file)
     vocab = load_phoneme_vocab(vocab_file)
@@ -180,15 +199,26 @@ def build_full_training_manifest(
     shard_dir.mkdir(exist_ok=True)
     report_dir.mkdir(exist_ok=True)
     build_config_path = destination / "build_config.json"
+    build_settings: dict[str, object] = {
+        "language": language,
+        "audio_column": audio_column,
+        "text_column": text_column,
+        "shard_size": shard_size,
+    }
+    # Preserve the exact legacy 500-hour build configuration so its completed
+    # output remains resumable after record identity became configurable.
+    if dataset != DEFAULT_DATASET:
+        build_settings["dataset"] = dataset
+    if id_prefix != DEFAULT_ID_PREFIX:
+        build_settings["id_prefix"] = id_prefix
+    if split != DEFAULT_SPLIT:
+        build_settings["split"] = split
     build_config = _build_config(
         tsv,
         root,
         dictionary_file,
         vocab_file,
-        language=language,
-        audio_column=audio_column,
-        text_column=text_column,
-        shard_size=shard_size,
+        **build_settings,
     )
     if build_config_path.exists():
         existing_config = json.loads(build_config_path.read_text(encoding="utf-8"))
@@ -237,6 +267,9 @@ def build_full_training_manifest(
                         root=root,
                         source_tsv=tsv,
                         language=language,
+                        dataset=dataset,
+                        id_prefix=id_prefix,
+                        split=split,
                         dictionary=dictionary,
                         vocab=vocab,
                     ),
@@ -322,8 +355,7 @@ def build_full_training_manifest(
             "ready_shards": [str(path) for path in ready_shards],
             "review_shards": [str(path) for path in review_shards],
             "reports": [
-                str(report_dir / f"shard-{index:05d}.json")
-                for index in range(len(reports))
+                str(report_dir / f"shard-{index:05d}.json") for index in range(len(reports))
             ],
         },
     )
@@ -333,18 +365,17 @@ def build_full_training_manifest(
         dictionary_path=str(dictionary_file),
         vocab_path=str(vocab_file),
         language=language,
+        dataset=dataset,
+        id_prefix=id_prefix,
+        split=split,
         shard_size=shard_size,
         workers=workers,
         source_records=source_records,
         ready_records=ready_records,
         review_records=review_records,
         valid_audio_records=sum(int(report["valid_audio_records"]) for report in reports),
-        total_audio_hours=(
-            sum(float(report["total_audio_seconds"]) for report in reports) / 3600
-        ),
-        ready_audio_hours=(
-            sum(float(report["ready_audio_seconds"]) for report in reports) / 3600
-        ),
+        total_audio_hours=(sum(float(report["total_audio_seconds"]) for report in reports) / 3600),
+        ready_audio_hours=(sum(float(report["ready_audio_seconds"]) for report in reports) / 3600),
         issue_counts=dict(sorted(issue_counts.items())),
         completed_shards=len(reports),
         resumed_shards=resumed_shards,
@@ -364,6 +395,9 @@ def _process_source_row(
     root: Path,
     source_tsv: Path,
     language: str,
+    dataset: str,
+    id_prefix: str,
+    split: str,
     dictionary: dict[str, tuple[str, ...]],
     vocab: PhonemeVocab,
 ) -> dict[str, Any]:
@@ -394,9 +428,9 @@ def _process_source_row(
 
     record: dict[str, Any] = {
         "schema_version": 1,
-        "dataset": "noah_pt_full_500h",
-        "split": "unsplit",
-        "id": f"noah_pt_row_{source.row_number}",
+        "dataset": dataset,
+        "split": split,
+        "id": f"{id_prefix}_{source.row_number}",
         "source_tsv": str(source_tsv),
         "row_number": source.row_number,
         "audio_relative": source.audio_relative,
@@ -426,9 +460,7 @@ def _process_source_row(
             minimum_length = ctc_minimum_input_length(label.phoneme_token_ids)
             record["ctc_minimum_input_length"] = minimum_length
             record["ctc_target_ratio"] = (
-                round(minimum_length / ctc_input_length, 6)
-                if ctc_input_length > 0
-                else None
+                round(minimum_length / ctc_input_length, 6) if ctc_input_length > 0 else None
             )
             if ctc_input_length < minimum_length:
                 issues.append(

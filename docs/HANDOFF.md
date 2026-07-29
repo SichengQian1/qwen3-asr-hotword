@@ -1,5 +1,83 @@
 # 工作交接记录
 
+## 0.5 2026-07-29 Noah 200 小时巴葡金融数据（代码就绪，待首轮审计）
+
+用户确认新增的 200 小时金融领域数据是巴西葡萄牙语，可复用 Noah 500 小时的
+巴葡 MFA 和完整 CTC manifest 流程。该数据先独立处理、全部作为 train 候选，
+暂不与旧 500 小时数据合并，也不建立新的 validation/test。
+
+用户给出的宿主机 TSV 为：
+
+```text
+/home/z00841352/27A/data/Noah_espt/tsv/pt_tsv/200小时巴西葡萄牙语金融领域口语化语音数据.tsv
+```
+
+容器内候选路径按现有挂载规则暂定为：
+
+```text
+TSV:
+/host_home/z00841352/27A/data/Noah_espt/tsv/pt_tsv/200小时巴西葡萄牙语金融领域口语化语音数据.tsv
+
+Audio root candidate:
+/host_home/z00841352/27A/data/Noah_espt/noah_pt
+```
+
+现有 full manifest builder 原先写死
+`dataset=noah_pt_full_500h`、`id=noah_pt_row_*` 和 `split=unsplit`，直接复用会
+导致新旧语料身份错误和 ID 冲突。本轮已给
+`scripts/build_full_training_manifest.py` 和
+`src/qwen_hotword/training/full_manifest.py` 增加：
+
+```text
+--dataset
+--id-prefix
+--split
+```
+
+旧默认值和旧 500 小时 `build_config.json` 的 resume 兼容性保持不变。新数据
+固定使用：
+
+```text
+dataset:   noah_pt_finance_200h
+id prefix: noah_pt_finance_200h_row
+language:  pt-BR
+split:     train
+```
+
+第一步只运行 1,000 行只读审计，不直接开始 MFA 长任务：
+
+```bash
+python scripts/audit_training_tsv.py \
+  --tsv "/host_home/z00841352/27A/data/Noah_espt/tsv/pt_tsv/200小时巴西葡萄牙语金融领域口语化语音数据.tsv" \
+  --audio-root /host_home/z00841352/27A/data/Noah_espt/noah_pt \
+  --max-records 1000 \
+  --sample-count 5 \
+  --output outputs/noah_pt_finance_200h/audit_first_1000.json
+```
+
+需要返回：
+
+```text
+outputs/noah_pt_finance_200h/audit_first_1000.json
+```
+
+通过标准：字段存在、1,000 行均有 audio/text、音频解析 1,000/1,000、缺失为
+0、绝对 audio 值为 0。若失败，先根据 report 中样本纠正 audio root，不启动
+G2P。
+
+本地定向验证：
+
+```text
+Ruff: pass
+Pytest（full manifest + G2P prep + MFA audit）: pass, 9 tests
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+首轮审计通过后的下一步：全量审计 → 独立 word list → 巴葡 MFA G2P →
+dictionary/vocab audit → 独立 full manifest。具体数据边界同步记录在
+`docs/data.md`。
+
 ## 0.4 2026-07-29 Prompt Injection 最小验证（代码完成，待工作区运行）
 
 本轮目标是关键词 RAG 的第一步，仅在 formal validation 上比较：

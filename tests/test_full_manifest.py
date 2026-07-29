@@ -110,6 +110,9 @@ def test_full_manifest_retains_every_source_row_and_resumes(tmp_path: Path) -> N
     assert len(ready) == 1
     assert len(review) == 4
     assert len(all_ids) == 5
+    assert ready[0]["dataset"] == "noah_pt_full_500h"
+    assert ready[0]["id"] == "noah_pt_row_2"
+    assert ready[0]["split"] == "unsplit"
     assert all(record["label_status"] == "needs_review" for record in review)
 
     connector = next(record for record in review if record["text"] == "Bem-vindo")
@@ -128,6 +131,51 @@ def test_full_manifest_retains_every_source_row_and_resumes(tmp_path: Path) -> N
     )
     assert resumed.resumed_shards == 3
     assert resumed.source_records == 5
+
+
+def test_full_manifest_supports_independent_train_corpus_identity(
+    tmp_path: Path,
+) -> None:
+    tsv, audio_root, dictionary, vocab = _write_fixture(tmp_path)
+    output_dir = tmp_path / "finance-output"
+
+    summary = build_full_training_manifest(
+        tsv,
+        audio_root,
+        dictionary,
+        vocab,
+        output_dir,
+        dataset="noah_pt_finance_200h",
+        id_prefix="noah_pt_finance_200h_row",
+        split="train",
+        shard_size=5,
+        workers=1,
+    )
+
+    assert summary.dataset == "noah_pt_finance_200h"
+    assert summary.id_prefix == "noah_pt_finance_200h_row"
+    assert summary.split == "train"
+    records = _read_jsonl(output_dir / "train_ready.jsonl")
+    records.extend(_read_jsonl(output_dir / "needs_review.jsonl"))
+    assert {record["dataset"] for record in records} == {"noah_pt_finance_200h"}
+    assert {record["split"] for record in records} == {"train"}
+    assert {record["id"] for record in records} == {
+        f"noah_pt_finance_200h_row_{row_number}" for row_number in range(2, 7)
+    }
+
+    with pytest.raises(ValueError, match="different build configuration"):
+        build_full_training_manifest(
+            tsv,
+            audio_root,
+            dictionary,
+            vocab,
+            output_dir,
+            dataset="another_dataset",
+            id_prefix="noah_pt_finance_200h_row",
+            split="train",
+            shard_size=5,
+            workers=1,
+        )
 
 
 def test_full_manifest_handles_audio_shorter_than_one_feature_frame(

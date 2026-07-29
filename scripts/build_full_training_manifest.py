@@ -25,6 +25,22 @@ def main() -> int:
     parser.add_argument("--vocab", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--language", default="pt-BR")
+    parser.add_argument(
+        "--dataset",
+        default="noah_pt_full_500h",
+        help="Dataset provenance stored in every output record.",
+    )
+    parser.add_argument(
+        "--id-prefix",
+        default="noah_pt_row",
+        help="Collision-safe sample ID prefix; the TSV row number is appended.",
+    )
+    parser.add_argument(
+        "--split",
+        choices=("unsplit", "train", "validation", "test"),
+        default="unsplit",
+        help="Split label stored in every output record (default: unsplit).",
+    )
     parser.add_argument("--audio-column", default="audio")
     parser.add_argument("--text-column", default="text")
     parser.add_argument("--shard-size", type=int, default=5_000)
@@ -40,6 +56,9 @@ def main() -> int:
             args.vocab,
             args.output_dir,
             language=args.language,
+            dataset=args.dataset,
+            id_prefix=args.id_prefix,
+            split=args.split,
             audio_column=args.audio_column,
             text_column=args.text_column,
             shard_size=args.shard_size,
