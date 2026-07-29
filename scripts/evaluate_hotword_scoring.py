@@ -57,7 +57,9 @@ def main() -> int:
     parser.add_argument(
         "--thresholds",
         type=_parse_thresholds,
-        default=_parse_thresholds("0.50,0.55,0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.95"),
+        default=_parse_thresholds(
+            "0.50,0.55,0.60,0.65,0.70,0.75,0.80,0.85,0.86,0.90,0.95"
+        ),
     )
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument(
@@ -69,7 +71,15 @@ def main() -> int:
     parser.add_argument("--maximum-edit-ratio", type=float, default=0.35)
     parser.add_argument("--posterior-weight", type=float, default=0.25)
     parser.add_argument("--minimum-posterior-confidence", type=float, default=0.0)
-    parser.add_argument("--minimum-top1-margin", type=float, default=0.03)
+    parser.add_argument(
+        "--minimum-top1-margin",
+        type=float,
+        default=0.0,
+        help=(
+            "Opt-in ambiguity suppression for single-label experiments. Keep 0.0 "
+            "for multi-hotword Top-K retrieval so close valid candidates are retained."
+        ),
+    )
     parser.add_argument("--target-precision", type=float, default=0.90)
     parser.add_argument(
         "--maximum-negative-case-false-positive-rate",

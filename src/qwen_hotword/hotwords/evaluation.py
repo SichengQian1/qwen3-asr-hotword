@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -224,6 +225,7 @@ def evaluate_hotword_scoring(
         0.75,
         0.80,
         0.85,
+        0.86,
         0.90,
         0.95,
     ),
@@ -232,7 +234,7 @@ def evaluate_hotword_scoring(
     maximum_edit_ratio: float = 0.35,
     posterior_weight: float = 0.25,
     minimum_posterior_confidence: float = 0.0,
-    minimum_top1_margin: float = 0.03,
+    minimum_top1_margin: float = 0.0,
     target_precision: float = 0.90,
     maximum_negative_case_false_positive_rate: float = 0.03,
     ranking_ks: tuple[int, ...] = (1, 3, 5),
@@ -246,6 +248,7 @@ def evaluate_hotword_scoring(
         ctc_head_config,
     )
 
+    evaluation_started = time.monotonic()
     if batch_size <= 0:
         raise ValueError("hotword evaluation batch size must be positive")
     if cache.split != "validation":
@@ -281,6 +284,11 @@ def evaluate_hotword_scoring(
     head = head.to(device=device, dtype=torch.float32)
     head.load_state_dict(payload["state_dict"], strict=True)
     head.eval()
+    print(
+        "loaded temporal hotword Head: "
+        f"checkpoint={checkpoint} device={device}",
+        flush=True,
+    )
 
     entry_by_id = {entry.hotword_id: entry for entry in hotwords}
     if len(entry_by_id) != len(hotwords):
@@ -310,10 +318,23 @@ def evaluate_hotword_scoring(
         minimum_top1_margin=0.0,
     )
     scores: list[HotwordCaseScore] = []
+    processed_cases = 0
+    scoring_started = time.monotonic()
+    print(
+        "hotword scoring started: "
+        f"cases={len(cases)} hotwords={len(hotwords)} "
+        f"feature_shards={len(cache.shards)} batch_size={batch_size}",
+        flush=True,
+    )
     with torch.no_grad():
-        for descriptor in cache.shards:
+        for shard_position, descriptor in enumerate(cache.shards, start=1):
             wanted = set(descriptor.sample_ids) & set(case_by_sample)
             if not wanted:
+                print(
+                    "skipped validation feature shard "
+                    f"{shard_position}/{len(cache.shards)}: selected_cases=0",
+                    flush=True,
+                )
                 continue
             samples = [
                 sample
@@ -359,12 +380,37 @@ def evaluate_hotword_scoring(
                             ranked_matches=result.ranked_matches,
                         )
                     )
+                processed_cases += len(batch)
             del samples
+            elapsed = time.monotonic() - scoring_started
+            cases_per_second = processed_cases / elapsed if elapsed > 0.0 else 0.0
+            remaining_cases = len(cases) - processed_cases
+            eta_seconds = (
+                remaining_cases / cases_per_second
+                if cases_per_second > 0.0
+                else 0.0
+            )
+            print(
+                "scored validation feature shard "
+                f"{shard_position}/{len(cache.shards)}: "
+                f"processed_cases={processed_cases}/{len(cases)} "
+                f"elapsed={elapsed:.1f}s "
+                f"rate={cases_per_second:.2f} cases/s "
+                f"eta={eta_seconds:.1f}s",
+                flush=True,
+            )
     if len(scores) != len(cases):
         raise RuntimeError(
             f"hotword evaluation scored {len(scores)} cases, expected {len(cases)}"
         )
     scores.sort(key=lambda item: item.case_id)
+    scoring_seconds = time.monotonic() - scoring_started
+    print(
+        "hotword scoring inference completed: "
+        f"cases={len(scores)} seconds={scoring_seconds:.1f}; "
+        "computing ranking and threshold metrics",
+        flush=True,
+    )
 
     ranking_metrics = evaluate_hotword_ranking(scores, ks=ranking_ks)
     length_groups = {
@@ -476,9 +522,16 @@ def evaluate_hotword_scoring(
         "time_axis_policy": "temporal_upsample_2x_only",
         "evaluation_scope": "simulated hotwords on formal validation cases",
         "test_set_used": False,
+        "scoring_wall_seconds": scoring_seconds,
+        "evaluation_wall_seconds": time.monotonic() - evaluation_started,
         "status": "pass",
     }
     _write_json(report_path, report)
+    print(
+        "hotword scoring outputs written: "
+        f"case_scores={case_scores_path} report={report_path}",
+        flush=True,
+    )
     return report
 
 

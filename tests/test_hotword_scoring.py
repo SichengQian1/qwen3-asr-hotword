@@ -89,6 +89,24 @@ def test_equal_confusable_scores_are_suppressed() -> None:
     assert result.suppressed_reason == "ambiguous_top_matches"
 
 
+def test_default_multi_hotword_scoring_keeps_close_matches() -> None:
+    result = score_hotwords(
+        _logits([0, 1, 0, 2, 0, 3, 0, 4, 0]),
+        input_length=9,
+        hotwords=[_entry("left", (1, 2, 3, 5)), _entry("right", (1, 2, 3, 6))],
+        config=HotwordScoringConfig(
+            score_threshold=0.70,
+            maximum_edit_ratio=0.30,
+        ),
+    )
+
+    assert [match.hotword_id for match in result.selected_matches] == [
+        "left",
+        "right",
+    ]
+    assert result.suppressed_reason is None
+
+
 def test_long_hotword_against_short_decode_returns_below_threshold() -> None:
     result = score_hotwords(
         _logits([0, 1, 0]),
@@ -163,6 +181,42 @@ def test_threshold_metrics_count_positive_hits_and_negative_false_alarms() -> No
     assert loose.negative_case_false_positive_rate == 1.0
     assert strict.recall == strict.precision == 1.0
     assert strict.negative_case_false_positive_rate == 0.0
+
+
+def test_threshold_metrics_keep_close_valid_multi_hotword_matches_without_margin() -> None:
+    cases = [
+        HotwordCaseScore(
+            case_id="multi-positive",
+            sample_id="sample-1",
+            case_type="positive_confusable",
+            active_hotword_ids=("short", "long"),
+            expected_hotword_ids=("short", "long"),
+            effective_time_steps=20,
+            decoded_token_count=8,
+            ranked_matches=(_match("short", 0.99), _match("long", 0.98)),
+        )
+    ]
+
+    retained = evaluate_hotword_threshold(
+        cases,
+        threshold=0.90,
+        top_k=5,
+        maximum_edit_ratio=0.35,
+        minimum_posterior_confidence=0.0,
+        minimum_top1_margin=0.0,
+    )
+    suppressed = evaluate_hotword_threshold(
+        cases,
+        threshold=0.90,
+        top_k=5,
+        maximum_edit_ratio=0.35,
+        minimum_posterior_confidence=0.0,
+        minimum_top1_margin=0.03,
+    )
+
+    assert retained.recall == retained.precision == 1.0
+    assert retained.positive_case_hit_rate == 1.0
+    assert suppressed.recall == suppressed.positive_case_hit_rate == 0.0
 
 
 def test_ranking_recall_reports_top1_top3_and_top5_without_threshold() -> None:

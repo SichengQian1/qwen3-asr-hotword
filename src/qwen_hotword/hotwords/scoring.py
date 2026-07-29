@@ -46,7 +46,7 @@ class HotwordScoringConfig:
     maximum_edit_ratio: float = 0.35
     posterior_weight: float = 0.25
     minimum_posterior_confidence: float = 0.0
-    minimum_top1_margin: float = 0.03
+    minimum_top1_margin: float = 0.0
 
     def validate(self) -> None:
         if not 0.0 <= self.score_threshold <= 1.0:

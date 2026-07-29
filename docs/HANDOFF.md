@@ -1,6 +1,64 @@
 # 工作交接记录
 
-## 0.2 2026-07-27 v2 分层模拟热词与 Recall@K（当前最高优先级）
+## 0.3 2026-07-29 热词评分阶段收尾（当前状态）
+
+v2 已在工作区完成：100 个热词、250 个正例、250 个负例，每条 case 激活完整
+100 词 registry。原始排序结果为 Recall@1/3/5 =
+67.98% / 96.63% / 99.44%，Top-1 正例 case 命中率 96.8%。
+
+完整 `hotword_case_scores.jsonl` 复算确认，旧报告在 threshold=0.90 时的
+Recall=43.26% 主要不是 Head 或阈值问题，而是
+`minimum_top1_margin=0.03` 会在 Top-2 接近时清空整条多热词 case：
+
+```text
+旧策略（margin=0.03）: Precision 96.25%, Recall 43.26%, negative FPR 2.4%
+关闭 margin，阈值 0.90: Precision 95.41%, Recall 87.64%, negative FPR 2.4%
+关闭 margin，阈值 0.86: Precision 93.29%, Recall 89.89%, negative FPR 2.8%
+```
+
+margin 共误杀 75 个正例 case、158 个已经过阈值的正确热词；67/75 case 的
+Top-1 和 Top-2 都是正确热词，且 margin 没有减少任何负例 case 误触发。因此
+多热词默认 margin 已改为 0.0，仍保留 CLI 参数供单标签实验显式启用。默认
+threshold sweep 补入 0.86。
+
+评分现会打印 Head 加载、每个 feature shard 的累计 case、耗时、cases/s、ETA
+以及输出路径，并在报告中记录 scoring/evaluation wall seconds。
+
+6 个严格词面负例触发均有明确文本来源：`coisa` 匹配 `coisas` 3 次、
+`relacionamento` 匹配 `relacionamentos` 2 次、`vamos` 匹配口语 `vamo`
+1 次。它们主要是局部音素子串与数据标签口径不一致，并非随机声学误触发。
+Top-5 仅漏 `design` 和 `ruim é` 各 1 次。
+
+遗留问题（进入下一阶段时保留）：
+
+1. 正式业务热词、人名/品牌、speaker-disjoint 与困难负例尚未提供；v2 只用于
+   validation 开发，不是最终业务验收集。
+2. 单复数和口语变体应通过 registry 显式 alias/pronunciation 管理，不能默认
+   对所有品牌、人名开放子串匹配。
+3. 0.86/0.90 都只是 validation 候选工作点，正式阈值需在未来业务集确认；已
+   消耗的 sealed CTC test 不得用于热词调参。
+4. 下一阶段按项目路线进入在线 hotword registry/reload 与 Qwen prompt
+   injection，再评估最终转写热词命中率、普通词退化和部署延迟。
+
+本轮代码：
+
+- `src/qwen_hotword/hotwords/scoring.py`
+- `src/qwen_hotword/hotwords/evaluation.py`
+- `scripts/evaluate_hotword_scoring.py`
+- `tests/test_hotword_scoring.py`
+
+本地实际验证：
+
+```text
+Ruff（本轮文件）: pass
+Mypy（scoring/evaluation，skip imports）: pass
+Pytest 定向: pass, 10 tests
+Pytest 全仓库: pass, 101 tests
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+## 0.2 2026-07-27 v2 分层模拟热词与 Recall@K（已完成）
 
 用户确认 v1 的 50 个 validation 模拟热词只完成了链路 smoke test，不能作为
 正式热词评估集。v1 的主要偏差是全部热词仅出现一次、音素长度为 14–24，
