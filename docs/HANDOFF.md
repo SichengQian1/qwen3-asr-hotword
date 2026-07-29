@@ -1,5 +1,114 @@
 # 工作交接记录
 
+## 0.4 2026-07-29 Prompt Injection 最小验证（代码完成，待工作区运行）
+
+本轮目标是关键词 RAG 的第一步，仅在 formal validation 上比较：
+
+```text
+Baseline:                40 条音频，不注入热词
+Oracle Prompt:           30 条正例，注入该音频真实包含的热词
+Negative Prompt Control: 10 条负例，各注入 1 个严格不在参考文本中的热词
+```
+
+不读取 CTC `hotword_case_scores`，不接 Retrieved RAG，不使用 sealed test，不训练
+Encoder/CTC Head，也不修改 Qwen 模型结构。固定 seed `20260729` 确定性选样；
+正例按 4–7、8–12、13+ 音素三档选择，并混合单热词和多热词 case。最终选择完整
+写入 `sample_selection.json`。
+
+### 已确认的官方 Prompt 接口
+
+工作区固定目标仍是模型 `Qwen3-ASR-1.7B`；`qwen-asr==0.0.6` 是 Python
+推理库版本，不是模型大小。已直接检查该库的真实接口：
+
+```python
+Qwen3ASRModel.transcribe(
+    audio,
+    context="",
+    language=None,
+    return_time_stamps=False,
+)
+```
+
+实际参数名为 `context`。官方 `_build_messages` 将 `context` 放入 system
+message，将音频放入 user message。本轮通过现有 `load_asr_model` 只加载一次
+模型，固定 `language="Portuguese"`、`return_time_stamps=False`，不额外覆盖
+beam、sampling 或其他 `generate` 参数；运行报告会记录 wrapper backend、
+`max_new_tokens` 和 `max_inference_batch_size` 的实际值。
+
+固定且唯一的葡萄牙语模板为：
+
+```text
+As palavras a seguir podem aparecer no áudio e servem apenas como referência de grafia. Use-as somente se forem realmente faladas; não as inclua à força na transcrição: {hotwords}
+```
+
+Baseline 传空 `context`。Oracle 和 Negative Control 均使用同一模板；热词只是
+拼写参考，不描述为必须输出。
+
+### 实现文件
+
+- `src/qwen_hotword/inference/hotword_prompt.py`
+  - NFKC、casefold、去标点、空格规范化和严格完整单词/连续词组匹配。
+  - 不扩展单复数、口语 alias；`coisa` 不匹配 `coisas`，
+    `relacionamento` 不匹配 `relacionamentos`。
+- `src/qwen_hotword/inference/prompt_smoke.py`
+  - validation-only 校验、确定性分层选样、三路推理、指标计算、逐条进度和
+    原子输出；非空输出目录拒绝覆盖。
+  - Baseline 只计算一次并复用于 Oracle/Negative 对照。
+  - 记录模型与四个输入文件的路径、大小和 SHA256。
+- `scripts/run_hotword_prompt_smoke.py`
+- `tests/test_hotword_prompt_smoke.py`
+
+### 本地实际验证
+
+本地测试使用 fake inference，不加载 1.7B 权重：
+
+```text
+Ruff（全仓库）: pass
+Ruff format（本轮文件）: pass
+Pytest 定向: pass, 7 tests
+Pytest 全仓库: pass, 108 tests
+Mypy（两个 inference 新模块）: pass
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+覆盖 Baseline 空 Prompt、Oracle 单/多热词 Prompt、负例错误 Prompt、空热词、
+模型只加载一次、严格词匹配、Recall/幻觉率、确定性选样、进度开关结果一致、
+防覆盖、非 validation split 拒绝和 sealed test 拒绝。
+
+### 工作区运行命令
+
+从项目根目录在物理 GPU 5 运行；它在进程内映射为逻辑 `cuda:0`：
+
+```bash
+CUDA_VISIBLE_DEVICES=5 python scripts/run_hotword_prompt_smoke.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/stratified_hotwords_v2.jsonl \
+  --cases outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/stratified_hotword_cases_v2.jsonl \
+  --output-dir outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/prompt_smoke_v1 \
+  --device cuda:0
+```
+
+每完成一次推理会打印 phase、累计完成数、耗时、cases/s 和 ETA。总计 80 次：
+40 次 Baseline、30 次 Oracle、10 次 Negative Control。
+
+需要返回并检查以下五个小文件：
+
+```text
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/prompt_smoke_v1/sample_selection.json
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/prompt_smoke_v1/baseline_predictions.jsonl
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/prompt_smoke_v1/oracle_predictions.jsonl
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/prompt_smoke_v1/negative_prompt_predictions.jsonl
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/prompt_smoke_v1/prompt_smoke_report.json
+```
+
+当前限制：尚无工作区真实推理结果，因此不能宣称 Prompt 有效；这是 40 条
+validation Oracle smoke，不是业务验收、Retrieved RAG 或完整误触发评估。
+
+下一步：接入Retrieved RAG小规模评估。
+
 ## 0.3 2026-07-29 热词评分阶段收尾（当前状态）
 
 v2 已在工作区完成：100 个热词、250 个正例、250 个负例，每条 case 激活完整
