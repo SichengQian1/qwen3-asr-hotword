@@ -1,6 +1,6 @@
 # 工作交接记录
 
-## 0.6 2026-07-30 三套葡语 Swift JSON（转换代码就绪，待工作区审计）
+## 0.6 2026-07-30 三套葡语 Swift JSON（第一版独立处理完成）
 
 Noah 金融 200 小时第一版 full manifest 已完成：
 
@@ -21,8 +21,10 @@ MFA corpus-token coverage 为 99.8380%，v0.2 phone OOV 为 0。缺词主要与�
 重合。金融数据先保留这版结果，未来用 2× 时间轴与连接词解析恢复，不阻塞三套新
 语料。
 
-当前目标转为分别转换和审计 FLEURS、MLS、Common Voice 葡语 Swift JSON，三者
-独立保存、全部作为 train 候选。本轮不运行 MFA 和 full manifest。
+FLEURS、MLS、Common Voice 葡语 Swift JSON 已分别完成转换、词表、巴葡 MFA
+候选 G2P、v0.2 audit 和完整 manifest。三者独立保存、全部作为 train 候选；
+没有修改源 JSON/音频，没有建立 validation/test，也没有合并或缓存 Encoder
+特征。
 
 本轮更新 Swift JSON 转换器：
 
@@ -32,46 +34,6 @@ MFA corpus-token coverage 为 99.8380%，v0.2 phone OOV 为 0。缺词主要与�
 - summary 记录 rewrite 配置、改写数量、缺失音频和耗时；
 - 大文件加载前后打印状态，每 10,000 条打印转换速度和累计结果；
 - 检测到语言不一致或缺失音频时 summary 标记 `warn`。
-
-工作区拉取后分别运行：
-
-```bash
-python scripts/convert_swift_json_to_tsv.py \
-  --input /data/h00911716/code/ms-swift/self_test/datalist/pt/fleurs/swift_fleurs_pt.json \
-  --output-tsv outputs/pt_external_train_sources_v1/fleurs/source.tsv \
-  --expected-language Portuguese \
-  --audio-prefix-rewrite /home_92=/host_home \
-  --check-audio \
-  --progress-every 10000
-
-python scripts/convert_swift_json_to_tsv.py \
-  --input /data/h00911716/code/ms-swift/self_test/datalist/pt/mls/swift_librispeech_pt.json \
-  --output-tsv outputs/pt_external_train_sources_v1/mls/source.tsv \
-  --expected-language Portuguese \
-  --audio-prefix-rewrite /home_92=/host_home \
-  --check-audio \
-  --progress-every 10000
-
-python scripts/convert_swift_json_to_tsv.py \
-  --input /data/h00911716/code/ms-swift/self_test/datalist/pt/cv/swift_cv_pt.json \
-  --output-tsv outputs/pt_external_train_sources_v1/common_voice/source.tsv \
-  --expected-language Portuguese \
-  --audio-prefix-rewrite /home_92=/host_home \
-  --check-audio \
-  --progress-every 10000
-```
-
-需要返回三份：
-
-```text
-outputs/pt_external_train_sources_v1/fleurs/swift_json_conversion_summary.json
-outputs/pt_external_train_sources_v1/mls/swift_json_conversion_summary.json
-outputs/pt_external_train_sources_v1/common_voice/swift_json_conversion_summary.json
-```
-
-通过后下一步：分别生成三套 word list，并在不混合 corpus provenance 的前提下
-运行巴葡 MFA 候选 G2P 与覆盖率审计。MLS 的最终 `pt`/`pt-BR-compatible`
-标记仍需结合元数据或跨说话人音频抽查，不由旧拼写单独决定。
 
 工作区转换与词表实际结果：
 
@@ -87,8 +49,53 @@ FLEURS/Common Voice 中的数字不能从 CTC 标签中静默丢失，因此 ful
 新增 `unresolved_digit` review 原因；暂不自动决定年份、金额或序数的葡语读法。
 该保护只影响后续新 manifest，不改动原始 JSON、TSV 或已有 Noah v1 输出。
 
-下一步：三套分别运行巴葡 MFA 候选 G2P 和 dictionary/v0.2 audit。MLS 运行结果
-只用于覆盖率候选分析，不等同于确认全部说话人为 pt-BR。
+MFA audit：
+
+```text
+Corpus          Token coverage   Missing words   Duplicate entries   Phone OOV
+FLEURS                99.4192%             124                   1           0
+MLS                    98.8174%           2,294                 305           0
+Common Voice           99.2889%             802                  12           0
+```
+
+最终 full manifest：
+
+```text
+Corpus          Source records/h       Ready records/h       Review
+FLEURS          2,793 / 10.1789 h       1,966 / 6.8475 h         827
+MLS            37,533 / 160.9632 h     26,030 / 110.3132 h     11,503
+Common Voice   22,923 / 26.4790 h      21,803 / 24.9761 h       1,120
+Total          63,249 / 197.6211 h     49,799 / 142.1368 h     13,450
+```
+
+正式使用路径：
+
+```text
+FLEURS:
+outputs/pt_external_train_sources_v1/fleurs/full_manifest_v2_digitguard
+
+MLS:
+outputs/pt_external_train_sources_v1/mls/full_manifest_v1
+
+Common Voice:
+outputs/pt_external_train_sources_v1/common_voice/full_manifest_v2_digitguard
+```
+
+FLEURS 的旧 `full_manifest_v1` 未启用数字保护，只保留历史对照，后续不得用于
+训练。Common Voice v1 的 ready 数量虽与 v2 相同，正式引用也固定为 v2。
+
+主要遗留问题：
+
+1. FLEURS 的 839 个、Common Voice 的 350 个 `unresolved_digit` issue 在有
+   上下文安全的数字读法规则前保留 review。
+2. MLS 有 14,698 个 connector issue，导致大量记录受影响；旧拼写和复合词修复
+   需新建恢复版本，不能覆盖 v1。
+3. MLS 使用巴葡 MFA 仅证明 phone/vocab 技术兼容，不能证明所有说话人是 pt-BR；
+   合并到巴葡训练前仍需元数据或跨说话人音频抽查。
+4. 三套与 Noah 数据尚未做跨语料音频/文本去重，也未决定训练采样权重。
+
+下一步只在用户决定合并策略后，构建 train-only 合并 manifest；在此之前不要
+缓存特征或启动新 CTC 训练。
 
 ## 0.5 2026-07-29 Noah 200 小时巴葡金融数据（代码就绪，待首轮审计）
 

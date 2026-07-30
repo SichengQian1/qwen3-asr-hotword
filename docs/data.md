@@ -331,7 +331,7 @@ outputs/noah_pt_finance_200h/full_manifest_v1
 500 小时 train 合并，必须等独立覆盖率、ready/review 比例和音频去重检查完成后
 另建合并数据版本。
 
-## 11. 待处理：FLEURS、MLS、Common Voice 葡语 Swift JSON
+## 11. FLEURS、MLS、Common Voice 葡语 Swift JSON
 
 三套新语料先分别转换、审计和版本化，全部作为 train 候选，不覆盖 Noah 数据，
 也不在本阶段创建 validation/test。
@@ -356,8 +356,8 @@ Common Voice:
 language Portuguese<asr_text>
 ```
 
-FLEURS 音频路径保留真实 `/data/...` 前缀。MLS/Common Voice 中以
-`/home_92/...` 开头的路径在容器内确定性改写为 `/host_home/...`。转换器在
+三份输入 JSON 位于 `/data/...`，但 JSON 内的 63,249 条音频路径均以
+`/home_92/...` 开头；转换时在容器内确定性改写为 `/host_home/...`。转换器在
 改写后检查文件存在性，并将所有行为记录在各自的
 `swift_json_conversion_summary.json`。
 
@@ -393,3 +393,76 @@ FLEURS 和 Common Voice 的数字片段不能被静默忽略。full manifest bui
 将任何含数字片段的记录标记为 `unresolved_digit` 并保留到 `needs_review`；
 在没有上下文明确的葡语数字规范化方案前，不自动生成年份、金额、序数或缩写的
 发音标签。
+
+独立 MFA audit：
+
+```text
+Corpus          Token coverage   Missing words   Duplicate entries   Phone OOV
+FLEURS                99.4192%             124                   1           0
+MLS                    98.8174%           2,294                 305           0
+Common Voice           99.2889%             802                  12           0
+```
+
+巴葡 MFA 的所有输出 phone 均兼容当前 90 类 v0.2 词表。`training_labels_ready`
+为 false 表示并非 100% 词覆盖，不代表审计运行失败。MLS 的覆盖结果只证明技术
+兼容，不能代替方言确认。
+
+最终第一版完整 manifest：
+
+```text
+Corpus          Source records/h       Ready records/h       Review
+FLEURS          2,793 / 10.1789 h       1,966 / 6.8475 h         827
+MLS            37,533 / 160.9632 h     26,030 / 110.3132 h     11,503
+Common Voice   22,923 / 26.4790 h      21,803 / 24.9761 h       1,120
+Total          63,249 / 197.6211 h     49,799 / 142.1368 h     13,450
+```
+
+正式引用：
+
+```text
+FLEURS:
+outputs/pt_external_train_sources_v1/fleurs/full_manifest_v2_digitguard
+
+MLS:
+outputs/pt_external_train_sources_v1/mls/full_manifest_v1
+
+Common Voice:
+outputs/pt_external_train_sources_v1/common_voice/full_manifest_v2_digitguard
+```
+
+FLEURS `full_manifest_v1` 在数字保护合入前生成，仅保留历史对照，不能用于训练。
+Common Voice v1 虽然 ready 数量与 v2 相同，正式版本仍固定为 v2。
+
+最终问题计数：
+
+```text
+FLEURS:
+  dictionary_missing:      350
+  standalone_h:             21
+  unresolved_connector:    316
+  unresolved_digit:        839
+
+MLS:
+  ctc_length_infeasible:    121
+  dictionary_missing:    14,773
+  standalone_h:             49
+  unresolved_connector: 14,698
+
+Common Voice:
+  ctc_length_infeasible:    111
+  dictionary_missing:     1,096
+  empty_ctc_target:          66
+  standalone_h:               1
+  unresolved_connector:   1,094
+  unresolved_digit:         350
+```
+
+Issue 数允许一条记录命中多个原因，不能将计数直接相加当作 review 记录数。
+
+三套数据当前只完成独立 train 候选处理。合并前必须：
+
+1. 明确 MLS 的方言兼容边界；
+2. 做跨 FLEURS/MLS/Common Voice/Noah 的音频和规范化文本去重；
+3. 固定每套 corpus 的采样权重，避免 MLS 书籍朗读数据淹没口语数据；
+4. 新建合并 manifest 版本，不覆盖任何独立产物；
+5. 合并完成后才创建新的 Encoder feature cache。
