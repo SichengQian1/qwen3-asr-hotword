@@ -73,6 +73,23 @@ outputs/pt_external_train_sources_v1/common_voice/swift_json_conversion_summary.
 运行巴葡 MFA 候选 G2P 与覆盖率审计。MLS 的最终 `pt`/`pt-BR-compatible`
 标记仍需结合元数据或跨说话人音频抽查，不由旧拼写单独决定。
 
+工作区转换与词表实际结果：
+
+```text
+Corpus          Records   Audio   Word tokens   Unique words   Digit fragments
+FLEURS            2,793   WAV          60,947          7,743               847
+MLS              37,533   FLAC      1,261,190         75,392                 0
+Common Voice     22,923   MP3         154,407         26,593               845
+```
+
+三套均 `status=pass`，全部 63,249 条音频在路径改写后存在，无跳过或语言异常。
+FLEURS/Common Voice 中的数字不能从 CTC 标签中静默丢失，因此 full manifest
+新增 `unresolved_digit` review 原因；暂不自动决定年份、金额或序数的葡语读法。
+该保护只影响后续新 manifest，不改动原始 JSON、TSV 或已有 Noah v1 输出。
+
+下一步：三套分别运行巴葡 MFA 候选 G2P 和 dictionary/v0.2 audit。MLS 运行结果
+只用于覆盖率候选分析，不等同于确认全部说话人为 pt-BR。
+
 ## 0.5 2026-07-29 Noah 200 小时巴葡金融数据（代码就绪，待首轮审计）
 
 用户确认新增的 200 小时金融领域数据是巴西葡萄牙语，可复用 Noah 500 小时的

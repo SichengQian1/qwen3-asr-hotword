@@ -374,3 +374,22 @@ outputs/pt_external_train_sources_v1/common_voice
 尚未严格确认；在音频/元数据抽查前保留 MLS 来源身份，不把全部说话人强行声明为
 pt-BR。FLEURS、Common Voice 也保留各自 corpus provenance，后续分别生成词表和
 G2P 报告，再决定最终语言标签与合并策略。
+
+转换和独立词表已于 2026-07-30 完成：
+
+```text
+Corpus          Records   Audio   Word tokens   Unique words   Digit fragments
+FLEURS            2,793   WAV          60,947          7,743               847
+MLS              37,533   FLAC      1,261,190         75,392                 0
+Common Voice     22,923   MP3         154,407         26,593               845
+Total            63,249
+```
+
+三套转换均为 `status=pass`，无跳过、缺失音频或语言异常；63,249 条音频路径全部
+完成 `/home_92 → /host_home` 改写并验证存在。MLS 的唯一词比例明显高于另外两
+套，符合书籍语料、旧拼写和长尾词较多的特征，不能与口语语料共用覆盖率结论。
+
+FLEURS 和 Common Voice 的数字片段不能被静默忽略。full manifest builder 从此
+将任何含数字片段的记录标记为 `unresolved_digit` 并保留到 `needs_review`；
+在没有上下文明确的葡语数字规范化方案前，不自动生成年份、金额、序数或缩写的
+发音标签。

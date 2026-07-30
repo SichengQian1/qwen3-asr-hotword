@@ -178,6 +178,38 @@ def test_full_manifest_supports_independent_train_corpus_identity(
         )
 
 
+def test_full_manifest_reviews_digit_fragments_instead_of_silently_dropping_them(
+    tmp_path: Path,
+) -> None:
+    tsv, audio_root, dictionary, vocab = _write_fixture(tmp_path)
+    tsv.write_text(
+        "audio\ttext\nready.wav\tBom dia em 2026\n",
+        encoding="utf-8",
+    )
+    dictionary.write_text(
+        dictionary.read_text(encoding="utf-8") + "em\te m\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "output"
+
+    summary = build_full_training_manifest(
+        tsv,
+        audio_root,
+        dictionary,
+        vocab,
+        output_dir,
+        shard_size=1,
+        workers=1,
+    )
+
+    assert summary.ready_records == 0
+    assert summary.review_records == 1
+    assert summary.issue_counts == {"unresolved_digit": 1}
+    record = _read_jsonl(output_dir / "needs_review.jsonl")[0]
+    assert record["phoneme_token_ids"]
+    assert record["issues"] == [{"detail": "2026", "reason": "unresolved_digit"}]
+
+
 def test_full_manifest_handles_audio_shorter_than_one_feature_frame(
     tmp_path: Path,
 ) -> None:

@@ -24,7 +24,11 @@ from qwen_hotword.training.experiment_a import (
     normalized_dictionary,
     read_audio_metadata,
 )
-from qwen_hotword.training.g2p_prep import extract_word_tokens, normalize_training_text
+from qwen_hotword.training.g2p_prep import (
+    digit_fragments,
+    extract_word_tokens,
+    normalize_training_text,
+)
 
 DEFAULT_DATASET = "noah_pt_full_500h"
 DEFAULT_ID_PREFIX = "noah_pt_row"
@@ -88,6 +92,8 @@ def assemble_full_label(
     issues: list[dict[str, str | None]] = []
     if not words:
         issues.append({"reason": "empty_token_sequence", "detail": None})
+    for fragment in digit_fragments(text):
+        issues.append({"reason": "unresolved_digit", "detail": fragment})
 
     sentence_phonemes: list[str] = []
     sentence_token_ids: list[int] = []
