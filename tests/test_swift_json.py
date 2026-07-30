@@ -83,3 +83,50 @@ def test_convert_swift_json_falls_back_to_assistant_message(tmp_path: Path) -> N
         "audio\ttext",
         "/data/audio/b.flac\tgritou gloria",
     ]
+
+
+def test_convert_swift_json_rewrites_audio_prefix_before_checking(
+    tmp_path: Path,
+) -> None:
+    mounted_root = tmp_path / "host_home"
+    audio_path = mounted_root / "corpus" / "sample.flac"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"not decoded by this conversion check")
+    source = tmp_path / "swift.json"
+    source.write_text(
+        json.dumps(
+            [
+                {
+                    "audios": ["/home_92/corpus/sample.flac"],
+                    "response": "language Portuguese<asr_text> texto",
+                    "language": "Portuguese",
+                },
+                {
+                    "audios": ["/home_920/corpus/not-rewritten.flac"],
+                    "response": "language Portuguese<asr_text> outro texto",
+                    "language": "Portuguese",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_tsv = tmp_path / "out" / "source.tsv"
+
+    summary = convert_swift_json_to_tsv(
+        source,
+        output_tsv,
+        expected_language="Portuguese",
+        check_audio=True,
+        audio_prefix_rewrites=[("/home_92", str(mounted_root))],
+        progress_every_records=1,
+    )
+
+    assert summary.status == "warn"
+    assert summary.audio_prefix_rewrites == (("/home_92", str(mounted_root)),)
+    assert summary.rewritten_audio_paths == 1
+    assert summary.issue_counts == {"missing_audio_file": 1}
+    assert output_tsv.read_text(encoding="utf-8").splitlines() == [
+        "audio\ttext",
+        f"{audio_path}\ttexto",
+        "/home_920/corpus/not-rewritten.flac\toutro texto",
+    ]

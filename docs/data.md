@@ -241,7 +241,7 @@ Experiment A 是 128 条、约 7.21 分钟的严格清洗过拟合集；Experime
 9. 重跑前检查现有 config、summary、shard index 和 resume 状态。
 10. 工作区实际结果与本文冲突时，以实际结果为准并更新本文。
 
-## 10. 待处理：Noah 200 小时巴葡金融口语数据
+## 10. Noah 200 小时巴葡金融口语数据
 
 用户于 2026-07-29 确认了一套新的巴西葡萄牙语金融领域口语数据。它优先于
 MLS 葡语变体审计，按 Noah 500 小时的 MFA、v0.2 音素词表和完整 manifest
@@ -263,7 +263,7 @@ Candidate audio root:
 /host_home/z00841352/27A/data/Noah_espt/noah_pt
 ```
 
-在首批 TSV 审计实际通过前，候选音频根目录不能视为已经确认。第一轮只运行：
+首批和全量 TSV 审计均已通过，确认音频根目录正确：
 
 ```bash
 python scripts/audit_training_tsv.py \
@@ -274,13 +274,40 @@ python scripts/audit_training_tsv.py \
   --output outputs/noah_pt_finance_200h/audit_first_1000.json
 ```
 
-确认字段为 `audio,text` 且音频正确解析后，再依次执行：
+实际输入和第一版 manifest 结果：
 
-1. 全量 TSV 审计；
-2. 为这套语料独立生成唯一词表和词频；
-3. 使用 `portuguese_brazil_mfa.zip` 生成独立 MFA 词典；
-4. 对词典覆盖率和 v0.2 phone OOV 做独立审计；
-5. 构建完整 `train_ready.jsonl` 和 `needs_review.jsonl`。
+```text
+Source records:       142,985
+Source audio:         195.3711 h
+Valid audio:          142,985
+Word tokens:          2,145,885
+Unique words:         40,458
+
+MFA dictionary word coverage:   97.1971%
+MFA corpus-token coverage:      99.8380%
+Missing unique words:           1,134
+Words/phones outside v0.2:      0
+
+Training-ready:        86,614 / 119.5436 h
+Needs review:          56,371
+Completed shards:      29
+Status:                pass
+```
+
+第一版问题计数允许一条记录命中多个问题：
+
+```text
+ctc_length_infeasible: 53,699
+dictionary_missing:     3,390
+unresolved_connector:   3,377
+standalone_h:               10
+empty_ctc_target:            8
+```
+
+缺词主要是带连字符的高频形式，如 `e-commerce`、`bem-vindo`、`bate-papo`、
+`bem-estar` 和 `matéria-prima`。所有 MFA 输出音素均兼容当前 90 类 v0.2
+词表。后续恢复重点是按已部署的 2× temporal Head 重算 CTC 可行性，并为连接词
+建立显式解析；这些恢复工作不阻塞其他语料首轮处理。
 
 正式 manifest 身份固定为：
 
@@ -303,3 +330,47 @@ outputs/noah_pt_finance_200h/full_manifest_v1
 这套数据当前全部作为新增训练候选，不从中建立新的 validation/test。是否与旧
 500 小时 train 合并，必须等独立覆盖率、ready/review 比例和音频去重检查完成后
 另建合并数据版本。
+
+## 11. 待处理：FLEURS、MLS、Common Voice 葡语 Swift JSON
+
+三套新语料先分别转换、审计和版本化，全部作为 train 候选，不覆盖 Noah 数据，
+也不在本阶段创建 validation/test。
+
+输入 JSON：
+
+```text
+FLEURS:
+/data/h00911716/code/ms-swift/self_test/datalist/pt/fleurs/swift_fleurs_pt.json
+
+MLS:
+/data/h00911716/code/ms-swift/self_test/datalist/pt/mls/swift_librispeech_pt.json
+
+Common Voice:
+/data/h00911716/code/ms-swift/self_test/datalist/pt/cv/swift_cv_pt.json
+```
+
+每条源记录是顶层 JSON list 中的对象。音频来自 `audios[0]`，文本优先使用
+`response`，缺失时回退到最后一条 assistant message，并去掉：
+
+```text
+language Portuguese<asr_text>
+```
+
+FLEURS 音频路径保留真实 `/data/...` 前缀。MLS/Common Voice 中以
+`/home_92/...` 开头的路径在容器内确定性改写为 `/host_home/...`。转换器在
+改写后检查文件存在性，并将所有行为记录在各自的
+`swift_json_conversion_summary.json`。
+
+建议独立目录：
+
+```text
+outputs/pt_external_train_sources_v1/fleurs
+outputs/pt_external_train_sources_v1/mls
+outputs/pt_external_train_sources_v1/common_voice
+```
+
+第一阶段只要求三份转换报告确认：全部源记录有音频和文本、语言字段一致、音频
+文件全部存在、路径改写数量合理。MLS 官方数据只提供 Portuguese 标识，地区变体
+尚未严格确认；在音频/元数据抽查前保留 MLS 来源身份，不把全部说话人强行声明为
+pt-BR。FLEURS、Common Voice 也保留各自 corpus provenance，后续分别生成词表和
+G2P 报告，再决定最终语言标签与合并策略。

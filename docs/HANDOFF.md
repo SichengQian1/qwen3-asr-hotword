@@ -1,5 +1,78 @@
 # 工作交接记录
 
+## 0.6 2026-07-30 三套葡语 Swift JSON（转换代码就绪，待工作区审计）
+
+Noah 金融 200 小时第一版 full manifest 已完成：
+
+```text
+Source:          142,985 / 195.3711 h
+Training-ready:   86,614 / 119.5436 h
+Needs review:     56,371
+Status:           pass
+
+ctc_length_infeasible: 53,699
+dictionary_missing:     3,390
+unresolved_connector:   3,377
+standalone_h:               10
+empty_ctc_target:            8
+```
+
+MFA corpus-token coverage 为 99.8380%，v0.2 phone OOV 为 0。缺词主要与连字符
+重合。金融数据先保留这版结果，未来用 2× 时间轴与连接词解析恢复，不阻塞三套新
+语料。
+
+当前目标转为分别转换和审计 FLEURS、MLS、Common Voice 葡语 Swift JSON，三者
+独立保存、全部作为 train 候选。本轮不运行 MFA 和 full manifest。
+
+本轮更新 Swift JSON 转换器：
+
+- 支持重复传入 `--audio-prefix-rewrite OLD=NEW`；
+- 只匹配完整路径前缀边界；
+- 在改写后执行 `--check-audio`；
+- summary 记录 rewrite 配置、改写数量、缺失音频和耗时；
+- 大文件加载前后打印状态，每 10,000 条打印转换速度和累计结果；
+- 检测到语言不一致或缺失音频时 summary 标记 `warn`。
+
+工作区拉取后分别运行：
+
+```bash
+python scripts/convert_swift_json_to_tsv.py \
+  --input /data/h00911716/code/ms-swift/self_test/datalist/pt/fleurs/swift_fleurs_pt.json \
+  --output-tsv outputs/pt_external_train_sources_v1/fleurs/source.tsv \
+  --expected-language Portuguese \
+  --audio-prefix-rewrite /home_92=/host_home \
+  --check-audio \
+  --progress-every 10000
+
+python scripts/convert_swift_json_to_tsv.py \
+  --input /data/h00911716/code/ms-swift/self_test/datalist/pt/mls/swift_librispeech_pt.json \
+  --output-tsv outputs/pt_external_train_sources_v1/mls/source.tsv \
+  --expected-language Portuguese \
+  --audio-prefix-rewrite /home_92=/host_home \
+  --check-audio \
+  --progress-every 10000
+
+python scripts/convert_swift_json_to_tsv.py \
+  --input /data/h00911716/code/ms-swift/self_test/datalist/pt/cv/swift_cv_pt.json \
+  --output-tsv outputs/pt_external_train_sources_v1/common_voice/source.tsv \
+  --expected-language Portuguese \
+  --audio-prefix-rewrite /home_92=/host_home \
+  --check-audio \
+  --progress-every 10000
+```
+
+需要返回三份：
+
+```text
+outputs/pt_external_train_sources_v1/fleurs/swift_json_conversion_summary.json
+outputs/pt_external_train_sources_v1/mls/swift_json_conversion_summary.json
+outputs/pt_external_train_sources_v1/common_voice/swift_json_conversion_summary.json
+```
+
+通过后下一步：分别生成三套 word list，并在不混合 corpus provenance 的前提下
+运行巴葡 MFA 候选 G2P 与覆盖率审计。MLS 的最终 `pt`/`pt-BR-compatible`
+标记仍需结合元数据或跨说话人音频抽查，不由旧拼写单独决定。
+
 ## 0.5 2026-07-29 Noah 200 小时巴葡金融数据（代码就绪，待首轮审计）
 
 用户确认新增的 200 小时金融领域数据是巴西葡萄牙语，可复用 Noah 500 小时的
