@@ -1,5 +1,110 @@
 # 工作交接记录
 
+## 0.7 2026-07-31 Retrieved RAG 端到端验证（代码完成，待工作区运行）
+
+本轮把已经完成的两段链路真正接起来：
+
+```text
+预生成 validation CTC case scores
+  -> 固定 threshold=0.86 / top-k=3 / margin=0
+  -> 热词 Prompt
+  -> Qwen3-ASR-1.7B 最终转写
+  -> Baseline / Retrieved / Oracle 归因
+```
+
+只做流程 smoke，不搜索 threshold/top-k，不训练 Encoder/CTC Head，不读 sealed
+test，不修改 Qwen 模型。CTC 候选除了 `score >= 0.86`，继续使用正式评分阶段的
+`edit_ratio <= 0.35` 与 `minimum_posterior_confidence=0`；不能把阈值简化为只
+过滤 score。
+
+现有 500 条 score 文件按本轮固定 `top-k=3` 复算为 Precision 93.47%、
+Recall 88.48%、负例 case FPR 2.8%。此前记录的 93.29% / 89.89% 是
+`top-k=5` 口径；两者没有冲突，本轮只是先固定 top-k=3 跑通流程。
+
+上一轮 Prompt smoke 已在工作区完成。40 条 validation case 的实际结果为：
+
+```text
+Baseline: 44/48, hotword recall 91.67%, positive case hit 30/30
+Oracle:   44/48, hotword recall 91.67%, absolute gain 0
+Negative Prompt: 0/10 错误热词写入，幻觉率 0
+Model load count: 1
+```
+
+这证明 `Qwen3ASRModel.transcribe(..., context=prompt)` 接口、固定葡语模板和安全
+控制可以运行，但未证明 Oracle Prompt 在当前常见词样本上有收益。Oracle 仍漏
+`pra vocês`（2 次）、`pode pausar`、`então vamo`。因此本轮完成标准是链路与
+归因正确，不以显著 Recall 提升作为通过条件。
+
+### 实现
+
+- `src/qwen_hotword/inference/retrieved_rag.py`
+  - 严格校验 validation manifest、v2 case、hotword table 与 CTC score 一致；
+  - 确定性选择 60 正例、40 负例；正例覆盖短/中/长热词和单/多热词；
+  - 负例优先纳入全部 threshold 触发 case，再用固定 seed 补足，专门观察错误
+    候选注入后的最终转写污染；
+  - Baseline 跑全部 100 条；有候选时才跑 Retrieved Prompt，无候选直接复用
+    Baseline；60 条正例另跑 Oracle；
+  - 模型只加载一次，逐次打印 phase、累计调用、耗时、速度和 ETA；
+  - 记录 CTC 检索 Precision/Recall/FPR、最终热词 Recall/case hit、检索漏召回、
+    检索正确但 Decoder 未写出、相对 Baseline 的热词救回、错误候选写入、
+    文本变化和简单 corpus WER；
+  - 五个输出统一原子写入，非空目录拒绝覆盖，记录所有输入 SHA256。
+- `scripts/run_retrieved_rag.py`
+- `tests/test_retrieved_rag.py`
+
+本地 fake inference 覆盖阈值与 edit guard、margin、确定性分层选样、CTC
+误触发负例、模型单次加载、无 Prompt Baseline 复用、多热词 Prompt、三路
+Recall、错误候选写入归因、WER、进度和防覆盖。
+
+本地实际验证：
+
+```text
+Ruff（全仓库）: pass
+Ruff format（本轮文件）: pass
+Pytest 定向: pass
+Pytest 全仓库: pass
+Mypy（retrieved_rag 新模块）: pass
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+### 工作区运行
+
+先拉取交付分支，然后从项目根目录在物理 GPU 5 运行：
+
+```bash
+CUDA_VISIBLE_DEVICES=5 python scripts/run_retrieved_rag.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/stratified_hotwords_v2.jsonl \
+  --cases outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/stratified_hotword_cases_v2.jsonl \
+  --ctc-case-scores outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/scoring_temporal2x_v2/hotword_case_scores.jsonl \
+  --output-dir outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/retrieved_rag_v1 \
+  --threshold 0.86 \
+  --top-k 3 \
+  --minimum-top1-margin 0 \
+  --device cuda:0
+```
+
+输出：
+
+```text
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/retrieved_rag_v1/sample_selection.json
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/retrieved_rag_v1/baseline_predictions.jsonl
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/retrieved_rag_v1/retrieved_predictions.jsonl
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/retrieved_rag_v1/oracle_predictions.jsonl
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/retrieved_rag_v1/retrieved_rag_report.json
+```
+
+需要优先返回 `retrieved_rag_report.json`；若要逐 case 归因，再返回另外四个小
+文件。当前限制：v2 是 validation 模拟常见词，Baseline 很高；负例选样故意
+富集 CTC 误触发，所以选中 40 条负例内部的误触发率不能当作无偏 FPR，报告另
+保留全 500 case 的正式 FPR。CTC score 是上一阶段离线生成，本轮尚未实现在线
+registry/reload。
+
+下一步只检查工作区端到端结果；threshold/top-k 调优留到后续独立实验。
+
 ## 0.6 2026-07-30 三套葡语 Swift JSON（第一版独立处理完成）
 
 Noah 金融 200 小时第一版 full manifest 已完成：
