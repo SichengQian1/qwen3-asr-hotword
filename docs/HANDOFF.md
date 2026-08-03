@@ -1,5 +1,91 @@
 # 工作交接记录
 
+## 0.8 2026-08-03 Temporal 2× 训练语料恢复审计（代码完成，待工作区运行）
+
+用户决定先重新审计旧 full manifest 的时间筛选，再决定第一批释放量。本轮只读，
+不生成训练 manifest、不修改原 ready/review、不缓存特征、不训练模型。审计顺序：
+
+```text
+Noah 金融 200 小时
+Noah 原 500 小时
+MLS
+Common Voice
+FLEURS
+```
+
+Temporal Head 的实际 `output_lengths` 已确认严格为原 Encoder CTC 长度乘 2。
+本轮 effective ratio 定义为：
+
+```text
+ctc_minimum_input_length / (estimated_ctc_input_length * 2)
+```
+
+为保护 Noah 500 小时已经封存的 test，工具不逐行读取任何
+`train_ready.jsonl`；原 ready 记录数/小时只从原 `summary.json` 获取。记录级
+扫描只读取从未进入正式 train/validation/test 切分的 `needs_review.jsonl`，报告
+显式记录 `ready_manifest_content_read=false`、`sealed_test_content_read=false`。
+
+Review 分类严格互斥：
+
+1. issues 恰好只有 `ctc_length_infeasible`：纯时间问题；
+2. 纯时间问题在 2× 后拆为可恢复与仍不可行；
+3. 可恢复再拆为 effective ratio `<=0.90` 的首批建议集，以及 `(0.90,1.00]`
+   的高压力延后集；
+4. 只要包含任何其他 issue，即使 2× 时间可行也归入“其他问题阻塞”，不得进入
+   第一批恢复。
+
+每套 corpus 报告包含原 ready/review 记录数与小时、2× 总可恢复、首批建议、
+高压力延后、仍不可行、其他 issue 阻塞、effective ratio 分桶、每种 issue
+总量、精确 issue 组合和两两交集。所有分类同时记录数量、已知小时和缺 duration
+数量；输入 summary/review 记录 SHA256，ready 只记路径和大小、不读取或计算
+SHA256。输出目录非空时拒绝覆盖。
+
+本轮代码：
+
+- `src/qwen_hotword/training/temporal_recovery.py`
+- `scripts/audit_temporal2x_recovery.py`
+- `tests/test_temporal_recovery.py`
+
+本地验证：
+
+```text
+Ruff（全仓库）: pass
+Pytest 定向: pass
+Pytest 全仓库: pass
+Mypy（temporal_recovery）: pass
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+工作区无需 GPU，按用户指定优先级运行：
+
+```bash
+python scripts/audit_temporal2x_recovery.py \
+  --corpus noah_finance_200h=outputs/noah_pt_finance_200h/full_manifest_v1 \
+  --corpus noah_500h=outputs/noah_pt_full_500h \
+  --corpus mls=outputs/pt_external_train_sources_v1/mls/full_manifest_v1 \
+  --corpus common_voice=outputs/pt_external_train_sources_v1/common_voice/full_manifest_v2_digitguard \
+  --corpus fleurs=outputs/pt_external_train_sources_v1/fleurs/full_manifest_v2_digitguard \
+  --output-dir outputs/temporal2x_recovery_audit_v1 \
+  --time-upsampling-factor 2 \
+  --release-max-effective-ratio 0.90 \
+  --progress-every 50000
+```
+
+预计输出：
+
+```text
+outputs/temporal2x_recovery_audit_v1/summary.json
+outputs/temporal2x_recovery_audit_v1/noah_finance_200h.json
+outputs/temporal2x_recovery_audit_v1/noah_500h.json
+outputs/temporal2x_recovery_audit_v1/mls.json
+outputs/temporal2x_recovery_audit_v1/common_voice.json
+outputs/temporal2x_recovery_audit_v1/fleurs.json
+```
+
+审计结束后先检查六个小 JSON，再决定第一批释放量。倾向方案保持为“旧训练集 +
+纯时间问题、2× 后 effective ratio <=0.90 的恢复集”；本轮不创建该合并版本。
+
 ## 0.7 2026-07-31 Retrieved RAG 端到端验证（代码完成，待工作区运行）
 
 本轮把已经完成的两段链路真正接起来：
