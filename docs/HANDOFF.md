@@ -40,6 +40,12 @@ Review 分类严格互斥：
 数量；输入 summary/review 记录 SHA256，ready 只记路径和大小、不读取或计算
 SHA256。输出目录非空时拒绝覆盖。
 
+首次工作区运行在 Noah 金融 review 第 3,507 行发现合法的“只有
+`estimated_ctc_input_length`、没有 `ctc_minimum_input_length`”记录。这是
+`empty_ctc_target`/标签组装失败一类记录的正常 partial metadata，不是数据损坏。
+审计器已修正：非时间问题的 partial length 计入 ratio unavailable 并继续保持
+阻塞；纯 `ctc_length_infeasible` 候选仍强制要求两个长度字段完整。
+
 本轮代码：
 
 - `src/qwen_hotword/training/temporal_recovery.py`

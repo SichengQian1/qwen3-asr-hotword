@@ -70,7 +70,7 @@ def _manifest_dir(tmp_path: Path, name: str = "corpus") -> Path:
             minimum=8,
         ),
         _row("dictionary", ["dictionary_missing"], estimated=8, minimum=4),
-        _row("empty-target", ["empty_ctc_target"]),
+        _row("empty-target", ["empty_ctc_target"], estimated=10),
     ]
     (manifest / "needs_review.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in rows),

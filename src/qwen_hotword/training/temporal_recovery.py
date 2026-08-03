@@ -457,15 +457,21 @@ def _optional_lengths(raw: dict[str, Any], path: Path, line_number: int) -> tupl
     minimum = raw.get("ctc_minimum_input_length")
     if estimated is None and minimum is None:
         return None
-    if (
-        not isinstance(estimated, int)
-        or isinstance(estimated, bool)
-        or estimated < 0
-        or not isinstance(minimum, int)
-        or isinstance(minimum, bool)
-        or minimum <= 0
+    if estimated is not None and (
+        not isinstance(estimated, int) or isinstance(estimated, bool) or estimated < 0
     ):
         raise ValueError(f"review row has invalid CTC lengths: {path}:{line_number}")
+    if minimum is not None and (
+        not isinstance(minimum, int) or isinstance(minimum, bool) or minimum <= 0
+    ):
+        raise ValueError(f"review row has invalid CTC lengths: {path}:{line_number}")
+    # Partial length metadata is expected when label assembly failed. Audio can
+    # still provide an estimated input length while no valid minimum target
+    # length exists. These rows remain blocked by their non-temporal issue and
+    # have no meaningful effective ratio. Pure temporal rows are checked later
+    # and still require both values.
+    if estimated is None or minimum is None:
+        return None
     return estimated, minimum
 
 
