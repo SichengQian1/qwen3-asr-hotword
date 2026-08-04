@@ -466,6 +466,51 @@ def load_hotword_families(path: str | Path) -> tuple[HotwordFamily, ...]:
     return tuple(families)
 
 
+def load_multi_nested_case_scores(path: str | Path) -> tuple[CaseScore, ...]:
+    rows: list[CaseScore] = []
+    seen_cases: set[str] = set()
+    seen_samples: set[str] = set()
+    with Path(path).expanduser().open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            if not isinstance(raw, dict):
+                raise ValueError(f"v3 score row {line_number} must be an object")
+            case_id = _required_string(raw, "case_id", line_number)
+            sample_id = _required_string(raw, "sample_id", line_number)
+            if case_id in seen_cases or sample_id in seen_samples:
+                raise ValueError("v3 scores must have unique case and sample IDs")
+            ranking_raw = raw.get("ranking_top5")
+            operating_raw = raw.get("operating_matches")
+            if not isinstance(ranking_raw, list) or not isinstance(operating_raw, list):
+                raise ValueError(f"v3 score row {line_number} has invalid match lists")
+            rows.append(
+                CaseScore(
+                    case_id=case_id,
+                    sample_id=sample_id,
+                    primary_group=_required_string(raw, "primary_group", line_number),
+                    ranked_matches=tuple(
+                        _hotword_match_from_dict(item, line_number) for item in ranking_raw
+                    ),
+                    operating_matches=tuple(
+                        _hotword_match_from_dict(item, line_number) for item in operating_raw
+                    ),
+                    effective_time_steps=_required_nonnegative_int(
+                        raw, "effective_time_steps", line_number
+                    ),
+                    decoded_token_count=_required_nonnegative_int(
+                        raw, "decoded_token_count", line_number
+                    ),
+                )
+            )
+            seen_cases.add(case_id)
+            seen_samples.add(sample_id)
+    if not rows:
+        raise ValueError("v3 score table is empty")
+    return tuple(rows)
+
+
 def evaluate_multi_nested_case_scores(
     cases: Sequence[MultiNestedCase],
     hotwords: Sequence[HotwordEntry],
@@ -525,10 +570,23 @@ def evaluate_multi_nested_case_scores(
         for case in cases
         if case.primary_group in {"nested_long_present", "nested_family_plus_two"}
     ]
-    short_ids = {family.short_hotword_id for family in families}
-    long_ids = {family.long_hotword_id for family in families}
+
+    def case_short_ids(case: MultiNestedCase) -> set[str]:
+        return {family_by_id[family_id].short_hotword_id for family_id in case.nested_family_ids}
+
+    def case_long_ids(case: MultiNestedCase) -> set[str]:
+        return {family_by_id[family_id].long_hotword_id for family_id in case.nested_family_ids}
+
     containment = _metric_block(long_present, score_by_id, ground_truth="containment")
-    longest = _metric_block(long_present, score_by_id, ground_truth="longest")
+    longest = _metric_block(
+        long_present,
+        score_by_id,
+        ground_truth="longest",
+        redundant_by_case={
+            case.case_id: set(case.containment_expected_ids) - set(case.longest_match_expected_ids)
+            for case in long_present
+        },
+    )
     short_only_long_ranking_trigger_cases = 0
     short_only_long_operating_trigger_cases = 0
     family_slots: list[int] = []
@@ -546,12 +604,12 @@ def evaluate_multi_nested_case_scores(
             )
         }
         if case.primary_group == "nested_short_only":
-            case_long_ids = {
+            corresponding_long_ids = {
                 family_by_id[family_id].long_hotword_id for family_id in case.nested_family_ids
             }
             operating_ids = {match.hotword_id for match in score.operating_matches}
-            short_only_long_ranking_trigger_cases += bool(set(ranked_ids) & case_long_ids)
-            short_only_long_operating_trigger_cases += bool(operating_ids & case_long_ids)
+            short_only_long_ranking_trigger_cases += bool(set(ranked_ids) & corresponding_long_ids)
+            short_only_long_operating_trigger_cases += bool(operating_ids & corresponding_long_ids)
         if case_family_ids:
             occupied = [hotword_id for hotword_id in ranked_ids if hotword_id in case_family_ids]
             family_slots.append(len(occupied))
@@ -590,10 +648,10 @@ def evaluate_multi_nested_case_scores(
     )
     nested_metrics: dict[str, object] = {
         "short_only_short_recall_at_5": _recall_for_case_ids(
-            short_only, score_by_id, lambda case: set(case.containment_expected_ids) & short_ids, 5
+            short_only, score_by_id, case_short_ids, 5
         ),
         "short_only_short_operating_recall": _operating_recall_for_case_ids(
-            short_only, score_by_id, lambda case: set(case.containment_expected_ids) & short_ids
+            short_only, score_by_id, case_short_ids
         ),
         "short_only_long_ranking_false_trigger_rate_at_5": _safe_ratio(
             short_only_long_ranking_trigger_cases, len(short_only)
@@ -602,21 +660,21 @@ def evaluate_multi_nested_case_scores(
             short_only_long_operating_trigger_cases, len(short_only)
         ),
         "long_present_long_recall_at_5": _recall_for_case_ids(
-            long_present, score_by_id, lambda case: set(case.containment_expected_ids) & long_ids, 5
+            long_present, score_by_id, case_long_ids, 5
         ),
         "long_present_long_operating_recall": _operating_recall_for_case_ids(
-            long_present, score_by_id, lambda case: set(case.containment_expected_ids) & long_ids
+            long_present, score_by_id, case_long_ids
         ),
         "long_present_short_simultaneous_recall_at_5": _recall_for_case_ids(
             long_present,
             score_by_id,
-            lambda case: set(case.containment_expected_ids) & short_ids,
+            case_short_ids,
             5,
         ),
         "long_present_short_operating_recall": _operating_recall_for_case_ids(
             long_present,
             score_by_id,
-            lambda case: set(case.containment_expected_ids) & short_ids,
+            case_short_ids,
         ),
         "containment": containment,
         "longest_match": longest,
@@ -1263,6 +1321,7 @@ def _metric_block(
     score_by_id: Mapping[str, CaseScore],
     *,
     ground_truth: str,
+    redundant_by_case: Mapping[str, set[str]] | None = None,
 ) -> dict[str, object]:
     def expected(case: MultiNestedCase) -> set[str]:
         values = (
@@ -1306,6 +1365,9 @@ def _metric_block(
         score = score_by_id[case.case_id]
         ranked_ids = {match.hotword_id for match in score.ranked_matches[:5]}
         selected_ids = {match.hotword_id for match in score.operating_matches}
+        precision_selected_ids = selected_ids - (
+            redundant_by_case.get(case.case_id, set()) if redundant_by_case else set()
+        )
         raw_hits += len(truth & ranked_ids)
         raw_selected += len(score.ranked_matches[:5])
         if truth:
@@ -1318,7 +1380,7 @@ def _metric_block(
         else:
             negative += 1
             negative_fp += bool(selected_ids)
-        selected_total += len(selected_ids)
+        selected_total += len(precision_selected_ids)
         true_total += len(truth & selected_ids)
     precision = _safe_ratio(true_total, selected_total)
     recall = _safe_ratio(true_total, expected_total)
@@ -1563,6 +1625,53 @@ def _required_string(raw: Mapping[str, object], key: str, line_number: int) -> s
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"row {line_number} has invalid {key}")
     return value.strip()
+
+
+def _required_nonnegative_int(raw: Mapping[str, object], key: str, line_number: int) -> int:
+    value = raw.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"row {line_number} has invalid {key}")
+    return value
+
+
+def _hotword_match_from_dict(value: object, line_number: int) -> HotwordMatch:
+    if not isinstance(value, dict):
+        raise ValueError(f"v3 score row {line_number} has a non-object match")
+
+    def number(key: str) -> float:
+        raw = value.get(key)
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+            raise ValueError(f"v3 score row {line_number} match has invalid {key}")
+        return float(raw)
+
+    def integer(key: str) -> int:
+        raw = value.get(key)
+        if not isinstance(raw, int) or isinstance(raw, bool):
+            raise ValueError(f"v3 score row {line_number} match has invalid {key}")
+        return raw
+
+    def optional_integer(key: str) -> int | None:
+        raw = value.get(key)
+        if raw is None:
+            return None
+        if not isinstance(raw, int) or isinstance(raw, bool):
+            raise ValueError(f"v3 score row {line_number} match has invalid {key}")
+        return raw
+
+    return HotwordMatch(
+        hotword_id=_required_string(value, "hotword_id", line_number),
+        surface=_required_string(value, "surface", line_number),
+        language=_required_string(value, "language", line_number),
+        score=number("score"),
+        edit_similarity=number("edit_similarity"),
+        edit_distance=integer("edit_distance"),
+        edit_ratio=number("edit_ratio"),
+        posterior_confidence=number("posterior_confidence"),
+        decoded_start=integer("decoded_start"),
+        decoded_end=integer("decoded_end"),
+        start_step=optional_integer("start_step"),
+        end_step=optional_integer("end_step"),
+    )
 
 
 def _string_tuple(

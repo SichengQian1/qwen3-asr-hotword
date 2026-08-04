@@ -11,6 +11,7 @@ from qwen_hotword.hotwords.multi_nested import (
     MultiNestedCase,
     build_multi_nested_assets,
     evaluate_multi_nested_case_scores,
+    load_multi_nested_case_scores,
     load_multi_nested_cases,
     load_validation_samples,
 )
@@ -166,7 +167,7 @@ def test_nested_ground_truth_false_trigger_and_slot_crowding() -> None:
     scores = (
         _score(ordinary, ("h1", "h2", "h3", "h4", "h5")),
         _score(short_only, ("h10", "h11", "h4", "h5", "h6")),
-        _score(long_present, ("h10", "h11", "h4", "h5", "h6")),
+        _score(long_present, ("h10", "h11", "h4", "h5", "h6"), ("h10", "h11")),
         _score(nested_plus, ("h10", "h11", "h1", "h4", "h5")),
     )
     hotwords = tuple(
@@ -185,11 +186,40 @@ def test_nested_ground_truth_false_trigger_and_slot_crowding() -> None:
     assert nested["short_only_long_operating_false_trigger_rate"] == 0.0
     assert nested["containment"]["ranking"][2]["micro_recall_at_k"] == pytest.approx(5 / 6)
     assert nested["longest_match"]["ranking"][2]["micro_recall_at_k"] == 0.75
+    assert nested["longest_match"]["operating"]["precision"] == 1.0
     assert nested["family_duplicate_or_redundant_hits"] >= 3
     assert nested["ordinary_three_independent_recall_at_5"] == 1.0
     assert nested["nested_plus_two_independent_recall_at_5"] == 0.5
     assert nested["slot_crowding_loss"] == 0.5
     assert nested["crowding_attribution_cases"][0]["case_id"] == "nested-plus"
+
+
+def test_v3_case_score_loader_round_trip(tmp_path: Path) -> None:
+    case = _case("score", "single_hotword", ("h1",))
+    score = _score(case, ("h1", "h2", "h3", "h4", "h5"), ("h1",))
+    row = {
+        "case_id": score.case_id,
+        "sample_id": score.sample_id,
+        "primary_group": score.primary_group,
+        "effective_time_steps": 42,
+        "decoded_token_count": 7,
+        "ranking_top5": [match.to_dict() for match in score.ranked_matches],
+        "operating_matches": [match.to_dict() for match in score.operating_matches],
+    }
+    path = tmp_path / "scores.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    loaded = load_multi_nested_case_scores(path)
+
+    assert loaded[0].case_id == "score"
+    assert loaded[0].effective_time_steps == 42
+    assert [match.hotword_id for match in loaded[0].ranked_matches] == [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+    ]
 
 
 def _alpha_name(index: int) -> str:

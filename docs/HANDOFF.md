@@ -1,5 +1,82 @@
 # 工作交接记录
 
+## 0.11 2026-08-04 v3结果复核与50条多关键词 Prompt 端到端验证（代码完成，待工作区运行）
+
+工作区 v3 CTC 专项资产和评分已完成：210条自然 Validation case、7组目标全部满足、
+500个热词、80个嵌套 family，primary audio 全部互异，`status=pass`。固定
+`threshold=0.86/top_k=5` 的主要实测结果为：总体 Ranking Recall@5 95.37%；
+Operating Precision 96.06%、Recall 83.17%、负例FPR 0%；3个独立热词 Recall@5
+93.33%、All-3-Hit@5 80%，未达到本轮95%/85%的工程参考目标；组合非嵌套词
+Recall@5 96.40%，高于单词91.67%，当前没有“组合词更难”的证据；short-only长词
+Forced Top-5误排20%，但Operating误触发0%；总体 slot crowding loss为0，不过有3条
+局部case出现family成员占位并挤掉独立真词。
+
+复核发现旧报告有两处仅影响指标汇总、不影响CTC逐case评分的口径问题：
+
+1. Longest-match Operating Precision 错把同family的短词冗余命中计为false positive；
+2. 嵌套short/long专项指标使用全局family成员集合，可能把case里的独立词误归入其他family。
+
+已修正为逐case family口径，并新增CPU-only报告重建工具；它复用已有
+`hotword_case_scores_v3.jsonl`，不加载Head、不读取特征、不重复推理，也不覆盖原报告。
+原报告保留用于审计，修正版另存：
+
+```bash
+python scripts/rebuild_multi_nested_hotword_report.py \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_hotwords_v3.jsonl \
+  --families outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/hotword_families_v3.jsonl \
+  --cases outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_cases_v3.jsonl \
+  --case-scores outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/hotword_case_scores_v3.jsonl \
+  --base-report outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_evaluation_report_v3.json \
+  --output outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_evaluation_report_v3_corrected.json
+```
+
+新增固定50条 Qwen3-ASR-1.7B Prompt 端到端评估：40正例+10负例，分组固定为
+3独立词10、nested family+2独立词10、nested long 8、2独立词6、nested short 3、
+单热词3、负例10。模型只加载一次，依次运行全部Baseline、仅有Operating候选时的
+Retrieved Prompt、40条正例Oracle Prompt；无候选case直接复用Baseline，不重复推理。
+最终目标采用Longest-match，contained short单独统计为redundant family hit，不当作
+错误候选；真正无关候选的注入、写入和新增幻觉另行统计。CTC配置必须仍为固定
+0.86/Top-5/.35/.25，不允许在本命令内调参；不读取sealed test。
+
+物理GPU 5运行：
+
+```bash
+CUDA_VISIBLE_DEVICES=5 python scripts/run_multi_nested_prompt_eval.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_hotwords_v3.jsonl \
+  --families outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/hotword_families_v3.jsonl \
+  --cases outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_cases_v3.jsonl \
+  --ctc-case-scores outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/hotword_case_scores_v3.jsonl \
+  --ctc-report outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_evaluation_report_v3_corrected.json \
+  --output-dir outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/prompt_multi_nested_v1 \
+  --device cuda:0 \
+  --dtype bfloat16
+```
+
+新增/修改文件：
+
+- `src/qwen_hotword/hotwords/multi_nested.py`
+- `src/qwen_hotword/inference/multi_nested_prompt.py`
+- `scripts/rebuild_multi_nested_hotword_report.py`
+- `scripts/run_multi_nested_prompt_eval.py`
+- `tests/test_multi_nested_hotwords.py`
+- `tests/test_multi_nested_prompt.py`
+
+本地实际验证：Ruff全仓库pass；Pytest全仓库128 tests pass；新模块Mypy pass；
+两个CLI `--help` smoke pass；`git diff --check` pass。fake/mock覆盖固定分组选择、
+audio-disjoint、模型单次加载、Baseline/Retrieved/Oracle、嵌套冗余与真正错误分离、
+原子输出及防覆盖。
+
+预计Prompt输出：`sample_selection.json`、`baseline_predictions.jsonl`、
+`retrieved_predictions.jsonl`、`oracle_predictions.jsonl`、
+`multi_nested_prompt_report.json`。需要返回修正后的CTC报告和Prompt报告；若报告发现
+具体幻觉或异常提升，再按其中case ID返回对应prediction行。当前限制：这是固定50条
+Validation小样本，不是生产评估；没有工作区Prompt真实结果前不得宣称Prompt有效。
+下一步只检查50条结果，再决定是否进入threshold/top-k调优或扩大正式评估。
+
 ## 0.10 2026-08-04 多关键词与组合/嵌套关键词专项评估（代码完成，待工作区运行）
 
 本轮只实现 Validation CTC 专项评估，不训练模型、不提取 Encoder 特征、不读取
