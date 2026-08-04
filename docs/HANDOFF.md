@@ -1,6 +1,108 @@
 # 工作交接记录
 
-## 0.9 2026-08-04 Temporal 2× 五语料合并训练集（代码完成，待工作区构建）
+## 0.10 2026-08-04 多关键词与组合/嵌套关键词专项评估（代码完成，待工作区运行）
+
+本轮只实现 Validation CTC 专项评估，不训练模型、不提取 Encoder 特征、不读取
+sealed test，也不运行 Qwen Prompt 推理。复用固定资产：
+
+```text
+Validation manifest: outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl
+Validation cache:    outputs/noah_pt_full_training_v1/features_ln_post_bf16/validation
+Temporal 2× Head:    outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt
+MFA dictionary:      outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict
+```
+
+新增独立 v3 资产构建器，严格从自然 Validation 文本选择约210条 audio-disjoint
+case：1/2/3个独立关键词、nested short-only、long-present、nested family+2个独立词
+及负例。组合词必须是连续完整词组；独立词 span 不重叠、无包含关系；嵌套 family
+同时保存 containment 和 longest-match Ground Truth。每条 case 固定100个 active
+hotwords，并记录规范化文本、真实 word span、family、困难负例和选择理由。输出目录
+非空时拒绝覆盖；关键嵌套组少于10条时保留最大自然子集并标记
+`smoke_insufficient_data`，不伪造样本或降低标准。无 speaker ID，因此只声明
+audio-disjoint。
+
+评分只复用现有 Validation cache 和 Temporal 2× Head，固定参数不可搜索：
+
+```text
+top_k=5, threshold=0.86, maximum_edit_ratio=0.35
+posterior_weight=0.25, minimum_posterior_confidence=0.0
+minimum_phonemes=4, minimum_top1_margin=0.0
+time_axis=temporal_upsample_2x_only
+```
+
+报告严格区分 Forced Ranking Top-5 与 threshold/edit/posterior guard 后最多Top-5的
+Operating 结果。包含总体/分组 Micro Recall@1/3/5、Any/All-Hit、All-3-Hit、Mean
+Hits、Raw Precision@5、Operating P/R/F1、正例命中率和负例FPR；按 hotword form、
+音素长度及 form×length 分桶；嵌套专项包含 short-only长词误触发、双GT、family
+槽位、redundant hit、其他独立词Recall、slot crowding loss及具体归因case。报告明确
+说明3个真实词而固定返回5个候选时 Raw Precision@5 的理论上限60%只是计算口径，
+不是模型准确率上限。
+
+本轮文件：
+
+- `src/qwen_hotword/hotwords/multi_nested.py`
+- `scripts/build_multi_nested_hotword_eval.py`
+- `scripts/evaluate_multi_nested_hotwords.py`
+- `tests/test_multi_nested_hotwords.py`
+- `docs/HANDOFF.md`
+
+本地实际验证：
+
+```text
+Ruff（全仓库）: pass
+Pytest（全仓库）: pass, 126 tests
+Mypy（multi_nested新模块）: pass
+两个CLI --help smoke: pass
+git diff --check: pass
+```
+
+工作区先运行CPU资产构建：
+
+```bash
+python scripts/build_multi_nested_hotword_eval.py \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --dictionary outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested
+```
+
+先检查 `asset_summary_v3.json` 的实际分组数；无论 formal 或 insufficient_data，均可
+继续运行固定口径 GPU 评分以获得 smoke 数据。物理 GPU 5 暴露为逻辑 cuda:0：
+
+```bash
+CUDA_VISIBLE_DEVICES=5 python scripts/evaluate_multi_nested_hotwords.py \
+  --validation-cache outputs/noah_pt_full_training_v1/features_ln_post_bf16/validation \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --dictionary outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --checkpoint outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt \
+  --hotwords outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_hotwords_v3.jsonl \
+  --families outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/hotword_families_v3.jsonl \
+  --cases outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/multi_nested_cases_v3.jsonl \
+  --asset-summary outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/asset_summary_v3.json \
+  --output-dir outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested \
+  --device cuda:0 \
+  --batch-size 128
+```
+
+预计生成：
+
+```text
+multi_nested_hotwords_v3.jsonl
+hotword_families_v3.jsonl
+multi_nested_cases_v3.jsonl
+sample_selection_v3.json
+asset_summary_v3.json
+hotword_case_scores_v3.jsonl
+multi_nested_evaluation_report_v3.json
+```
+
+需要返回 `asset_summary_v3.json` 和 `multi_nested_evaluation_report_v3.json`；若要
+逐case核查 crowding 再返回 `hotword_case_scores_v3.jsonl`。当前限制是本机没有真实
+Validation/cache/checkpoint，尚未产生或宣称任何真实效果结论。下一步只根据CTC专项
+结果决定是否运行50条多热词/组合词 Prompt 端到端验证。
+
+## 0.9 2026-08-04 Temporal 2× 五语料合并训练集（工作区已完成）
 
 Temporal 2× 只读审计已在工作区完成，5套语料合计结果：
 
@@ -9,6 +111,11 @@ Temporal 2× 只读审计已在工作区完成，5套语料合计结果：
 纯时间恢复 ratio<=0.9: 166,757 / 227.142632 h
 合并候选总计:          547,046 / 815.694894 h
 ```
+
+工作区构建已完成并通过：train 525,189条/783.223637小时，validation
+10,899条/16.239131小时，sealed test 10,958条/16.232128小时；全局重复ID、重复
+音频和跨split overlap均为0，`source_manifests_modified=false`、`test_set_used=false`、
+`status=pass`。后续不再把该合并manifest写成“待构建”。
 
 用户决定不再只释放 Noah 500h，而是把以下5套语料的原 ready 与安全时间恢复集
 一次性组成新的独立训练数据版本，按已有稳定 `split_hash` 做96/2/2：
