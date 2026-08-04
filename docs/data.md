@@ -459,10 +459,44 @@ Common Voice:
 
 Issue 数允许一条记录命中多个原因，不能将计数直接相加当作 review 记录数。
 
-三套数据当前只完成独立 train 候选处理。合并前必须：
+三套数据完成独立 train 候选处理时记录了以下合并检查项：
 
 1. 明确 MLS 的方言兼容边界；
 2. 做跨 FLEURS/MLS/Common Voice/Noah 的音频和规范化文本去重；
-3. 固定每套 corpus 的采样权重，避免 MLS 书籍朗读数据淹没口语数据；
+3. 明确记录是否使用 corpus 采样权重，避免误解样本自然比例；
 4. 新建合并 manifest 版本，不覆盖任何独立产物；
 5. 合并完成后才创建新的 Encoder feature cache。
+
+## 12. Temporal 2× 五语料合并版本
+
+2026-08-04 用户决定建立新的全集训练版本，不覆盖任何旧清单。数据来源为 Noah
+500h、Noah金融200h、MLS、Common Voice和FLEURS；每套都纳入原ready记录，并
+额外纳入唯一问题为 `ctc_length_infeasible`、2×后 effective ratio `<=0.90`
+的恢复记录。其他标签问题和ratio `(0.90,1.00]` 暂不释放。
+
+审计后的候选规模：
+
+```text
+Corpus                 Original ready             Temporal 2x recovery <=0.90
+Noah finance 200h       86,614 / 119.543627 h      52,944 / 70.628133 h
+Noah 500h              243,876 / 326.871849 h     113,607 / 156.022247 h
+MLS                     26,030 / 110.313155 h          98 / 0.382994 h
+Common Voice            21,803 /  24.976131 h         108 / 0.109258 h
+FLEURS                    1,966 /   6.847500 h           0 / 0 h
+Total                   380,289 / 588.552262 h     166,757 / 227.142632 h
+Combined                547,046 / 815.694894 h
+```
+
+构建入口和新输出目录：
+
+```text
+scripts/build_temporal2x_combined_training.py
+src/qwen_hotword/training/combined_training.py
+outputs/pt_combined_temporal2x_v1
+```
+
+使用每条记录已有的稳定 `split_hash` 做96/2/2，保证旧Noah样本不会因合并改变
+split。新清单保留来源与原始语言标签，拒绝跨语料重复ID/绝对音频路径；测试清单
+生成后封存。所有记录绑定 `ctc_time_upsampling_factor=2`，因此该版本只用于
+Temporal 2× Head，不用于线性1× Head。第一版暂按样本自然比例合并，没有实现
+corpus重采样权重；MLS的地域变体限制仍需在正式产品结论中注明。

@@ -48,6 +48,20 @@ def test_load_experiment_records_validates_training_contract(tmp_path: Path) -> 
     assert len(records) == 1
     assert records[0].sample_id == "sample-1"
     assert records[0].token_ids == (2, 3, 4)
+    assert records[0].ctc_time_upsampling_factor == 1
+
+
+def test_load_experiment_records_reads_temporal_upsampling_contract(
+    tmp_path: Path,
+) -> None:
+    audio_path = tmp_path / "audio.wav"
+    manifest_path = tmp_path / "experiment.jsonl"
+    _write_wav(audio_path)
+    _write_manifest(manifest_path, audio_path, ctc_time_upsampling_factor=2)
+
+    records = load_experiment_records(manifest_path, num_classes=10)
+
+    assert records[0].ctc_time_upsampling_factor == 2
 
 
 def test_load_experiment_records_accepts_expected_experiment_b_split(

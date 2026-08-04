@@ -1,6 +1,112 @@
 # 工作交接记录
 
-## 0.8 2026-08-03 Temporal 2× 训练语料恢复审计（代码完成，待工作区运行）
+## 0.9 2026-08-04 Temporal 2× 五语料合并训练集（代码完成，待工作区构建）
+
+Temporal 2× 只读审计已在工作区完成，5套语料合计结果：
+
+```text
+原 ready:              380,289 / 588.552262 h
+纯时间恢复 ratio<=0.9: 166,757 / 227.142632 h
+合并候选总计:          547,046 / 815.694894 h
+```
+
+用户决定不再只释放 Noah 500h，而是把以下5套语料的原 ready 与安全时间恢复集
+一次性组成新的独立训练数据版本，按已有稳定 `split_hash` 做96/2/2：
+
+```text
+Noah 金融 200h
+Noah 原 500h
+MLS Portuguese
+Common Voice Portuguese
+FLEURS Portuguese
+```
+
+新构建器严格纳入两类记录：
+
+1. 原 `train_ready.jsonl` 的全部 ready 记录；
+2. `needs_review.jsonl` 中 issue 集合恰好只有 `ctc_length_infeasible`、Temporal
+   2× 后可行且 effective ratio `<=0.90` 的记录。
+
+任何 dictionary/connector/digit/standalone-h/empty-target 等其他问题仍然阻塞；
+`(0.90,1.00]` 高压力样本和2×后仍不可行样本不释放。构建器只读源文件，输出
+目录非空时拒绝覆盖，写入临时文件后原子替换；全局拒绝重复ID和重复绝对音频
+路径，并检查跨split ID/音频重叠为0。输出保留 `source_corpus`、原始 language
+和 `release_source`，MLS/CV 的 `pt` 不会被伪改为 `pt-BR`。
+
+所有新记录明确写入：
+
+```text
+dataset_version: temporal2x-combined-v1
+ctc_time_upsampling_factor: 2
+estimated_ctc_input_length: 原 Encoder CTC 帧数
+effective_ctc_input_length: 原帧数 * 2
+```
+
+feature-cache/训练边界已同步支持这一合约：恢复样本在缓存校验时按2×有效时间轴
+判断可行；新缓存记录 time factor，训练时若使用小于数据要求的 Head factor 会
+拒绝启动。旧 manifest 未写该字段时默认1，既有旧缓存元数据缺字段也按1兼容。
+
+本轮文件：
+
+- `src/qwen_hotword/training/combined_training.py`
+- `scripts/build_temporal2x_combined_training.py`
+- `tests/test_combined_training.py`
+- `src/qwen_hotword/training/ctc_overfit.py`
+- `src/qwen_hotword/training/feature_cache.py`
+- `src/qwen_hotword/training/sharded_ctc.py`
+- `tests/test_ctc_overfit.py`
+- `tests/test_feature_cache.py`
+- `docs/data.md`
+
+本地验证：
+
+```text
+Ruff（全仓库）: pass
+Pytest 定向（combined/feature/loader/sharded CTC）: pass, 24 tests
+Pytest 全仓库: pass
+Mypy（combined_training 新模块）: pass
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+工作区不需要GPU，从项目根目录运行：
+
+```bash
+python scripts/build_temporal2x_combined_training.py \
+  --corpus noah_finance_200h=outputs/noah_pt_finance_200h/full_manifest_v1 \
+  --corpus noah_500h=outputs/noah_pt_full_500h \
+  --corpus mls=outputs/pt_external_train_sources_v1/mls/full_manifest_v1 \
+  --corpus common_voice=outputs/pt_external_train_sources_v1/common_voice/full_manifest_v2_digitguard \
+  --corpus fleurs=outputs/pt_external_train_sources_v1/fleurs/full_manifest_v2_digitguard \
+  --output-dir outputs/pt_combined_temporal2x_v1 \
+  --time-upsampling-factor 2 \
+  --release-max-effective-ratio 0.90 \
+  --train-fraction 0.96 \
+  --validation-fraction 0.02 \
+  --test-fraction 0.02 \
+  --progress-every 50000
+```
+
+预计输出：
+
+```text
+outputs/pt_combined_temporal2x_v1/full_ctc_train.jsonl
+outputs/pt_combined_temporal2x_v1/full_ctc_validation.jsonl
+outputs/pt_combined_temporal2x_v1/full_ctc_test.jsonl
+outputs/pt_combined_temporal2x_v1/split_config.json
+outputs/pt_combined_temporal2x_v1/split_summary.json
+```
+
+首先返回 `split_summary.json`。通过标准：总数547,046、原ready 380,289、恢复
+166,757、总时长约815.694894小时、三split均非空、duplicate和cross-split overlap
+全部为0、`source_manifests_modified=false`、`test_set_used=false`、status pass。
+test输出生成后立即封存，不参与特征缓存、选模或调参。
+
+当前限制：这是按样本自然比例的首个全集版本，尚未做corpus sampling weight；
+MLS仍保留Portuguese来源身份，不能宣称为纯巴葡。下一步只在summary通过后缓存
+新train/validation的Encoder特征，test不读取。
+
+## 0.8 2026-08-03 Temporal 2× 训练语料恢复审计（工作区已完成）
 
 用户决定先重新审计旧 full manifest 的时间筛选，再决定第一批释放量。本轮只读，
 不生成训练 manifest、不修改原 ready/review、不缓存特征、不训练模型。审计顺序：

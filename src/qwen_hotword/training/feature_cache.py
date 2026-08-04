@@ -86,6 +86,9 @@ def cache_feature_split(
         raise ValueError("feature caching accepts only train or validation data")
     if not records:
         raise ValueError(f"cannot cache an empty {split} split")
+    time_factors = {record.ctc_time_upsampling_factor for record in records}
+    if len(time_factors) != 1:
+        raise ValueError("a feature cache requires one CTC time upsampling factor")
     if encoder_batch_size <= 0 or samples_per_shard <= 0:
         raise ValueError("encoder batch size and samples per shard must be positive")
 
@@ -235,7 +238,7 @@ def write_feature_shard(
             raise ValueError(
                 f"sample {sample.sample_id} has invalid hidden shape: {list(hidden.shape)}"
             )
-        if hidden.shape[0] < record.ctc_minimum_input_length:
+        if hidden.shape[0] * record.ctc_time_upsampling_factor < record.ctc_minimum_input_length:
             raise ValueError(f"sample {sample.sample_id} is not physically CTC-feasible")
         hidden_parts.append(hidden.contiguous())
         hidden_offsets.append(hidden_offsets[-1] + int(hidden.shape[0]))
@@ -265,6 +268,7 @@ def write_feature_shard(
         "record_end": record_start + len(records),
         "record_count": len(records),
         "sample_ids": [record.sample_id for record in records],
+        "ctc_time_upsampling_factor": records[0].ctc_time_upsampling_factor,
         "hidden_size": FEATURE_HIDDEN_SIZE,
         "feature_dtype": FEATURE_DTYPE,
         "total_frames": hidden_offsets[-1],
@@ -318,6 +322,10 @@ def validate_feature_shard(
     for key, value in expected.items():
         if raw.get(key) != value:
             raise ValueError(f"feature shard metadata mismatch for {key}: {metadata_path}")
+    if raw.get("ctc_time_upsampling_factor", 1) != records[0].ctc_time_upsampling_factor:
+        raise ValueError(
+            f"feature shard metadata mismatch for ctc_time_upsampling_factor: {metadata_path}"
+        )
     if raw.get("feature_bytes") != feature_path.stat().st_size:
         raise ValueError(f"feature shard size mismatch: {feature_path}")
     if raw.get("feature_sha256") != _sha256_file(feature_path):
@@ -353,7 +361,7 @@ def validate_feature_shard(
         raise ValueError(f"feature shard token offsets are invalid: {feature_path}")
     for index, record in enumerate(records):
         input_length = hidden_values[index + 1] - hidden_values[index]
-        if input_length < record.ctc_minimum_input_length:
+        if input_length * record.ctc_time_upsampling_factor < record.ctc_minimum_input_length:
             raise ValueError(f"cached sample {record.sample_id} is not CTC-feasible")
         actual_tokens = tuple(tokens[token_values[index] : token_values[index + 1]].tolist())
         if actual_tokens != record.token_ids:
@@ -381,6 +389,7 @@ def _cache_config(
         "split": split,
         "sample_count": len(records),
         "sample_id_sha256": _strings_sha256([record.sample_id for record in records]),
+        "ctc_time_upsampling_factor": records[0].ctc_time_upsampling_factor,
         "source_manifest": _file_identity(source_manifest),
         "model": {
             "path": str(model_path.resolve()),
@@ -403,6 +412,8 @@ def _ensure_cache_config(path: Path, expected: dict[str, object]) -> None:
         _write_json(path, expected)
         return
     actual = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(actual, dict) and "ctc_time_upsampling_factor" not in actual:
+        actual["ctc_time_upsampling_factor"] = 1
     if actual != expected:
         raise ValueError(
             f"feature cache configuration does not match the requested run: {path}; "

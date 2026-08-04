@@ -21,6 +21,7 @@ class ExperimentRecord:
     language: str
     token_ids: tuple[int, ...]
     ctc_minimum_input_length: int
+    ctc_time_upsampling_factor: int = 1
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,13 @@ def load_experiment_records(
             minimum_length = raw.get("ctc_minimum_input_length")
             if not isinstance(minimum_length, int) or minimum_length < len(token_ids):
                 raise ValueError(f"row {line_number} has invalid CTC minimum input length")
+            time_upsampling_factor = raw.get("ctc_time_upsampling_factor", 1)
+            if (
+                not isinstance(time_upsampling_factor, int)
+                or isinstance(time_upsampling_factor, bool)
+                or time_upsampling_factor <= 0
+            ):
+                raise ValueError(f"row {line_number} has invalid CTC time upsampling factor")
             records.append(
                 ExperimentRecord(
                     sample_id=sample_id,
@@ -156,6 +164,7 @@ def load_experiment_records(
                     language=_required_string(raw, "language", line_number),
                     token_ids=token_ids,
                     ctc_minimum_input_length=minimum_length,
+                    ctc_time_upsampling_factor=time_upsampling_factor,
                 )
             )
     if not records:

@@ -12,6 +12,7 @@ from qwen_hotword.training.feature_cache import (
     cache_feature_split,
     exclusive_feature_cache_run,
 )
+from qwen_hotword.training.sharded_ctc import load_disk_feature_cache
 
 
 def _write_wav(path: Path) -> None:
@@ -151,6 +152,46 @@ def test_feature_cache_rejects_test_split(tmp_path: Path) -> None:
             vocab_path=vocab,
             extractor=_fake_extractor,
         )
+
+
+def test_feature_cache_honors_temporal_upsampling_manifest_contract(
+    tmp_path: Path,
+) -> None:
+    records = _records(tmp_path, 1)
+    temporal_record = ExperimentRecord(
+        sample_id=records[0].sample_id,
+        audio_path=records[0].audio_path,
+        text=records[0].text,
+        language=records[0].language,
+        token_ids=(2, 3, 4, 5),
+        ctc_minimum_input_length=8,
+        ctc_time_upsampling_factor=2,
+    )
+    manifest, vocab, model = _identity_inputs(tmp_path)
+
+    summary = cache_feature_split(
+        [temporal_record],
+        SimpleNamespace(),
+        tmp_path / "temporal-cache",
+        split="train",
+        source_manifest_path=manifest,
+        model_path=model,
+        model_dtype="bfloat16",
+        vocab_path=vocab,
+        extractor=_fake_extractor,
+    )
+
+    assert summary.status == "pass"
+    config = json.loads((tmp_path / "temporal-cache/cache_config.json").read_text(encoding="utf-8"))
+    assert config["ctc_time_upsampling_factor"] == 2
+    disk_cache = load_disk_feature_cache(
+        tmp_path / "temporal-cache",
+        expected_split="train",
+        source_manifest_path=manifest,
+        vocab_path=vocab,
+    )
+    assert disk_cache.ctc_time_upsampling_factor == 2
+    assert disk_cache.shards[0].ctc_time_upsampling_factor == 2
 
 
 def test_feature_cache_lock_rejects_duplicate_process(tmp_path: Path) -> None:

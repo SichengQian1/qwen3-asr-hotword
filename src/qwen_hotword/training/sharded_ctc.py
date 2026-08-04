@@ -35,6 +35,7 @@ class FeatureShardDescriptor:
     feature_bytes: int
     feature_sha256: str
     sample_ids: tuple[str, ...]
+    ctc_time_upsampling_factor: int
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class DiskFeatureCache:
     encoder_frozen_parameters: int
     fingerprint: str
     sha256_verified: bool
+    ctc_time_upsampling_factor: int
     shards: tuple[FeatureShardDescriptor, ...]
 
 
@@ -168,6 +170,13 @@ def load_disk_feature_cache(
         raise ValueError(f"feature cache is not full-ctc-v1 data: {root}")
     if config.get("hidden_size") != 1024 or config.get("feature_dtype") != "torch.bfloat16":
         raise ValueError(f"feature cache tensor contract is invalid: {root}")
+    ctc_time_upsampling_factor = config.get("ctc_time_upsampling_factor", 1)
+    if (
+        not isinstance(ctc_time_upsampling_factor, int)
+        or isinstance(ctc_time_upsampling_factor, bool)
+        or ctc_time_upsampling_factor <= 0
+    ):
+        raise ValueError(f"feature cache CTC time factor is invalid: {root}")
     _validate_identity(
         config.get("source_manifest"),
         Path(source_manifest_path).expanduser(),
@@ -198,6 +207,9 @@ def load_disk_feature_cache(
         feature_path = root / "shards" / f"shard-{position:06d}.pt"
         metadata_path = root / "shards" / f"shard-{position:06d}.json"
         metadata = _read_object(metadata_path)
+        metadata_time_factor = metadata.get("ctc_time_upsampling_factor", 1)
+        if metadata_time_factor != ctc_time_upsampling_factor:
+            raise ValueError(f"feature shard CTC time factor mismatch: {metadata_path}")
         record_count = _required_int(metadata, "record_count")
         if metadata.get("split") != expected_split or metadata.get("shard_index") != position:
             raise ValueError(f"feature shard metadata identity mismatch: {metadata_path}")
@@ -236,6 +248,7 @@ def load_disk_feature_cache(
                 feature_bytes=feature_bytes,
                 feature_sha256=feature_sha256,
                 sample_ids=tuple(sample_ids),
+                ctc_time_upsampling_factor=ctc_time_upsampling_factor,
             )
         )
         if verify_sha256 and (
@@ -271,6 +284,7 @@ def load_disk_feature_cache(
         encoder_frozen_parameters=encoder_frozen_parameters,
         fingerprint=fingerprint,
         sha256_verified=verify_sha256,
+        ctc_time_upsampling_factor=ctc_time_upsampling_factor,
         shards=tuple(descriptors),
     )
 
@@ -345,7 +359,7 @@ def load_feature_shard(
         minimum_input_length = len(token_ids) + sum(
             left == right for left, right in zip(token_ids, token_ids[1:], strict=False)
         )
-        if input_end - input_start < minimum_input_length:
+        if (input_end - input_start) * descriptor.ctc_time_upsampling_factor < minimum_input_length:
             raise ValueError(f"cached CTC lengths are infeasible for sample {sample_id}")
         samples.append(
             CachedSample(
@@ -425,6 +439,16 @@ def train_sharded_ctc_head(
         time_upsampling_factor=head_time_upsampling_factor,
     ).to(device=device, dtype=torch.float32)
     head_configuration = ctc_head_config(head)
+    required_time_factor = max(
+        train_cache.ctc_time_upsampling_factor,
+        validation_cache.ctc_time_upsampling_factor,
+    )
+    actual_time_factor = int(head_configuration["time_upsampling_factor"])
+    if actual_time_factor < required_time_factor:
+        raise ValueError(
+            "CTC Head time upsampling factor is smaller than the feature-cache "
+            f"manifest contract: head={actual_time_factor}, required={required_time_factor}"
+        )
     optimizer = torch.optim.AdamW(head.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
