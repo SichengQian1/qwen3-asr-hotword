@@ -49,3 +49,26 @@ def test_audit_rejects_unexpected_columns(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="missing required columns"):
         audit_training_tsv(tsv_path, audio_root)
+
+
+def test_audit_requires_explicit_opt_in_for_absolute_audio(tmp_path: Path) -> None:
+    audio_root = tmp_path / "unused-root"
+    audio_root.mkdir()
+    audio_path = tmp_path / "external" / "sample.wav"
+    audio_path.parent.mkdir()
+    audio_path.write_bytes(b"wav")
+    tsv_path = tmp_path / "external.tsv"
+    tsv_path.write_text(f"audio\ttext\n{audio_path}\tHola.\n", encoding="utf-8")
+
+    rejected = audit_training_tsv(tsv_path, audio_root)
+    accepted = audit_training_tsv(
+        tsv_path,
+        audio_root,
+        allow_absolute_audio=True,
+    )
+
+    assert rejected.status == "fail"
+    assert rejected.absolute_audio_values == 1
+    assert accepted.status == "pass"
+    assert accepted.absolute_audio_values == 1
+    assert accepted.resolved_audio_files == 1

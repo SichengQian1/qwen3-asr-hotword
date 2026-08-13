@@ -27,6 +27,14 @@ def main() -> int:
         help="Rows to inspect; 0 scans the complete TSV (default: 1000).",
     )
     parser.add_argument("--sample-count", type=int, default=3)
+    parser.add_argument(
+        "--allow-absolute-audio",
+        action="store_true",
+        help=(
+            "Permit absolute audio values after resolving/checking them. Required for "
+            "converted external Swift JSON sources; relative paths remain the default."
+        ),
+    )
     parser.add_argument("--output", help="Optional JSON report path.")
     args = parser.parse_args()
 
@@ -38,6 +46,7 @@ def main() -> int:
             text_column=args.text_column,
             max_records=args.max_records,
             sample_count=args.sample_count,
+            allow_absolute_audio=args.allow_absolute_audio,
         )
     except (FileNotFoundError, OSError, UnicodeError, ValueError) as error:
         print(f"TRAINING TSV AUDIT FAILED: {type(error).__name__}: {error}", file=sys.stderr)

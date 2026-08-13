@@ -44,6 +44,7 @@ def audit_training_tsv(
     text_column: str = "text",
     max_records: int = 1000,
     sample_count: int = 3,
+    allow_absolute_audio: bool = False,
 ) -> TsvAudit:
     path = Path(tsv_path).expanduser()
     root = Path(audio_root).expanduser()
@@ -75,8 +76,7 @@ def audit_training_tsv(
         ]
         if missing_columns:
             raise ValueError(
-                f"TSV is missing required columns {missing_columns}; "
-                f"found {sorted(fieldnames)}"
+                f"TSV is missing required columns {missing_columns}; found {sorted(fieldnames)}"
             )
 
         for row_number, row in enumerate(reader, start=2):
@@ -131,10 +131,8 @@ def audit_training_tsv(
         errors.append(f"{rows_scanned - rows_with_text} rows have empty text values")
     if missing_audio_files:
         errors.append(f"{missing_audio_files} relative audio paths did not resolve")
-    if absolute_audio_values:
-        errors.append(
-            f"{absolute_audio_values} audio values are absolute; expected relative paths"
-        )
+    if absolute_audio_values and not allow_absolute_audio:
+        errors.append(f"{absolute_audio_values} audio values are absolute; expected relative paths")
 
     total_text_characters = sum(text_lengths)
     return TsvAudit(
@@ -149,9 +147,7 @@ def audit_training_tsv(
         duplicate_audio_values=duplicate_audio_values,
         minimum_text_characters=min(text_lengths, default=0),
         maximum_text_characters=max(text_lengths, default=0),
-        mean_text_characters=(
-            total_text_characters / len(text_lengths) if text_lengths else 0.0
-        ),
+        mean_text_characters=(total_text_characters / len(text_lengths) if text_lengths else 0.0),
         samples=tuple(samples),
         errors=tuple(errors),
         status="pass" if not errors else "fail",

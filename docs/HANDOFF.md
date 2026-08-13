@@ -1,5 +1,87 @@
 # 工作交接记录
 
+## 0.12 2026-08-13 英西葡混训前置：西语独立处理第一阶段（代码完成，待工作区审计）
+
+英西葡混训不直接拼接原始数据，先分别完成英语和西语的独立TSV、音频、G2P、
+字典和Manifest审计。当前西语已知输入只有两份只读Swift JSON：
+
+```text
+MLS Spanish:
+/data/h00911716/code/ms-swift/self_test/datalist/es/mls/swift_librispeech_es.json
+
+Common Voice Spanish:
+/data/h00911716/code/ms-swift/self_test/datalist/es/cv/swift_cv_es.json
+
+Candidate G2P model:
+/host_home/star/q00933266/qwen3-asr-hotword/models/mfa/g2p/spanish_latin_america_mfa.zip
+```
+
+尚未生成或确认西语TSV、MFA字典、覆盖率报告、ready/review Manifest。MLS Spanish
+通常偏西班牙来源，Common Voice `es` 可能混合多个地区；当前统一只标记为`es`，
+不声明`es-AR`或纯拉美西语。Latin America MFA模型先作为候选标签器，其G2P成功率
+不能代替方言适配结论。
+
+Swift转换输出绝对容器音频路径。旧TSV审计默认把任何绝对路径判为失败，已新增
+显式`--allow-absolute-audio`：只有传入该开关才允许绝对路径，仍会逐条检查文件
+存在性；默认相对路径安全策略不变。原Swift JSON始终只读，所有产物进入新的
+`outputs/es_external_train_sources_v1`，不覆盖葡语或原始文件。
+
+工作区按顺序运行，先不要并行：
+
+```bash
+python scripts/convert_swift_json_to_tsv.py \
+  --input /data/h00911716/code/ms-swift/self_test/datalist/es/mls/swift_librispeech_es.json \
+  --output-tsv outputs/es_external_train_sources_v1/mls/source.tsv \
+  --expected-language Spanish \
+  --audio-prefix-rewrite /home_92=/host_home \
+  --check-audio \
+  --progress-every 10000
+
+python scripts/convert_swift_json_to_tsv.py \
+  --input /data/h00911716/code/ms-swift/self_test/datalist/es/cv/swift_cv_es.json \
+  --output-tsv outputs/es_external_train_sources_v1/common_voice/source.tsv \
+  --expected-language Spanish \
+  --audio-prefix-rewrite /home_92=/host_home \
+  --check-audio \
+  --progress-every 10000
+
+python scripts/audit_training_tsv.py \
+  --tsv outputs/es_external_train_sources_v1/mls/source.tsv \
+  --audio-root /host_home \
+  --allow-absolute-audio \
+  --max-records 0 \
+  --sample-count 5 \
+  --output outputs/es_external_train_sources_v1/mls/audio_audit_full.json
+
+python scripts/audit_training_tsv.py \
+  --tsv outputs/es_external_train_sources_v1/common_voice/source.tsv \
+  --audio-root /host_home \
+  --allow-absolute-audio \
+  --max-records 0 \
+  --sample-count 5 \
+  --output outputs/es_external_train_sources_v1/common_voice/audio_audit_full.json
+
+python scripts/prepare_mfa_g2p.py \
+  --tsv outputs/es_external_train_sources_v1/mls/source.tsv \
+  --output-dir outputs/es_external_train_sources_v1/mls/mfa_g2p \
+  --text-column text \
+  --max-records 0 \
+  --minimum-word-count 1
+
+python scripts/prepare_mfa_g2p.py \
+  --tsv outputs/es_external_train_sources_v1/common_voice/source.tsv \
+  --output-dir outputs/es_external_train_sources_v1/common_voice/mfa_g2p \
+  --text-column text \
+  --max-records 0 \
+  --minimum-word-count 1
+```
+
+需要返回两套`swift_json_conversion_summary.json`、`audio_audit_full.json`和
+`mfa_g2p/summary.json`。只有两套转换均无unexpected language、音频审计缺失为0，
+才继续各自运行MFA G2P、字典覆盖/phone OOV审计及完整Manifest；若路径前缀不匹配，
+先根据转换报告修正映射，不得跳过音频检查。下一步是西语第二阶段G2P与Manifest，
+不是三语合并或训练。
+
 ## 0.11 2026-08-04 v3结果复核与50条多关键词 Prompt 端到端验证（代码完成，待工作区运行）
 
 工作区 v3 CTC 专项资产和评分已完成：210条自然 Validation case、7组目标全部满足、
