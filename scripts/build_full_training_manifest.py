@@ -46,6 +46,14 @@ def main() -> int:
     parser.add_argument("--shard-size", type=int, default=5_000)
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--no-resume", action="store_true")
+    parser.add_argument(
+        "--allow-exact-dictionary-connectors",
+        action="store_true",
+        help=(
+            "Allow apostrophe/hyphen words when the dictionary supplies one exact, "
+            "in-vocabulary pronunciation. The conservative review policy remains the default."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -64,6 +72,7 @@ def main() -> int:
             shard_size=args.shard_size,
             workers=args.workers,
             resume=not args.no_resume,
+            allow_exact_dictionary_connectors=args.allow_exact_dictionary_connectors,
         )
     except (FileNotFoundError, OSError, RuntimeError, UnicodeError, ValueError) as error:
         print(

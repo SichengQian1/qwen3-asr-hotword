@@ -178,6 +178,29 @@ def test_full_manifest_supports_independent_train_corpus_identity(
         )
 
 
+def test_full_manifest_can_allow_exact_dictionary_connectors(tmp_path: Path) -> None:
+    tsv, audio_root, dictionary, vocab = _write_fixture(tmp_path)
+    output_dir = tmp_path / "connector-output"
+
+    summary = build_full_training_manifest(
+        tsv,
+        audio_root,
+        dictionary,
+        vocab,
+        output_dir,
+        shard_size=5,
+        workers=1,
+        allow_exact_dictionary_connectors=True,
+    )
+
+    assert summary.allow_exact_dictionary_connectors is True
+    assert summary.ready_records == 2
+    assert "unresolved_connector" not in summary.issue_counts
+    ready = _read_jsonl(output_dir / "train_ready.jsonl")
+    connector = next(record for record in ready if record["text"] == "Bem-vindo")
+    assert connector["training_ready"] is True
+
+
 def test_full_manifest_reviews_digit_fragments_instead_of_silently_dropping_them(
     tmp_path: Path,
 ) -> None:

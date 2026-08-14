@@ -1,6 +1,6 @@
 # 工作交接记录
 
-## 0.13 2026-08-14 美式英语独立处理：音频通过，MFA 唇化 OOV 修复待工区复审
+## 0.13 2026-08-14 美式英语独立处理：MFA复审通过，待完整Manifest
 
 美式英语 Swift JSON 已在工区独立转换并完成全量音频审计，输出目录为
 `outputs/en_external_train_sources_v1/swift_us_english`。原始 JSON 及音频路径为：
@@ -47,9 +47,38 @@ python scripts/audit_mfa_dictionary.py \
   --output-dir outputs/en_external_train_sources_v1/swift_us_english/mfa_audit_v2
 ```
 
-预期phone OOV归零；`training_labels_ready`仍会因为`h`和`lx`两个缺词保持false。
-这4个corpus token不得静默删除，完整Manifest阶段应将包含它们的记录写入
-`needs_review`。复审通过前不构建英语Manifest，也不与西语或葡语合并。
+工区复审确认phone OOV及其corpus-weighted count均归零；词型和token覆盖率分别为
+99.995656%和99.999864%。`training_labels_ready`只因为`h`和`lx`两个缺词保持
+false。这4个corpus token不得静默删除，完整Manifest阶段应将包含它们的记录写入
+`needs_review`。
+
+英语词表另有1,717个含撇号或连字符的唯一词，共17,671个corpus token；这些词在
+第一版字典中全部有且只有一个精确发音，缺失和歧义均为0。完整Manifest构建器因此
+增加显式`--allow-exact-dictionary-connectors`：启用后不再仅因连接符把已有唯一
+精确发音的英语词送入review，但字典缺失、多发音和phone OOV仍按原规则review。
+默认关闭，既有葡语和西语策略不变；该策略写入build config和summary，不能与默认
+策略的旧shard混用。
+
+英语完整Manifest命令：
+
+```bash
+python scripts/build_full_training_manifest.py \
+  --tsv outputs/en_external_train_sources_v1/swift_us_english/source.tsv \
+  --audio-root /host_home \
+  --dictionary outputs/en_external_train_sources_v1/swift_us_english/mfa_g2p/swift_us_english_english_us_mfa.v1.dict \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir outputs/en_us_swift_full_manifest_v1 \
+  --language en-US \
+  --dataset swift_us_english \
+  --id-prefix swift_us_english_row \
+  --split unsplit \
+  --allow-exact-dictionary-connectors \
+  --shard-size 5000 \
+  --workers 16
+```
+
+该构建仍不与西语或葡语合并，也不生成正式96/2/2 split；先回传summary、ready/review
+记录数与小时数，再做Temporal 2×可恢复审计。
 
 ## 0.12 2026-08-13 英西葡混训前置：西语独立处理第一阶段（代码完成，待工作区审计）
 

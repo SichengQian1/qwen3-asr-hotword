@@ -62,6 +62,7 @@ class FullManifestSummary:
     dataset: str
     id_prefix: str
     split: str
+    allow_exact_dictionary_connectors: bool
     shard_size: int
     workers: int
     source_records: int
@@ -87,6 +88,8 @@ def assemble_full_label(
     text: str,
     dictionary: dict[str, tuple[str, ...]],
     vocab: PhonemeVocab,
+    *,
+    allow_exact_dictionary_connectors: bool = False,
 ) -> LabelAssembly:
     words = extract_word_tokens(text)
     issues: list[dict[str, str | None]] = []
@@ -101,7 +104,7 @@ def assemble_full_label(
     for word in words:
         if word == "h":
             issues.append({"reason": "standalone_h", "detail": word})
-        if "-" in word or "'" in word:
+        if ("-" in word or "'" in word) and not allow_exact_dictionary_connectors:
             issues.append({"reason": "unresolved_connector", "detail": word})
 
         pronunciations = dictionary.get(word)
@@ -172,6 +175,7 @@ def build_full_training_manifest(
     shard_size: int = 5_000,
     workers: int = 16,
     resume: bool = True,
+    allow_exact_dictionary_connectors: bool = False,
 ) -> FullManifestSummary:
     tsv = Path(tsv_path).expanduser()
     root = Path(audio_root).expanduser()
@@ -219,6 +223,8 @@ def build_full_training_manifest(
         build_settings["id_prefix"] = id_prefix
     if split != DEFAULT_SPLIT:
         build_settings["split"] = split
+    if allow_exact_dictionary_connectors:
+        build_settings["allow_exact_dictionary_connectors"] = True
     build_config = _build_config(
         tsv,
         root,
@@ -276,6 +282,7 @@ def build_full_training_manifest(
                         dataset=dataset,
                         id_prefix=id_prefix,
                         split=split,
+                        allow_exact_dictionary_connectors=allow_exact_dictionary_connectors,
                         dictionary=dictionary,
                         vocab=vocab,
                     ),
@@ -374,6 +381,7 @@ def build_full_training_manifest(
         dataset=dataset,
         id_prefix=id_prefix,
         split=split,
+        allow_exact_dictionary_connectors=allow_exact_dictionary_connectors,
         shard_size=shard_size,
         workers=workers,
         source_records=source_records,
@@ -404,6 +412,7 @@ def _process_source_row(
     dataset: str,
     id_prefix: str,
     split: str,
+    allow_exact_dictionary_connectors: bool,
     dictionary: dict[str, tuple[str, ...]],
     vocab: PhonemeVocab,
 ) -> dict[str, Any]:
@@ -413,7 +422,12 @@ def _process_source_row(
     if not source.text:
         issues.append({"reason": "empty_text", "detail": None})
 
-    label = assemble_full_label(source.text, dictionary, vocab)
+    label = assemble_full_label(
+        source.text,
+        dictionary,
+        vocab,
+        allow_exact_dictionary_connectors=allow_exact_dictionary_connectors,
+    )
     issues.extend(label.issues)
     relative_path = Path(source.audio_relative)
     audio_path = relative_path if relative_path.is_absolute() else root / relative_path
