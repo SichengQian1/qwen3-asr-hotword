@@ -1,5 +1,56 @@
 # 工作交接记录
 
+## 0.13 2026-08-14 美式英语独立处理：音频通过，MFA 唇化 OOV 修复待工区复审
+
+美式英语 Swift JSON 已在工区独立转换并完成全量音频审计，输出目录为
+`outputs/en_external_train_sources_v1/swift_us_english`。原始 JSON 及音频路径为：
+
+```text
+Swift JSON:
+/host_home/z00841352/27A/data/en/json/swift_en_美式英语.json
+
+Audio prefix:
+/host_home/z00841352/27A/data/en/untar_files/美式英语
+```
+
+转换和音频审计均通过：389,738条记录全部写入，语言字段全部为`English`，
+389,738个WAV全部存在，空audio/text、缺失和重复音频均为0。词表提取共得到
+2,940,208个word token和46,041个唯一词，数字片段为0。
+
+候选English US MFA模型和第一版生成字典的SHA256为：
+
+```text
+english_us_mfa.zip:
+9923b38d59a8b3e3e322f225c52523c2a6248e5ffc9fd89be151ade2dc97cb02
+
+words.txt:
+15546c3ab1dc7136a732bd25524e0681c88a4bd2e484915db1d03b4526d4ecfe
+
+swift_us_english_english_us_mfa.v1.dict:
+2dd3c3e045eabaeac4666a4a99cf472bf7a4ef816adf35943a072bd2262c23e2
+```
+
+MFA为46,041个输入词生成46,039个唯一发音，无额外词和重复发音；只缺`h`
+（corpus count 3）和`lx`（count 1）。初次v0.2共享CTC词表审计还发现590个
+发音包含同一个OOV符号`ʷ`，corpus-weighted count为12,460。该符号是MFA附在
+辅音后的唇化修饰符，例如`kʷ`、`tʷ`和`ɟʷ`；共享词表已有普通`w`，因此phone
+归一化现将`ʷ`展开为`w`，得到`k w`、`t w`和`ɟ w`，无需重新运行MFA G2P。
+
+工区拉取本提交后只需重新运行字典审计：
+
+```bash
+python scripts/audit_mfa_dictionary.py \
+  --words outputs/en_external_train_sources_v1/swift_us_english/mfa_g2p/words.txt \
+  --word-counts outputs/en_external_train_sources_v1/swift_us_english/mfa_g2p/word_counts.tsv \
+  --dictionary outputs/en_external_train_sources_v1/swift_us_english/mfa_g2p/swift_us_english_english_us_mfa.v1.dict \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir outputs/en_external_train_sources_v1/swift_us_english/mfa_audit_v2
+```
+
+预期phone OOV归零；`training_labels_ready`仍会因为`h`和`lx`两个缺词保持false。
+这4个corpus token不得静默删除，完整Manifest阶段应将包含它们的记录写入
+`needs_review`。复审通过前不构建英语Manifest，也不与西语或葡语合并。
+
 ## 0.12 2026-08-13 英西葡混训前置：西语独立处理第一阶段（代码完成，待工作区审计）
 
 英西葡混训不直接拼接原始数据，先分别完成英语和西语的独立TSV、音频、G2P、
