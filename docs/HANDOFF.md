@@ -1,5 +1,69 @@
 # 工作交接记录
 
+## 0.15 2026-08-17 流式端到端热词 RAG 评测（代码完成，待 H200 实跑）
+
+本轮暂停西语数据处理，新增独立的 Qwen3-ASR-1.7B 流式端到端热词
+评测，不改训练数据、模型权重、CTC checkpoint、Manifest 或既有离线结果。
+
+已对照 Qwen 官方示例和当前上游源码确认：流式仅支持 vLLM，默认每个
+2 秒 chunk 累计重放全部已收到音频；前 2 个 chunk 无文本 prefix，从第 3 个
+chunk 开始回退最后 5 个 `processor.tokenizer` token；尾音通过
+`finish_streaming_transcribe` 不补零处理。官方接口没有流中动态 context
+setter，所以本评测把同轮候选注入明确标记为 experimental state refresh：通过
+公开 initializer 构造临时 state，只刷新活跃 state 的 Prompt 元数据。安装版本
+字段不兼容时立即失败，不会假装同轮生效或静默延迟。
+
+新增：
+
+- `src/qwen_hotword/inference/streaming_core.py`：2 秒调度、尾音 flush、tokenizer
+  5-token rollback、fixed/unfixed 记录、因果候选、同轮 Prompt、逐 chunk
+  时间线、延迟与失败分类。
+- `src/qwen_hotword/inference/streaming_backends.py`：官方 vLLM streaming adapter，以及
+  独立 Transformers Qwen Encoder + 封存 Temporal 2× CTC Head 的累计音频检测器。
+- `src/qwen_hotword/inference/streaming_rag.py`：统一 A/B/C/D/E、单样本原子分片
+  resume、Recall/WER/CER、边界、延迟、稳定性与失败汇总。
+- `src/qwen_hotword/inference/streaming_boundary.py`：只接受强制对齐或人工确认
+  时间戳，通过运行时前置静音生成不覆盖原音频的 2 秒相位变体。
+- `scripts/run_streaming_rag_evaluation.py`
+- `scripts/build_streaming_boundary_eval.py`
+- `tests/test_streaming_core.py`
+- `tests/test_streaming_boundary.py`
+- `tests/test_streaming_rag.py`
+- `docs/STREAMING_RAG_EVAL.md`
+
+原始端到端集复用离线 `sample_selection.json` 和 A/B 预测；C/D/E 重新做真实
+流式推理。D 每一步只读当前累计音频，没有候选 TTL/永久保留；E 的
+Oracle 只来自该 case 的 expected IDs，不进入 D。每个 chunk 记录 CTC Top-K/
+置信度、实际注入、Prompt 生效 chunk、fixed prefix、回退 token IDs/文本、
+unfixed/完整 partial、热词状态和文本 diff。
+
+无强制对齐的原始集不会伪造声学结束时间，因此该集的 Recall/WER/CER
+有效，基于声学结束的 latency 保持 `null`。边界资产默认强制覆盖
+chunk 中间、边界前、跨边界、边界后、尾音、多词短语、跨多 chunk 长热词、
+多热词和负例；缺类别时拒绝标记为完整基线。
+
+本地不加载完整 Qwen/vLLM。已完成 fake backend 和纯 CPU 单测，覆盖空/
+短于/等于/长于 2 秒、尾音、前两 chunk 无 prefix、tokenizer 级 5-token
+回退、多字节文本、当轮候选、Oracle 隔离、边界分桶、时间线失败归因和
+可恢复分片。H200 尚未完成的项目是安装版本 API 实测、50条 smoke、100条
+完整原始集和人工/强制对齐边界集。
+
+本地实际验证：
+
+```text
+Ruff（全仓库）: pass
+Pytest 定向:    pass, 17 tests
+Pytest 全仓库: pass, 153 tests
+Mypy 新增四个 source 模块: pass
+Mypy 全仓库: 仍有 11 个既有 Torch/类型注解错误，新模块 0 个
+CLI --help smoke: pass
+git diff --check: pass
+```
+
+完整工作区命令、输入路径、边界 spec 格式、输出和恢复规则见
+`docs/STREAMING_RAG_EVAL.md`。第一轮必须保留 2/2/5 原始基线，报告后再决定是否
+测 1 秒 chunk 或扩大 unfixed token 数。
+
 ## 0.14 2026-08-17 阿根廷/拉普拉塔西语：原始结构复核与专用转换器
 
 西语新增两套只读来源，数据根目录为：
