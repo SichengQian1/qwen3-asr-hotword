@@ -1,5 +1,66 @@
 # 工作交接记录
 
+## 0.14 2026-08-17 阿根廷/拉普拉塔西语：原始结构复核与专用转换器
+
+西语新增两套只读来源，数据根目录为：
+
+```text
+/host_home/star/q00933266/data/es_ar_sources_v1
+```
+
+SLR61解压目录共有5,919个WAV。三个阿根廷索引文件均为无表头两列TSV，不能用
+`csv.DictReader`读取，否则每个文件会少算首行。正确索引规模为female 3,921、
+male 1,818、`es-ar` weather 90，共5,829条阿根廷西语；另外90个WAV属于压缩包内
+的`es-es`天气语音，必须明确排除。`extracted/line_index.tsv`是male索引的重复副本，
+也不得再次纳入。
+
+Common Voice Rioplatense v26包含train 9,903、dev 266、test 224，共10,393条，和
+`clips/`下10,393个MP3一致。该语料的地域标签覆盖阿根廷、乌拉圭、巴拉圭和玻利维亚
+东部，不能宣称为纯阿根廷西语。必须保留官方train/dev/test和`client_id`，并审计
+跨split说话人重叠；官方test后续保持封存，不能重分到训练集。
+
+新增两个专用转换入口：
+
+```text
+scripts/convert_slr61_argentinian_to_tsv.py
+scripts/convert_common_voice_rioplatense_to_tsv.py
+```
+
+两者输出规范TSV时均保留`source_id`、`speaker_id`、`source_split`、`language`、
+`dialect`和来源元数据。主语言仍写`es`；方言只作为来源元数据记录为`argentinian`
+或`rioplatense`，不把Rioplatense误标为纯`es-AR`。当前只做转换、全量音频/库存及
+split审计；审计结果确认前不运行MFA G2P或完整Manifest。
+
+工区拉取后先记录Common Voice归档SHA256，再运行转换：
+
+```bash
+ES_AR_DATA_ROOT=/host_home/star/q00933266/data/es_ar_sources_v1
+ES_AR_OUTPUT_ROOT=outputs/es_ar_train_sources_v1
+
+sha256sum \
+  "$ES_AR_DATA_ROOT/common_voice_rioplatense_v26/downloads/es-Rioplatense.tar.gz" \
+  > "$ES_AR_DATA_ROOT/common_voice_rioplatense_v26/downloads/common_voice_rioplatense_v26_sha256.txt"
+
+python scripts/convert_slr61_argentinian_to_tsv.py \
+  --source-root "$ES_AR_DATA_ROOT/slr61_argentinian_spanish" \
+  --output-tsv "$ES_AR_OUTPUT_ROOT/slr61/source.tsv" \
+  --check-audio \
+  --scan-audio-inventory
+
+python scripts/convert_common_voice_rioplatense_to_tsv.py \
+  --corpus-root "$ES_AR_DATA_ROOT/common_voice_rioplatense_v26/extracted/es-Rioplatense" \
+  --output-tsv "$ES_AR_OUTPUT_ROOT/common_voice_rioplatense_v26/source.tsv" \
+  --check-audio \
+  --scan-audio-inventory
+```
+
+先回传`slr61/slr61_conversion_summary.json`和
+`common_voice_rioplatense_v26/common_voice_conversion_summary.json`。SLR61应精确
+写入5,829条、缺失/重复为0、识别并排除90条`es-es`且无其他未索引WAV；Common
+Voice应精确写入10,393条、三组split规模不变、缺失/重复/未引用MP3为0。若Common
+Voice出现跨split说话人重叠，转换器会返回`warn`；先决定是否沿用官方split或重新做
+说话人隔离，不能直接继续G2P和Manifest。
+
 ## 0.13 2026-08-14 美式英语独立处理：MFA复审通过，待完整Manifest
 
 美式英语 Swift JSON 已在工区独立转换并完成全量音频审计，输出目录为
