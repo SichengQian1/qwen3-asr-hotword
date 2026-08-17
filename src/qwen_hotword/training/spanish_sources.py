@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import filecmp
 import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
@@ -45,10 +46,16 @@ class Slr61ConversionSummary:
     dialect_counts: dict[str, int]
     audio_extension_counts: dict[str, int]
     duplicate_source_ids: int
+    duplicate_weather_alias_records: int
+    verified_duplicate_weather_audio_files: int
+    duplicate_weather_text_mismatches: int
+    duplicate_weather_audio_mismatches: int
+    unexpected_duplicate_source_ids: int
     duplicate_audio_values: int
     missing_audio_files: int
     audio_files_under_root: int
     indexed_audio_files: int
+    excluded_duplicate_argentinian_weather_audio_files: int
     excluded_peninsular_weather_audio_files: int
     unexpected_unindexed_audio_files: int
     issue_counts: dict[str, int]
@@ -113,13 +120,19 @@ def convert_slr61_argentinian_to_tsv(
         input_rows.extend((subset, source_id, text) for source_id, text in rows)
 
     rows_to_write: list[dict[str, str]] = []
-    source_ids: set[str] = set()
+    source_records_by_id: dict[str, tuple[str, str, Path]] = {}
     audio_values: set[str] = set()
+    duplicate_weather_alias_audio: set[Path] = set()
     speakers: set[str] = set()
     gender_counts: Counter[str] = Counter()
     dialect_counts: Counter[str] = Counter()
     extension_counts: Counter[str] = Counter()
     duplicate_source_ids = 0
+    duplicate_weather_alias_records = 0
+    verified_duplicate_weather_audio_files = 0
+    duplicate_weather_text_mismatches = 0
+    duplicate_weather_audio_mismatches = 0
+    unexpected_duplicate_source_ids = 0
     duplicate_audio_values = 0
     missing_audio_files = 0
 
@@ -135,9 +148,34 @@ def convert_slr61_argentinian_to_tsv(
         )
         audio_path = audio_root / relative_audio
         audio_value = str(audio_path)
-        if source_id in source_ids:
+        previous = source_records_by_id.get(source_id)
+        if previous is not None:
             duplicate_source_ids += 1
-            issues["duplicate_source_id"] += 1
+            previous_subset, previous_text, previous_audio_path = previous
+            expected_weather_alias = (
+                subset == "weather_es_ar" and previous_subset == "female"
+            )
+            if not expected_weather_alias:
+                unexpected_duplicate_source_ids += 1
+                issues["unexpected_duplicate_source_id"] += 1
+                continue
+
+            duplicate_weather_alias_records += 1
+            duplicate_weather_alias_audio.add(audio_path)
+            if text != previous_text:
+                duplicate_weather_text_mismatches += 1
+                issues["duplicate_weather_text_mismatch"] += 1
+            if check_audio:
+                if not audio_path.is_file():
+                    missing_audio_files += 1
+                    issues["missing_audio_file"] += 1
+                elif previous_audio_path.is_file() and filecmp.cmp(
+                    previous_audio_path, audio_path, shallow=False
+                ):
+                    verified_duplicate_weather_audio_files += 1
+                else:
+                    duplicate_weather_audio_mismatches += 1
+                    issues["duplicate_weather_audio_mismatch"] += 1
             continue
         if audio_value in audio_values:
             duplicate_audio_values += 1
@@ -147,7 +185,7 @@ def convert_slr61_argentinian_to_tsv(
             missing_audio_files += 1
             issues["missing_audio_file"] += 1
 
-        source_ids.add(source_id)
+        source_records_by_id[source_id] = (subset, text, audio_path)
         audio_values.add(audio_value)
         speakers.add(speaker_id)
         gender_counts[gender] += 1
@@ -173,7 +211,7 @@ def convert_slr61_argentinian_to_tsv(
 
     inventory = set(audio_root.rglob("*.wav")) if scan_audio_inventory else set()
     referenced = {Path(value) for value in audio_values}
-    unindexed = inventory - referenced
+    unindexed = inventory - referenced - duplicate_weather_alias_audio
     excluded_peninsular = {
         path for path in unindexed if _is_relative_to(path, audio_root / "es-es")
     }
@@ -196,16 +234,24 @@ def convert_slr61_argentinian_to_tsv(
         dialect_counts=_sorted_counter(dialect_counts),
         audio_extension_counts=_sorted_counter(extension_counts),
         duplicate_source_ids=duplicate_source_ids,
+        duplicate_weather_alias_records=duplicate_weather_alias_records,
+        verified_duplicate_weather_audio_files=verified_duplicate_weather_audio_files,
+        duplicate_weather_text_mismatches=duplicate_weather_text_mismatches,
+        duplicate_weather_audio_mismatches=duplicate_weather_audio_mismatches,
+        unexpected_duplicate_source_ids=unexpected_duplicate_source_ids,
         duplicate_audio_values=duplicate_audio_values,
         missing_audio_files=missing_audio_files,
         audio_files_under_root=len(inventory),
         indexed_audio_files=len(referenced),
+        excluded_duplicate_argentinian_weather_audio_files=len(
+            duplicate_weather_alias_audio
+        ),
         excluded_peninsular_weather_audio_files=len(excluded_peninsular),
         unexpected_unindexed_audio_files=len(unexpected_unindexed),
         issue_counts=_sorted_counter(issues),
         status="pass"
         if rows_to_write
-        and source_records == len(rows_to_write)
+        and source_records == len(rows_to_write) + duplicate_weather_alias_records
         and not issues
         and (not check_audio or missing_audio_files == 0)
         else "warn",

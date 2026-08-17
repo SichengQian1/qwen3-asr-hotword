@@ -58,7 +58,9 @@ def test_convert_slr61_includes_first_headerless_rows_and_excludes_es_es(
     (extracted / "es-ar").mkdir(parents=True)
     (extracted / "es-es").mkdir(parents=True)
     (downloads / "line_index_female.tsv").write_text(
-        "arf_05679_0001\t¿Me podés ayudar?\n", encoding="utf-8"
+        "arf_05679_0001\t¿Me podés ayudar?\n"
+        "arf_02485_0001\tHace doce grados con sol\n",
+        encoding="utf-8",
     )
     (downloads / "line_index_male.tsv").write_text(
         "arm_09697_0001\tTengo un nuevo jabón\n", encoding="utf-8"
@@ -67,8 +69,9 @@ def test_convert_slr61_includes_first_headerless_rows_and_excludes_es_es(
         "arf_02485_0001\tHace doce grados con sol\n", encoding="utf-8"
     )
     (extracted / "arf_05679_0001.wav").write_bytes(b"audio")
+    (extracted / "arf_02485_0001.wav").write_bytes(b"weather")
     (extracted / "arm_09697_0001.wav").write_bytes(b"audio")
-    (extracted / "es-ar" / "arf_02485_0001.wav").write_bytes(b"audio")
+    (extracted / "es-ar" / "arf_02485_0001.wav").write_bytes(b"weather")
     (extracted / "es-es" / "esw_03397_0001.wav").write_bytes(b"excluded")
     output_tsv = tmp_path / "output" / "source.tsv"
 
@@ -80,15 +83,20 @@ def test_convert_slr61_includes_first_headerless_rows_and_excludes_es_es(
     )
 
     assert summary.status == "pass"
-    assert summary.source_records == 3
+    assert summary.source_records == 4
     assert summary.written_records == 3
     assert summary.input_record_counts == {
-        "female": 1,
+        "female": 2,
         "male": 1,
         "weather_es_ar": 1,
     }
-    assert summary.audio_files_under_root == 4
+    assert summary.duplicate_source_ids == 1
+    assert summary.duplicate_weather_alias_records == 1
+    assert summary.verified_duplicate_weather_audio_files == 1
+    assert summary.unexpected_duplicate_source_ids == 0
+    assert summary.audio_files_under_root == 5
     assert summary.indexed_audio_files == 3
+    assert summary.excluded_duplicate_argentinian_weather_audio_files == 1
     assert summary.excluded_peninsular_weather_audio_files == 1
     assert summary.unexpected_unindexed_audio_files == 0
     with output_tsv.open(encoding="utf-8", newline="") as handle:
@@ -96,11 +104,43 @@ def test_convert_slr61_includes_first_headerless_rows_and_excludes_es_es(
     assert tuple(rows[0]) == CANONICAL_FIELDS
     assert [row["source_id"] for row in rows] == [
         "arf_05679_0001",
-        "arm_09697_0001",
         "arf_02485_0001",
+        "arm_09697_0001",
     ]
     assert {row["language"] for row in rows} == {"es"}
     assert {row["dialect"] for row in rows} == {"argentinian"}
+
+
+def test_convert_slr61_warns_when_weather_alias_differs(tmp_path: Path) -> None:
+    source_root = tmp_path / "slr61"
+    downloads = source_root / "downloads"
+    extracted = source_root / "extracted"
+    downloads.mkdir(parents=True)
+    (extracted / "es-ar").mkdir(parents=True)
+    (downloads / "line_index_female.tsv").write_text(
+        "arf_02485_0001\tHace doce grados con sol\n", encoding="utf-8"
+    )
+    (downloads / "line_index_male.tsv").write_text(
+        "arm_09697_0001\tTexto masculino\n", encoding="utf-8"
+    )
+    (downloads / "es_ar_line_index_weather.tsv").write_text(
+        "arf_02485_0001\tTexto diferente\n", encoding="utf-8"
+    )
+    (extracted / "arf_02485_0001.wav").write_bytes(b"original")
+    (extracted / "arm_09697_0001.wav").write_bytes(b"audio")
+    (extracted / "es-ar" / "arf_02485_0001.wav").write_bytes(b"different")
+
+    summary = convert_slr61_argentinian_to_tsv(
+        source_root,
+        tmp_path / "source.tsv",
+        check_audio=True,
+        scan_audio_inventory=True,
+    )
+
+    assert summary.status == "warn"
+    assert summary.duplicate_weather_text_mismatches == 1
+    assert summary.duplicate_weather_audio_mismatches == 1
+    assert summary.verified_duplicate_weather_audio_files == 0
 
 
 def test_convert_common_voice_preserves_official_splits_and_speakers(

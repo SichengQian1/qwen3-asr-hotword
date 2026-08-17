@@ -9,10 +9,12 @@
 ```
 
 SLR61解压目录共有5,919个WAV。三个阿根廷索引文件均为无表头两列TSV，不能用
-`csv.DictReader`读取，否则每个文件会少算首行。正确索引规模为female 3,921、
-male 1,818、`es-ar` weather 90，共5,829条阿根廷西语；另外90个WAV属于压缩包内
-的`es-es`天气语音，必须明确排除。`extracted/line_index.tsv`是male索引的重复副本，
-也不得再次纳入。
+`csv.DictReader`读取，否则每个文件会少算首行。原始索引规模为female 3,921、
+male 1,818、`es-ar` weather 90，共5,829行；实测weather的90个`source_id`已经全部
+包含在female索引中，因此去重后是5,739条唯一阿根廷语音。库存中的另外180个WAV
+分别是这90条`es-ar` weather的重复副本和90条`es-es`天气语音。转换器必须逐一验证
+重复weather的文本和WAV内容相同，并明确排除`es-es`。`extracted/line_index.tsv`是
+male索引的重复副本，也不得再次纳入。
 
 Common Voice Rioplatense v26包含train 9,903、dev 266、test 224，共10,393条，和
 `clips/`下10,393个MP3一致。该语料的地域标签覆盖阿根廷、乌拉圭、巴拉圭和玻利维亚
@@ -55,8 +57,9 @@ python scripts/convert_common_voice_rioplatense_to_tsv.py \
 ```
 
 先回传`slr61/slr61_conversion_summary.json`和
-`common_voice_rioplatense_v26/common_voice_conversion_summary.json`。SLR61应精确
-写入5,829条、缺失/重复为0、识别并排除90条`es-es`且无其他未索引WAV；Common
+`common_voice_rioplatense_v26/common_voice_conversion_summary.json`。SLR61应读取
+5,829个原始索引行、精确写入5,739条唯一语音，逐一验证并排除90条相同的`es-ar`
+weather副本，再排除90条`es-es`，缺失、内容不一致和其他未索引WAV均为0；Common
 Voice应精确写入10,393条、三组split规模不变、缺失/重复/未引用MP3为0。若Common
 Voice出现跨split说话人重叠，转换器会返回`warn`；先决定是否沿用官方split或重新做
 说话人隔离，不能直接继续G2P和Manifest。
