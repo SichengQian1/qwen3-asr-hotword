@@ -78,6 +78,23 @@ python scripts/diagnose_spanish_mfa_audit.py \
 每个输入目录会生成`spanish_diagnostics.json`。诊断结果确认前不要构建西语Manifest，
 也不要全局删除组合波浪号；葡语鼻元音仍依赖这些组合符。
 
+实际诊断确认phone OOV只有`U+0303 COMBINING TILDE`，来自西语G2P的非音位性
+鼻化；该符号后续只在西语修复字典内处理。缺词主要来自MFA模型不接受acute accent、
+`ñ`和`ü`输入。acute accent可以用去重音代理词重新G2P，但不能把`ñ`直接折叠成
+`n`，否则会把`/ɲ/`错误变成`/n/`。已加入小型代理拼写探针：
+
+```bash
+conda run --no-capture-output -n aligner mfa g2p \
+  --num_pronunciations 1 \
+  configs/phonemes/spanish_latin_america_repair_probe.v1.txt \
+  models/mfa/g2p/spanish_latin_america_mfa.zip \
+  outputs/spanish_latin_america_repair_probe.v1.dict
+
+cat outputs/spanish_latin_america_repair_probe.v1.dict
+```
+
+探针用于比较`ny`/`ni`对`ñ`以及`gw`对`gü`的输出；结果确认前不生成正式修复字典。
+
 ## 0.13 2026-08-14 美式英语独立处理：MFA复审通过，待完整Manifest
 
 美式英语 Swift JSON 已在工区独立转换并完成全量音频审计，输出目录为
