@@ -64,6 +64,20 @@ Voice应精确写入10,393条、三组split规模不变、缺失/重复/未引�
 Voice出现跨split说话人重叠，转换器会返回`warn`；先决定是否沿用官方split或重新做
 说话人隔离，不能直接继续G2P和Manifest。
 
+首轮SLR61和Rioplatense MFA字典审计发现大量带重音或`ñ`的输入词没有生成发音，
+且phone OOV在终端显示为空白组合符。新增`diagnose_spanish_mfa_audit.py`，用于区分
+只去acute accent即可映射、必须去全部组合符才可映射和仍不可恢复的缺词，并把不可见
+OOV的Unicode码点写入JSON。诊断只读现有字典和审计TSV，不修改或修复字典：
+
+```bash
+python scripts/diagnose_spanish_mfa_audit.py \
+  --audit-dir outputs/es_ar_train_sources_v1/slr61/mfa_audit_v1 \
+  --audit-dir outputs/es_ar_train_sources_v1/common_voice_rioplatense_v26/mfa_audit_v1
+```
+
+每个输入目录会生成`spanish_diagnostics.json`。诊断结果确认前不要构建西语Manifest，
+也不要全局删除组合波浪号；葡语鼻元音仍依赖这些组合符。
+
 ## 0.13 2026-08-14 美式英语独立处理：MFA复审通过，待完整Manifest
 
 美式英语 Swift JSON 已在工区独立转换并完成全量音频审计，输出目录为
