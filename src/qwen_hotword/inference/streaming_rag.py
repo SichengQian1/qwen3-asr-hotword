@@ -215,6 +215,7 @@ def run_streaming_rag_evaluation(
                     chunk_size_sec=chunk_size_sec,
                     unfixed_chunk_num=unfixed_chunk_num,
                     unfixed_token_num=unfixed_token_num,
+                    asr_language=language,
                 )
                 _write_shard(shard_dir, group, sample.case_id, result, rows)
             results.append(result)
@@ -322,7 +323,7 @@ def _load_boundary_samples(
         if {item.hotword_id for item in timings} != set(expected):
             raise ValueError(f"boundary timings do not match expected IDs at row {line_number}")
         duration = raw.get("audio_duration_sec")
-        if not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration <= 0:
+        if not isinstance(duration, int | float) or isinstance(duration, bool) or duration <= 0:
             raise ValueError(f"boundary row {line_number} has invalid audio_duration_sec")
         if any(
             not 0 <= item.start_sec < item.end_sec <= float(duration) + 0.05 for item in timings
@@ -500,9 +501,9 @@ def _group_delta(
         right_value = groups.get(right, {}).get(metric)
         result[metric] = (
             float(left_value) - float(right_value)
-            if isinstance(left_value, (int, float))
+            if isinstance(left_value, int | float)
             and not isinstance(left_value, bool)
-            and isinstance(right_value, (int, float))
+            and isinstance(right_value, int | float)
             and not isinstance(right_value, bool)
             else None
         )

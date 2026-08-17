@@ -288,6 +288,7 @@ def run_streaming_sample(
     unfixed_chunk_num: int = 2,
     unfixed_token_num: int = 5,
     prompt_effect_policy: str = "same_step_state_refresh",
+    asr_language: str | None = None,
 ) -> tuple[dict[str, object], tuple[dict[str, object], ...]]:
     if group not in {"C", "D", "E"}:
         raise ValueError("streaming group must be C, D, or E")
@@ -298,9 +299,10 @@ def run_streaming_sample(
         sample_rate=sample_rate,
         chunk_size_sec=chunk_size_sec,
     )
+    official_language = asr_language or sample.language
     state = backend.init_streaming_state(
         context="",
-        language=sample.language,
+        language=official_language,
         unfixed_chunk_num=unfixed_chunk_num,
         unfixed_token_num=unfixed_token_num,
         chunk_size_sec=chunk_size_sec,
@@ -344,7 +346,7 @@ def run_streaming_sample(
                 backend,
                 state,
                 prompt=prompt,
-                language=sample.language,
+                language=official_language,
                 unfixed_chunk_num=unfixed_chunk_num,
                 unfixed_token_num=unfixed_token_num,
                 chunk_size_sec=chunk_size_sec,

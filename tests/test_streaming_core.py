@@ -49,6 +49,7 @@ class FakeBackend:
         self.tokenizer = PieceTokenizer()
         self.outputs = outputs
         self.contexts: list[str] = []
+        self.languages: list[str] = []
         self.finish_calls = 0
 
     def init_streaming_state(
@@ -61,6 +62,7 @@ class FakeBackend:
         chunk_size_sec: float,
     ) -> FakeState:
         del unfixed_chunk_num, unfixed_token_num, chunk_size_sec
+        self.languages.append(language)
         return FakeState(
             prompt_raw=f"PROMPT:{context}",
             context=context,
@@ -180,6 +182,30 @@ def test_tail_flush_runs_and_current_ctc_candidate_affects_same_step() -> None:
     assert timeline[-1]["prompt_effective_chunk"] == 2
     assert backend.contexts[-1] == "Reference only: hot word"
     assert result["matched_expected_hotword_ids"] == ["hot"]
+
+
+def test_explicit_asr_language_overrides_manifest_language() -> None:
+    backend = FakeBackend(["olá"])
+    sample = StreamingSample(
+        case_id="case-pt",
+        sample_id="sample-pt",
+        reference_text="olá",
+        language="pt-BR",
+        expected_hotword_ids=(),
+        expected_surfaces=(),
+        active_hotword_ids=("hot",),
+    )
+    run_streaming_sample(
+        backend=backend,
+        waveform=[0.0] * 32_000,
+        sample=sample,
+        group="C",
+        hotword_surfaces={"hot": "palavra"},
+        ctc_detector=None,
+        prompt_template="Reference only: {hotwords}",
+        asr_language="Portuguese",
+    )
+    assert backend.languages == ["Portuguese"]
 
 
 def test_empty_audio_finishes_without_creating_a_fake_chunk() -> None:

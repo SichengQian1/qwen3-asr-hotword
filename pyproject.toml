@@ -60,6 +60,7 @@ packages = ["qwen_hotword"]
 [[tool.mypy.overrides]]
 module = [
   "accelerate",
+  "librosa",
   "phonemizer",
   "pyarrow",
   "qwen_asr",
