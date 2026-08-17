@@ -28,6 +28,13 @@ def main() -> int:
     parser.add_argument("--hotwords", required=True)
     parser.add_argument("--cases", required=True)
     parser.add_argument("--offline-rag-dir", required=True)
+    parser.add_argument(
+        "--offline-format",
+        choices=("retrieved_v2", "multi_nested_v3"),
+        default="retrieved_v2",
+    )
+    parser.add_argument("--hotword-families")
+    parser.add_argument("--ctc-report")
     parser.add_argument("--ctc-checkpoint", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
@@ -51,7 +58,11 @@ def main() -> int:
     parser.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.70)
-    parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        help="Must match the offline report; omitted means inherit its recorded value.",
+    )
     parser.add_argument("--seed", type=int, default=20_260_817)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--quiet-progress", action="store_true")
@@ -65,6 +76,9 @@ def main() -> int:
             hotword_table_path=args.hotwords,
             cases_path=args.cases,
             offline_rag_dir=args.offline_rag_dir,
+            offline_format=args.offline_format,
+            hotword_families_path=args.hotword_families,
+            ctc_report_path=args.ctc_report,
             ctc_checkpoint_path=args.ctc_checkpoint,
             output_dir=args.output_dir,
             groups=groups,

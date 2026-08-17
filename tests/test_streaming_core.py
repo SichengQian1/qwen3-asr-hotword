@@ -293,3 +293,60 @@ def test_cross_boundary_failure_uses_timeline_evidence() -> None:
         prompt_template="Reference only: {hotwords}",
     )
     assert result["failure_reason"] == "boundary_specific_ctc_miss"
+
+
+def test_correct_before_injection_is_not_negative_correction_latency() -> None:
+    backend = FakeBackend(["hello hot word", "hello hot word", "hello hot word"])
+
+    def detector(audio: list[float], _active: tuple[str, ...]) -> list[StreamingCandidate]:
+        if len(audio) > 64_000:
+            return [StreamingCandidate("hot", "hot word", 0.9, 0.0, 0.9)]
+        return []
+
+    result, _ = run_streaming_sample(
+        backend=backend,
+        waveform=[0.0] * 72_000,
+        sample=_sample(),
+        group="D",
+        hotword_surfaces={"hot": "hot word", "wrong": "cold word"},
+        ctc_detector=detector,
+        prompt_template="Reference only: {hotwords}",
+    )
+    metric = result["hotword_metrics"][0]
+    assert metric["correct_before_first_injection"] is True
+    assert metric["chunks_from_injection_to_first_correct"] is None
+
+
+def test_tail_failure_requires_confirmed_tail_hotword_timing() -> None:
+    without_timing, _ = run_streaming_sample(
+        backend=FakeBackend(["hello", "hello", "hello"]),
+        waveform=[0.0] * 72_000,
+        sample=_sample(),
+        group="C",
+        hotword_surfaces={"hot": "hot word", "wrong": "cold word"},
+        ctc_detector=None,
+        prompt_template="Reference only: {hotwords}",
+    )
+    assert without_timing["failure_reason"] == "streaming_baseline_regression"
+
+    tail_sample = StreamingSample(
+        case_id="tail-case",
+        sample_id="tail-sample",
+        reference_text="hello hot word",
+        language="English",
+        expected_hotword_ids=("hot",),
+        expected_surfaces=("hot word",),
+        active_hotword_ids=("hot",),
+        timings=(HotwordTiming("hot", 4.2, 4.8, "manual_confirmed"),),
+        boundary_bucket="tail_flush",
+    )
+    with_timing, _ = run_streaming_sample(
+        backend=FakeBackend(["hello", "hello", "hello"]),
+        waveform=[0.0] * 80_000,
+        sample=tail_sample,
+        group="C",
+        hotword_surfaces={"hot": "hot word"},
+        ctc_detector=None,
+        prompt_template="Reference only: {hotwords}",
+    )
+    assert with_timing["failure_reason"] == "tail_flush_failure"

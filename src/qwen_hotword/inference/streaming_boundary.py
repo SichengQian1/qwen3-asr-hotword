@@ -251,7 +251,7 @@ def _parse_timing(raw: Any, line_number: int, duration: float) -> dict[str, obje
 
 def _audio_duration(path: Path) -> float:
     try:
-        import soundfile as sf  # type: ignore[import-untyped]
+        import soundfile as sf
     except ImportError as error:
         raise RuntimeError("soundfile is required to inspect boundary audio") from error
     info = sf.info(str(path))
@@ -262,7 +262,7 @@ def _audio_duration(path: Path) -> float:
 
 def _float_value(raw: Mapping[str, object], key: str) -> float:
     value = raw.get(key)
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
+    if not isinstance(value, int | float) or isinstance(value, bool):
         raise ValueError(f"generated timing has invalid {key}")
     return float(value)
 

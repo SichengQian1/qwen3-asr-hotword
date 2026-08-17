@@ -49,6 +49,13 @@ DEFAULT_GROUP_QUOTAS: dict[str, int] = {
     "single_hotword": 3,
     "negative": 10,
 }
+FORMAL_100_GROUP_QUOTAS: dict[str, int] = {
+    group: count * 2 for group, count in DEFAULT_GROUP_QUOTAS.items()
+}
+SELECTION_PROFILES: dict[str, dict[str, int]] = {
+    "smoke50": DEFAULT_GROUP_QUOTAS,
+    "formal100": FORMAL_100_GROUP_QUOTAS,
+}
 OUTPUT_FILENAMES = (
     "sample_selection.json",
     "baseline_predictions.jsonl",
@@ -83,10 +90,14 @@ def select_multi_nested_prompt_samples(
     group_quotas: Mapping[str, int] | None = None,
 ) -> tuple[MultiPromptSample, ...]:
     quotas = dict(group_quotas or DEFAULT_GROUP_QUOTAS)
-    if set(quotas) != set(DEFAULT_GROUP_QUOTAS) or sum(quotas.values()) != 50:
+    matching_profiles = [
+        name for name, expected in SELECTION_PROFILES.items() if quotas == expected
+    ]
+    if not matching_profiles:
         raise ValueError(
-            "multi-nested Prompt selection requires the fixed seven groups and 50 cases"
+            "multi-nested Prompt selection requires the fixed smoke50 or formal100 quotas"
         )
+    expected_total = sum(quotas.values())
     hotword_by_id = {entry.hotword_id: entry for entry in hotwords}
     score_by_id = {score.case_id: score for score in scores}
     if len(hotword_by_id) != len(hotwords) or len(score_by_id) != len(scores):
@@ -151,8 +162,12 @@ def select_multi_nested_prompt_samples(
                     ),
                 )
             )
-    if len(selected) != 50 or len({item.rag_sample.audio_path for item in selected}) != 50:
-        raise RuntimeError("Prompt selection must contain 50 audio-disjoint cases")
+    if len(selected) != expected_total or len(
+        {item.rag_sample.audio_path for item in selected}
+    ) != expected_total:
+        raise RuntimeError(
+            f"Prompt selection must contain {expected_total} audio-disjoint cases"
+        )
     return tuple(selected)
 
 
@@ -168,6 +183,7 @@ def run_multi_nested_prompt_eval(
     ctc_report_path: str | Path,
     output_dir: str | Path,
     seed: int = DEFAULT_MULTI_PROMPT_SEED,
+    selection_profile: str = "smoke50",
     prompt_template: str = DEFAULT_PT_BR_PROMPT_TEMPLATE,
     language: str = "Portuguese",
     dtype: str = "bfloat16",
@@ -180,6 +196,9 @@ def run_multi_nested_prompt_eval(
         raise ValueError(f"model path must be an existing {EXPECTED_MODEL_NAME} directory: {model}")
     if dtype not in {"bfloat16", "float16"}:
         raise ValueError("dtype must be bfloat16 or float16")
+    if selection_profile not in SELECTION_PROFILES:
+        raise ValueError(f"unknown multi-nested selection profile: {selection_profile}")
+    group_quotas = SELECTION_PROFILES[selection_profile]
     build_hotword_prompt(("probe",), template=prompt_template)
     destination = Path(output_dir).expanduser()
     if destination.exists() and any(destination.iterdir()):
@@ -206,7 +225,14 @@ def run_multi_nested_prompt_eval(
     } - family_ids
     if missing_family_ids:
         raise ValueError(f"cases reference unknown nested families: {sorted(missing_family_ids)}")
-    samples = select_multi_nested_prompt_samples(records, hotwords, cases, scores, seed=seed)
+    samples = select_multi_nested_prompt_samples(
+        records,
+        hotwords,
+        cases,
+        scores,
+        seed=seed,
+        group_quotas=group_quotas,
+    )
     hotword_by_id = {entry.hotword_id: entry for entry in hotwords}
 
     config = ModelConfig(
@@ -295,6 +321,8 @@ def run_multi_nested_prompt_eval(
         prompt_template=prompt_template,
         language=language,
         seed=seed,
+        selection_profile=selection_profile,
+        group_quotas=group_quotas,
         elapsed=time.monotonic() - started,
         inputs={
             "validation_manifest": manifest,
@@ -312,10 +340,11 @@ def run_multi_nested_prompt_eval(
         "evaluation_scope": "validation_multi_nested_prompt_eval",
         "test_set_used": False,
         "seed": seed,
-        "target_group_counts": DEFAULT_GROUP_QUOTAS,
+        "selection_profile": selection_profile,
+        "target_group_counts": group_quotas,
         "actual_group_counts": {
             group: sum(item.primary_group == group for item in samples)
-            for group in DEFAULT_GROUP_QUOTAS
+            for group in group_quotas
         },
         "samples": [item.to_dict() for item in samples],
     }
@@ -345,6 +374,8 @@ def _build_report(
     prompt_template: str,
     language: str,
     seed: int,
+    selection_profile: str,
+    group_quotas: Mapping[str, int],
     elapsed: float,
     inputs: Mapping[str, Path],
     output_paths: Mapping[str, Path],
@@ -422,7 +453,7 @@ def _build_report(
             retrieved_by_case,
             oracle_by_case,
         )
-        for group in DEFAULT_GROUP_QUOTAS
+        for group in group_quotas
     }
     baseline_recall = _safe_ratio(baseline_correct, expected_total)
     retrieved_recall = _safe_ratio(retrieved_correct, expected_total)
@@ -441,6 +472,7 @@ def _build_report(
             "local_files_only": config.local_files_only,
             "wrapper_class": type(wrapper).__name__,
             "backend": getattr(wrapper, "backend", None),
+            "max_new_tokens": getattr(wrapper, "max_new_tokens", None),
             "load_count": 1,
             "config": _file_identity(config.path / "config.json"),
             "weight_index": _file_identity(config.path / "model.safetensors.index.json"),
@@ -464,12 +496,13 @@ def _build_report(
         },
         "selection": {
             "seed": seed,
+            "profile": selection_profile,
             "total_cases": len(samples),
             "positive_cases": len(positive_ids),
             "negative_cases": len(samples) - len(positive_ids),
             "group_counts": {
                 group: sum(item.primary_group == group for item in samples)
-                for group in DEFAULT_GROUP_QUOTAS
+                for group in group_quotas
             },
             "prompted_cases": sum(bool(item.rag_sample.selected_matches) for item in samples),
             "prompted_positive_cases": sum(
@@ -530,7 +563,7 @@ def _build_report(
         },
         "outputs": {name: str(path) for name, path in output_paths.items()},
         "limitations": [
-            "Fifty deterministic validation cases; not a production benchmark.",
+            f"{len(samples)} deterministic validation cases; not a production benchmark.",
             "Longest-match is the final nested target; contained short hits are redundant.",
             "Fixed threshold and Top-5; no tuning is performed.",
             "No sealed test data are read.",

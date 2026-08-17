@@ -67,6 +67,7 @@ module = [
   "rapidfuzz",
   "rapidfuzz.*",
   "safetensors",
+  "soundfile",
   "torch",
   "torch.*",
   "transformers",

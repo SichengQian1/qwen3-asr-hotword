@@ -1,5 +1,37 @@
 # 工作交接记录
 
+## 0.16 2026-08-17 v3 Top-5 流式正式100条控制实验（代码完成，待 H200 运行）
+
+首次 Top-3 50条流式smoke已在H200完成，A/B/C/D/E均为50条且
+`status=pass`。该次使用v2 `stratified_100/retrieved_rag_v1`，最终精确热词
+Recall A/B/C/D/E = 95%/96.25%/96.25%/96.25%/96.25%；D相对B的Recall
+变化为0，WER/CER分别增加0.252/0.145个百分点。该smoke仅验证流式
+链路，不是正式离线→流式结论；原目录不覆盖，作为参考封存。
+
+用户确认正式控制实验应对齐更早的v3多词/组合/嵌套端到端Top-5，
+而不是v2 Top-3。v3固定参数为0.86/Top-5/.35/.25/min posterior 0/
+minimum phonemes 4/margin 0/Temporal 2×。旧v3端到端只有50条，因此新增
+`formal100`选样profile：把原七组配额严格2倍扩展到80正例+20负例，
+且原50条必为新100条的确定性子集。
+
+正式流程分两步：先用`run_multi_nested_prompt_eval.py
+--selection-profile formal100`在新目录生成这100条的离线A/B/Oracle；
+再用`run_streaming_rag_evaluation.py --offline-format multi_nested_v3`读同一
+`sample_selection.json`运行C/D/E。流式入口在加载模型前强制校验Top-5
+参数、Prompt/语言/dtype/`max_new_tokens`/qwen-asr版本、输入SHA256、
+CTC修正报告及checkpoint SHA256，任意不同立即失败。
+
+同时修正两个smoke暴露的统计问题：注入前已正确不再产生负的
+`chunks_from_injection_to_first_correct`，而是单独记录
+`correct_before_first_injection`；只有人工或强制对齐证明热词位于尾块时才分类
+`tail_flush_failure`。完整H200命令和新输出目录见`docs/STREAMING_RAG_EVAL.md`。
+
+本地实际验证：流式/v3定向pytest 23项通过；全量pytest通过；
+本轮文件Ruff通过；54个source模块全量Mypy通过；两个CLI `--help`通过；
+`git diff --check`通过。全仓库Ruff在本地新版规则下仍报告9个既有UP038，
+位于本轮未修改的multi-nested/retrieved/prompt/temporal历史代码，本轮不做
+扩张性机械改写。
+
 ## 0.15 2026-08-17 流式端到端热词 RAG 评测（代码完成，待 H200 实跑）
 
 本轮暂停西语数据处理，新增独立的 Qwen3-ASR-1.7B 流式端到端热词

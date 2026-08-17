@@ -35,6 +35,15 @@ def main() -> int:
     parser.add_argument("--ctc-case-scores", required=True)
     parser.add_argument("--ctc-report", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--selection-profile",
+        choices=("smoke50", "formal100"),
+        default="smoke50",
+        help=(
+            "Keep the original fixed 50-case profile or use its deterministic "
+            "2x 100-case expansion."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=DEFAULT_MULTI_PROMPT_SEED)
     parser.add_argument("--language", default="Portuguese")
     parser.add_argument("--prompt-template", default=DEFAULT_PT_BR_PROMPT_TEMPLATE)
@@ -54,6 +63,7 @@ def main() -> int:
             ctc_report_path=args.ctc_report,
             output_dir=args.output_dir,
             seed=args.seed,
+            selection_profile=args.selection_profile,
             prompt_template=args.prompt_template,
             language=args.language,
             dtype=args.dtype,

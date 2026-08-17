@@ -4,6 +4,95 @@
 Top-K 或 Prompt 模板，不读 sealed test。A/B 直接导入既有离线 Retrieved RAG
 产物，C/D/E 调用 Qwen 官方 vLLM 流式方法。
 
+## 正式 Top-5 控制基线
+
+最初的 Top-3 50 条流式 smoke 只用于验证链路，目录必须原样保留：
+
+```text
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v2_stratified_100/
+  streaming_rag_2s_u2_t5_smoke50_v1
+```
+
+正式离线/流式比较使用既有 v3 多词、组合词和嵌套词架构。旧版端到端
+Top-5 是固定 50 条；正式 100 条将七组配额严格扩大 2 倍，旧 50 条是新
+100 条的确定性子集：
+
+```text
+three_independent:       20
+nested_family_plus_two:  20
+nested_long_present:     16
+two_independent:         12
+nested_short_only:        6
+single_hotword:           6
+negative:                20
+total:                  100（80正例/20负例）
+```
+
+固定 Operating 配置为 `threshold=0.86 / Top-5 / maximum_edit_ratio=0.35 /
+posterior_weight=0.25 / minimum_posterior_confidence=0 /
+minimum_phonemes=4 / minimum_top1_margin=0`。正式流程先在新目录生成同一批
+100 条的离线 A/B/Oracle，再由流式评测读取该目录的 `sample_selection.json`
+和 A/B 预测。流式入口在模型加载前校验离线报告、Prompt、语言、dtype、
+`max_new_tokens`、qwen-asr 版本、输入 SHA256、CTC 修正版报告和 checkpoint
+SHA256；任一不同就拒绝运行。
+
+先生成正式离线 Top-5 100 条，不覆盖旧 `prompt_multi_nested_v1`：
+
+```bash
+V3_ROOT=outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested
+OFFLINE100_ROOT="$V3_ROOT/prompt_multi_nested_formal100_top5_v1"
+
+CUDA_VISIBLE_DEVICES=4 python scripts/run_multi_nested_prompt_eval.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --ctc-case-scores "$V3_ROOT/hotword_case_scores_v3.jsonl" \
+  --ctc-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --output-dir "$OFFLINE100_ROOT" \
+  --selection-profile formal100 \
+  --language Portuguese \
+  --device cuda:0 \
+  --dtype bfloat16
+```
+
+检查离线报告通过后运行同一选择的正式流式 Top-5 100 条：
+
+```bash
+STREAM100_ROOT="$V3_ROOT/streaming_rag_2s_u2_t5_top5_formal100_v1"
+
+CUDA_VISIBLE_DEVICES=4 python scripts/run_streaming_rag_evaluation.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --hotword-families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --ctc-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --offline-rag-dir "$OFFLINE100_ROOT" \
+  --offline-format multi_nested_v3 \
+  --ctc-checkpoint outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt \
+  --output-dir "$STREAM100_ROOT" \
+  --groups A,B,C,D,E \
+  --chunk-size-sec 2.0 \
+  --unfixed-chunk-num 2 \
+  --unfixed-token-num 5 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --language Portuguese \
+  --gpu-memory-utilization 0.50
+```
+
+两步都使用新目录。中断后只有流式命令可在配置完全相同时加 `--resume`；
+离线入口仍要求新空目录。
+正式输出使用 streaming schema v2；Top-3 smoke50 保持 schema v1，不回写。
+
 ## 固定基线
 
 ```text

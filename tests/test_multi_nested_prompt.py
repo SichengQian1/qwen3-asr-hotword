@@ -14,6 +14,7 @@ from qwen_hotword.hotwords.multi_nested import (
 from qwen_hotword.hotwords.registry import HotwordEntry, load_hotword_table, write_hotword_table
 from qwen_hotword.inference.multi_nested_prompt import (
     DEFAULT_GROUP_QUOTAS,
+    FORMAL_100_GROUP_QUOTAS,
     run_multi_nested_prompt_eval,
     select_multi_nested_prompt_samples,
 )
@@ -42,7 +43,10 @@ def _match(hotword_id: str, surface: str, score: float) -> dict[str, object]:
     }
 
 
-def _assets(tmp_path: Path) -> dict[str, Path]:
+def _assets(
+    tmp_path: Path,
+    group_quotas: dict[str, int] | None = None,
+) -> dict[str, Path]:
     model = tmp_path / "Qwen3-ASR-1.7B"
     model.mkdir()
     (model / "config.json").write_text('{"model_type":"qwen3_asr"}\n')
@@ -87,7 +91,7 @@ def _assets(tmp_path: Path) -> dict[str, Path]:
         "nested_family_plus_two": 3,
         "negative": 0,
     }
-    for group, count in DEFAULT_GROUP_QUOTAS.items():
+    for group, count in (group_quotas or DEFAULT_GROUP_QUOTAS).items():
         for _ in range(count):
             sample_id = f"sample-{case_index:03d}"
             case_id = f"case-{case_index:03d}"
@@ -219,6 +223,7 @@ def _assets(tmp_path: Path) -> dict[str, Path]:
 
 class _FakeWrapper:
     backend = "transformers"
+    max_new_tokens = 128
 
     def __init__(self, references: dict[str, str]) -> None:
         self.references = references
@@ -305,3 +310,48 @@ def test_fixed_selection_and_fake_prompt_run(tmp_path: Path) -> None:
             model_loader=loader,
             print_progress=False,
         )
+
+
+def test_formal_100_profile_is_deterministic_two_x_expansion(tmp_path: Path) -> None:
+    paths = _assets(tmp_path, FORMAL_100_GROUP_QUOTAS)
+    vocab = load_phoneme_vocab(paths["vocab"])
+    records = load_validation_manifest(paths["manifest"])
+    hotwords = load_hotword_table(paths["hotwords"], vocab=vocab)
+    cases = load_multi_nested_cases(paths["cases"])
+    scores = load_multi_nested_case_scores(paths["scores"])
+    smoke = select_multi_nested_prompt_samples(records, hotwords, cases, scores)
+    formal = select_multi_nested_prompt_samples(
+        records,
+        hotwords,
+        cases,
+        scores,
+        group_quotas=FORMAL_100_GROUP_QUOTAS,
+    )
+    assert len(formal) == 100
+    assert {
+        group: sum(item.primary_group == group for item in formal)
+        for group in FORMAL_100_GROUP_QUOTAS
+    } == FORMAL_100_GROUP_QUOTAS
+    assert {item.rag_sample.case_id for item in smoke}.issubset(
+        item.rag_sample.case_id for item in formal
+    )
+    references = {row.sample_id: row.reference_text for row in records.values()}
+    report = run_multi_nested_prompt_eval(
+        model_path=paths["model"],
+        validation_manifest_path=paths["manifest"],
+        vocab_path=paths["vocab"],
+        hotword_table_path=paths["hotwords"],
+        families_path=paths["families"],
+        cases_path=paths["cases"],
+        ctc_case_scores_path=paths["scores"],
+        ctc_report_path=paths["report"],
+        output_dir=tmp_path / "formal-output",
+        selection_profile="formal100",
+        model_loader=lambda _config: _FakeWrapper(references),
+        print_progress=False,
+    )
+    assert report["selection"]["profile"] == "formal100"
+    assert report["selection"]["total_cases"] == 100
+    assert report["selection"]["positive_cases"] == 80
+    assert report["selection"]["negative_cases"] == 20
+    assert report["model"]["max_new_tokens"] == 128

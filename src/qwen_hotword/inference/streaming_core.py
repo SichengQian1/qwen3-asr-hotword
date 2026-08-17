@@ -67,6 +67,8 @@ class StreamingSample:
     expected_hotword_ids: tuple[str, ...]
     expected_surfaces: tuple[str, ...]
     active_hotword_ids: tuple[str, ...]
+    primary_group: str | None = None
+    redundant_family_ids: tuple[str, ...] = ()
     timings: tuple[HotwordTiming, ...] = ()
     boundary_bucket: str | None = None
     audio_path: str = ""
@@ -486,6 +488,11 @@ def summarize_streaming_sample(
         injected_steps = [row for row in timeline if hotword_id in row["injected_hotword_ids"]]
         first_injected_chunk = int(injected_steps[0]["chunk_id"]) if injected_steps else None
         first_correct_chunk = int(correct_steps[0]["chunk_id"]) if correct_steps else None
+        correct_before_first_injection = (
+            first_correct_chunk < first_injected_chunk
+            if first_correct_chunk is not None and first_injected_chunk is not None
+            else None
+        )
         hotword_metrics.append(
             {
                 "hotword_id": hotword_id,
@@ -504,9 +511,12 @@ def summarize_streaming_sample(
                 "correction_window_evidence": correction_window_evidence,
                 "first_injected_chunk": first_injected_chunk,
                 "first_correct_chunk": first_correct_chunk,
+                "correct_before_first_injection": correct_before_first_injection,
                 "chunks_from_injection_to_first_correct": (
                     first_correct_chunk - first_injected_chunk
-                    if first_correct_chunk is not None and first_injected_chunk is not None
+                    if first_correct_chunk is not None
+                    and first_injected_chunk is not None
+                    and first_correct_chunk >= first_injected_chunk
                     else None
                 ),
                 "final_correct": strict_phrase_match(final_text, surface),
@@ -540,6 +550,8 @@ def summarize_streaming_sample(
             {str(surface) for row in timeline for surface in row["injected_hotwords"]}
         ),
         "boundary_bucket": sample.boundary_bucket,
+        "primary_group": sample.primary_group,
+        "redundant_family_ids": list(sample.redundant_family_ids),
         "hotword_metrics": hotword_metrics,
         "partial_modification_count": sum(
             bool(row["partial_change"]["changed"]) for row in timeline
@@ -588,7 +600,10 @@ def classify_streaming_failure(
         return "ctc_detected_in_unfixed_window_but_not_corrected"
     if group == "E":
         return "prompt_injected_but_decoder_failed"
-    if timeline and bool(timeline[-1].get("is_tail_flush")):
+    if any(
+        not bool(item.get("final_correct")) and item.get("boundary_bucket") == "tail_flush"
+        for item in hotword_metrics
+    ):
         return "tail_flush_failure"
     return "streaming_baseline_regression" if group == "C" else "unknown_requires_review"
 
