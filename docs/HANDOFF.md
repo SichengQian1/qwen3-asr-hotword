@@ -43,10 +43,18 @@ outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
 benchmark、20条流式replay smoke、Representative流式benchmark；smoke通过后再做
 formal100流式replay。最终上线建议只取Representative，Hard-negative只作压力诊断。
 
-本地不加载真实H200模型或30.9GB缓存。全仓库Ruff通过；全量pytest 164项通过；
-4个任务source模块Mypy strict通过；容量+既有scoring定向pytest 11项通过；3个CLI
+本地不加载真实H200模型或30.9GB缓存。全仓库Ruff通过；全量pytest 166项通过；
+5个任务source模块Mypy strict通过；容量/距离定向pytest通过；3个CLI
 `--help`和`git diff --check`通过。全仓库Mypy仍是6个既有Torch/transformers模块的
-11项错误，本轮4个模块为0。发布前remote-parent检查仍需在收口阶段执行。
+11项错误，本轮5个模块为0。发布前remote-parent检查仍需在收口阶段执行。
+
+H200第一次Representative运行在`python_dynamic_programming`编辑距离后端上，
+100词档Raw Recall@5为164/172（95.35%）、Operating Recall@5为140/172
+（81.40%）、负例FPR为0；但retrieval P95/P99为2.070/2.515秒，耗时几乎全部在
+matching，因而保护机制在100词档停止。`recommended_online_cap=0`只表示该慢速
+参考实现不满足工程SLO，不代表CTC质量或产品容量为0。随后新增RapidFuzz等价距离
+后端和随机序列一致性测试；下一轮必须写入新目录，并确认报告中的
+`edit_distance_backend=rapidfuzz`后再解释扩容曲线。
 
 ## 0.18 2026-08-18 v3 Formal100 Operating/Forced Top-5 实测结论与词库上限计划
 

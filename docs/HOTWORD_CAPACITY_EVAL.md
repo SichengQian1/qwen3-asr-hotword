@@ -217,3 +217,9 @@ Operating Recall@5相对100词下降 <= 1个百分点
 
 当前matcher是Python逐热词局部编辑距离全扫描再全量排序。若5k或10k失败，先保存
 本基线，再考虑音素长度桶/候选索引加精确重排；不得修改本轮结果来掩盖失败。
+
+第一次工作区基线在纯Python动态规划后端上仅100个active热词就得到retrieval
+P95约2.070秒，因此按保护策略停止；该结果必须保留为slow-backend基线，不能解释成
+模型容量为0。后续实现保持窗口、距离、排序和门控完全不变，只把Levenshtein距离
+换成项目已锁定的RapidFuzz 3.x等价C++后端。新benchmark的`run_config.json`和
+`summary.json`必须显示`edit_distance_backend=rapidfuzz`，并使用新输出目录。

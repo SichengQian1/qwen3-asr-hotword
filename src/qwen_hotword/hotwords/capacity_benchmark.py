@@ -29,6 +29,7 @@ from qwen_hotword.hotwords.scoring import (
     profile_decoded_hotwords,
 )
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
+from qwen_hotword.training.edit_distance import sequence_edit_distance_backend
 
 
 def benchmark_hotword_capacity(
@@ -89,6 +90,7 @@ def benchmark_hotword_capacity(
         minimum_top1_margin=minimum_top1_margin,
     )
     config.validate()
+    edit_distance_backend = sequence_edit_distance_backend()
     query_rows: list[dict[str, Any]] = []
     level_summaries: dict[str, dict[str, Any]] = {}
     started = time.monotonic()
@@ -257,6 +259,7 @@ def benchmark_hotword_capacity(
             "posterior_weight": posterior_weight,
             "minimum_posterior_confidence": minimum_posterior_confidence,
             "minimum_top1_margin": minimum_top1_margin,
+            "edit_distance_backend": edit_distance_backend,
         },
         "warmup_queries": warmup_queries,
         "stop_retrieval_p95_seconds": stop_retrieval_p95_seconds,
@@ -273,6 +276,7 @@ def benchmark_hotword_capacity(
         "status": "pass",
         "elapsed_seconds": time.monotonic() - started,
         "query_rows": len(query_rows),
+        "edit_distance_backend": edit_distance_backend,
         "levels": level_summaries,
         "recommendation": recommendation,
         "test_set_used": False,

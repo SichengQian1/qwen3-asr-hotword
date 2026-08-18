@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+try:
+    from rapidfuzz.distance import Levenshtein as _RapidFuzzLevenshtein
+except ImportError:  # pragma: no cover - exercised only in minimal local environments
+    _RapidFuzzLevenshtein = None
+
 
 def sequence_editops(
     reference: tuple[int, ...],
@@ -33,11 +38,7 @@ def sequence_editops(
         ):
             row -= 1
             column -= 1
-        elif (
-            row
-            and column
-            and distances[row][column] == distances[row - 1][column - 1] + 1
-        ):
+        elif row and column and distances[row][column] == distances[row - 1][column - 1] + 1:
             operations.append(("replace", row - 1, column - 1))
             row -= 1
             column -= 1
@@ -55,4 +56,10 @@ def sequence_edit_distance(
     reference: tuple[int, ...],
     hypothesis: tuple[int, ...],
 ) -> int:
+    if _RapidFuzzLevenshtein is not None:
+        return int(_RapidFuzzLevenshtein.distance(reference, hypothesis))
     return len(sequence_editops(reference, hypothesis))
+
+
+def sequence_edit_distance_backend() -> str:
+    return "rapidfuzz" if _RapidFuzzLevenshtein is not None else "python_dynamic_programming"

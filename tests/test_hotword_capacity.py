@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,10 @@ from qwen_hotword.hotwords.scoring import (
     score_hotwords,
 )
 from qwen_hotword.phonemes.coverage import PhonemeVocab, load_phoneme_vocab
+from qwen_hotword.training.edit_distance import (
+    sequence_edit_distance,
+    sequence_editops,
+)
 
 
 def _letters(index: int) -> str:
@@ -197,6 +202,16 @@ def test_decoded_scoring_is_equivalent_to_logits_and_exposes_phase_timings() -> 
     assert profiled.matching_seconds >= 0
     assert profiled.sorting_seconds >= 0
     assert profiled.selection_seconds >= 0
+
+
+def test_fast_edit_distance_is_exactly_equivalent_to_editops() -> None:
+    generator = random.Random(20_260_818)
+    for _ in range(250):
+        reference = tuple(generator.randrange(1, 12) for _ in range(generator.randrange(0, 18)))
+        hypothesis = tuple(generator.randrange(1, 12) for _ in range(generator.randrange(0, 18)))
+        assert sequence_edit_distance(reference, hypothesis) == len(
+            sequence_editops(reference, hypothesis)
+        )
 
 
 def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_deterministic(
