@@ -1,5 +1,117 @@
 # 工作交接记录
 
+## 0.19 2026-08-18 葡语100至10k热词库容量评测（代码完成，待H200）
+
+按照已确认的容量阶梯`100/500/1k/2k/5k/10k`新增葡语单语热词库容量评测。
+10k只是当前精确扫描实现的压力上限，不预先宣称为上线容量；100k不在本轮范围。
+固定复用Temporal 2× CTC Head、Top-5、threshold 0.86、maximum edit ratio 0.35、
+posterior weight 0.25、minimum phones 4及既有v3 formal100，不训练、不调参、不读
+sealed test。
+
+新增实现：
+
+- `src/qwen_hotword/hotwords/capacity_assets.py`：从Noah葡语train-only Manifest
+  确定性采样真实1至4词连续n-gram，校验MFA/phone覆盖，构建Representative与
+  Hard-negative两套严格嵌套active词库；支持读取既有formal100
+  `sample_selection.json`，并强制formal100/operating语义，以选择文件中的最长匹配
+  真值覆盖原始多真值，防止扩容时悄悄改变case集合或真值口径。
+- `src/qwen_hotword/hotwords/capacity_replay.py`：生成完整Validation feature-cache
+  离线CTC replay，或真实累计0-2/0-4/...音频的流式CTC replay；后者分段记录
+  processor、Encoder、CTC Head、posterior decode和GPU内存，尾部不足2秒保留。
+- `src/qwen_hotword/hotwords/capacity_benchmark.py`：同一decoded replay回放各级词库，
+  输出Raw Recall@1/3/5/10/20、Operating Recall@5、MRR/rank/margin、负例FPR、
+  Top-5 churn、matching/sort/select延迟、P50/P90/P95/P99、2秒deadline、RSS、
+  Python heap、GPU峰值及累计音频时长分桶；默认retrieval P95超过2秒后停止扩容。
+- `score_decoded_hotwords`和`profile_decoded_hotwords`：与现有logits评分完全复用
+  同一个matcher和门控逻辑，只把不可变decoded phoneme作为输入，避免每一级重复
+  Encoder造成质量与计时噪声。
+- CLI：`build_hotword_capacity_assets.py`、`build_hotword_capacity_replay.py`、
+  `benchmark_hotword_capacity.py`。
+- 测试：`tests/test_hotword_capacity.py`，覆盖logits/replay等价、严格嵌套active
+  数量、train-only候选、Representative/Hard两profile、离线质量/性能输出、容量
+  headroom建议及sealed-test拒绝。
+
+输出根目录固定建议为：
+
+```text
+outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+```
+
+完整工作区命令和判定口径见`docs/HOTWORD_CAPACITY_EVAL.md`。执行顺序必须是：CPU
+资产构建、formal100离线replay、Representative离线benchmark、Hard-negative离线
+benchmark、20条流式replay smoke、Representative流式benchmark；smoke通过后再做
+formal100流式replay。最终上线建议只取Representative，Hard-negative只作压力诊断。
+
+本地不加载真实H200模型或30.9GB缓存。全仓库Ruff通过；全量pytest 164项通过；
+4个任务source模块Mypy strict通过；容量+既有scoring定向pytest 11项通过；3个CLI
+`--help`和`git diff --check`通过。全仓库Mypy仍是6个既有Torch/transformers模块的
+11项错误，本轮4个模块为0。发布前remote-parent检查仍需在收口阶段执行。
+
+## 0.18 2026-08-18 v3 Formal100 Operating/Forced Top-5 实测结论与词库上限计划
+
+同一批v3 `formal100`（80正例、20负例、172个期望热词）已经完成
+`0.86 / Operating Top-5`和无门控`Forced Top-5`的离线与2秒流式控制实验。
+两轮都只读validation资产，没有读取sealed test；Forced结果保存在新的输出目录，
+没有覆盖Operating基线。
+
+正式对比如下（Recall均为最终文本的严格完整词/短语exact recall）：
+
+| 推理组 | 策略 | 正确/期望 | Recall | WER | CER | 负样本错误注入 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 离线B | Operating Top-5，threshold 0.86 | 157/172 | 91.2791% | 8.2329% | 3.3610% | 0/20 |
+| 离线B | Forced Raw Top-5，无门控 | 158/172 | 91.8605% | 8.1660% | 3.4078% | 20/20 |
+| 流式D | Operating Top-5，threshold 0.86 | 160/172 | 93.0233% | 7.9652% | 3.3453% | 0/20 |
+| 流式D | Forced Raw Top-5，无门控 | 159/172 | 92.4419% | 8.6345% | 4.0019% | 20/20 |
+| 流式E | Oracle | 161/172 | 93.6047% | 8.0991% | 3.3610% | 0/20 |
+
+Forced离线相对Operating只多正确1个热词（+0.5814个百分点），并把所有20条
+负样本都注入了错误候选；共注入302个错误候选，最终严格写出1个，但相对baseline
+没有新增严格错误热词。Forced流式相对Operating反而少正确1个热词（-0.5814个
+百分点），WER增加0.6693个百分点（119个词错误变为129个，增加10个），CER增加
+0.6566个百分点。严格热词幻觉率仍为0不代表错误Prompt无害：普通词错误已经明显
+增加。
+
+流式失败证据也支持保留门控：Forced使`ctc_never_detected`从5降为0，但
+`ctc_detected_too_late_already_fixed`从3增至9，且20条负样本均成为
+`wrong_hotword_injected`。因此无门控只是让更多低置信、随累计音频波动的候选进入
+Prompt，并没有提高最终流式Recall。正式2秒流式基线继续固定Top-5、threshold 0.86、
+maximum edit ratio 0.35、posterior weight 0.25和5-token rollback；Forced目录只作为
+诊断对照封存。早期约99%的数字是另一资产上的CTC raw ranking recall，不是Qwen最终
+端到端Recall，不能用来替代本次结论。
+
+Forced离线报告位于：
+
+```text
+outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested/
+  prompt_multi_nested_formal100_forced_top5_v1/multi_nested_prompt_report.json
+```
+
+下一阶段拟先用已经训练完成的葡语Temporal 2× CTC Head测单语热词库上限，分成两条
+互不混淆的曲线：
+
+1. 检索质量上限：保持同一批音频、CTC checkpoint、CTC decoded序列、Top-5和
+   0.86门控不变，只扩大每条case的active词库，主指标为raw Recall@5，同时报告
+   Operating Recall@5、目标热词rank/MRR、负样本FPR和跨chunk候选稳定性。
+2. 工程性能上限：每2秒对当前累计音频重新检索，分别记录Encoder、CTC Head、
+   posterior decode/CPU copy、hotword matching、Top-K排序和Prompt刷新耗时，并记录
+   p50/p90/p95/p99、2秒deadline miss、进程RSS、GPU allocated/reserved/peak、词库
+   加载时间及每词内存。
+
+词库规模采用确定性嵌套超集，最终固定先测100、500、1k、2k、5k、10k；10k为本轮
+压力上限，不测25k/50k/100k。若某一级retrieval p95已经超过2秒或资源达到预先约定
+的上限，则记录首个失败点并停止更大规模。扩展词来自train-only葡语真实1至多词
+n-gram，不读取sealed test；每个case
+必须排除参考文本中存在但未标注为目标的词，防止把真实热词误算成干扰项。除频率分层
+的代表性词库外，还要单列长度匹配、近音、包含/被包含关系等hard-negative词库，避免
+随机干扰词高估Recall。
+
+现有实现还不能直接产生可信的工程上限报告：`score_hotwords`会对每个active entry
+逐一执行Python局部编辑距离窗口扫描，再对全部match排序；当前v3每条case固定只有
+100个active hotwords。流式时间线只记录整条样本`inference_seconds`，没有上述分段
+耗时或RSS/GPU峰值。下一轮应先增加独立benchmark资产构建器和分段计时器；质量实验
+复用一次生成的离线/逐chunk CTC decoded序列，在所有词库规模上replay，避免重复运行
+Encoder造成噪声。随后只在100、性能拐点和最大可接受规模上跑真实全链路流式D组确认。
+
 ## 0.17 2026-08-18 v3 Raw/Forced Top-5 无门控消融
 
 正式100条 `0.86 / Operating Top-5` 离线与流式评测均已在H200完成并保持

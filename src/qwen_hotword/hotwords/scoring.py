@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -83,6 +84,18 @@ class HotwordScoringResult:
         }
 
 
+@dataclass(frozen=True)
+class ProfiledHotwordScoringResult:
+    result: HotwordScoringResult
+    matching_seconds: float
+    sorting_seconds: float
+    selection_seconds: float
+
+    @property
+    def retrieval_seconds(self) -> float:
+        return self.matching_seconds + self.sorting_seconds + self.selection_seconds
+
+
 def decode_ctc_posterior(
     logits: Any,
     *,
@@ -137,11 +150,58 @@ def score_hotwords(
         input_length=input_length,
         blank_id=blank_id,
     )
+    return score_decoded_hotwords(
+        decoded,
+        effective_time_steps=input_length,
+        hotwords=hotwords,
+        config=scoring_config,
+    )
+
+
+def score_decoded_hotwords(
+    decoded: tuple[DecodedPhoneme, ...],
+    *,
+    effective_time_steps: int,
+    hotwords: list[HotwordEntry] | tuple[HotwordEntry, ...],
+    config: HotwordScoringConfig | None = None,
+) -> HotwordScoringResult:
+    return profile_decoded_hotwords(
+        decoded,
+        effective_time_steps=effective_time_steps,
+        hotwords=hotwords,
+        config=config,
+    ).result
+
+
+def profile_decoded_hotwords(
+    decoded: tuple[DecodedPhoneme, ...],
+    *,
+    effective_time_steps: int,
+    hotwords: list[HotwordEntry] | tuple[HotwordEntry, ...],
+    config: HotwordScoringConfig | None = None,
+) -> ProfiledHotwordScoringResult:
+    scoring_config = config or HotwordScoringConfig()
+    scoring_config.validate()
+    if effective_time_steps <= 0:
+        raise ValueError("effective_time_steps must be positive")
+    if any(
+        item.token_id <= 0
+        or item.start_step < 0
+        or item.end_step <= item.start_step
+        or item.end_step > effective_time_steps
+        or not 0.0 <= item.confidence <= 1.0
+        for item in decoded
+    ):
+        raise ValueError("decoded phonemes are outside the effective CTC time axis")
+
+    matching_started = time.perf_counter()
     matches = [
         _score_candidate(candidate, decoded, scoring_config)
         for candidate in hotwords
         if len(candidate.token_ids) >= scoring_config.minimum_phonemes
     ]
+    matching_seconds = time.perf_counter() - matching_started
+    sorting_started = time.perf_counter()
     matches.sort(
         key=lambda item: (
             -item.score,
@@ -150,13 +210,14 @@ def score_hotwords(
             item.hotword_id,
         )
     )
+    sorting_seconds = time.perf_counter() - sorting_started
+    selection_started = time.perf_counter()
     qualified = [
         match
         for match in matches
         if match.score >= scoring_config.score_threshold
         and match.edit_ratio <= scoring_config.maximum_edit_ratio
-        and match.posterior_confidence
-        >= scoring_config.minimum_posterior_confidence
+        and match.posterior_confidence >= scoring_config.minimum_posterior_confidence
     ]
     suppressed_reason: str | None = None
     if not qualified:
@@ -164,20 +225,25 @@ def score_hotwords(
         selected: list[HotwordMatch] = []
     elif (
         len(qualified) > 1
-        and qualified[0].score - qualified[1].score
-        < scoring_config.minimum_top1_margin
+        and qualified[0].score - qualified[1].score < scoring_config.minimum_top1_margin
     ):
         suppressed_reason = "ambiguous_top_matches"
         selected = []
     else:
         selected = qualified[: scoring_config.top_k]
-    return HotwordScoringResult(
-        effective_time_steps=input_length,
-        decoded_token_ids=tuple(item.token_id for item in decoded),
-        decoded_confidences=tuple(item.confidence for item in decoded),
-        ranked_matches=tuple(matches),
-        selected_matches=tuple(selected),
-        suppressed_reason=suppressed_reason,
+    selection_seconds = time.perf_counter() - selection_started
+    return ProfiledHotwordScoringResult(
+        result=HotwordScoringResult(
+            effective_time_steps=effective_time_steps,
+            decoded_token_ids=tuple(item.token_id for item in decoded),
+            decoded_confidences=tuple(item.confidence for item in decoded),
+            ranked_matches=tuple(matches),
+            selected_matches=tuple(selected),
+            suppressed_reason=suppressed_reason,
+        ),
+        matching_seconds=matching_seconds,
+        sorting_seconds=sorting_seconds,
+        selection_seconds=selection_seconds,
     )
 
 
@@ -229,9 +295,7 @@ def _score_candidate(
     edit_ratio, distance, negative_posterior, _, start, end = best
     posterior = -negative_posterior
     similarity = 1.0 - edit_ratio
-    confidence_factor = (
-        1.0 - config.posterior_weight + config.posterior_weight * posterior
-    )
+    confidence_factor = 1.0 - config.posterior_weight + config.posterior_weight * posterior
     score = max(0.0, min(1.0, similarity * confidence_factor))
     return HotwordMatch(
         hotword_id=candidate.hotword_id,
