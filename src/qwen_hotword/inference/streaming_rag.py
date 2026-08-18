@@ -66,6 +66,7 @@ def run_streaming_rag_evaluation(
     unfixed_token_num: int = 5,
     threshold: float = 0.86,
     top_k: int = 3,
+    retrieval_mode: str = "operating",
     maximum_edit_ratio: float = 0.35,
     posterior_weight: float = 0.25,
     minimum_posterior_confidence: float = 0.0,
@@ -87,6 +88,10 @@ def run_streaming_rag_evaluation(
         raise ValueError("max_samples must not be negative")
     if offline_format not in {"retrieved_v2", "multi_nested_v3"}:
         raise ValueError("offline_format must be retrieved_v2 or multi_nested_v3")
+    if retrieval_mode not in {"operating", "forced_topk"}:
+        raise ValueError("retrieval_mode must be operating or forced_topk")
+    if retrieval_mode == "forced_topk" and offline_format != "multi_nested_v3":
+        raise ValueError("forced_topk currently requires --offline-format multi_nested_v3")
     if offline_format == "multi_nested_v3" and (
         hotword_families_path is None or ctc_report_path is None
     ):
@@ -124,6 +129,7 @@ def run_streaming_rag_evaluation(
         paths=paths,
         threshold=threshold,
         top_k=top_k,
+        retrieval_mode=retrieval_mode,
         maximum_edit_ratio=maximum_edit_ratio,
         posterior_weight=posterior_weight,
         minimum_posterior_confidence=minimum_posterior_confidence,
@@ -148,12 +154,30 @@ def run_streaming_rag_evaluation(
         chunk_size_sec=chunk_size_sec,
         unfixed_chunk_num=unfixed_chunk_num,
         unfixed_token_num=unfixed_token_num,
-        threshold=threshold,
+        threshold=threshold if retrieval_mode == "operating" else None,
         top_k=top_k,
-        maximum_edit_ratio=maximum_edit_ratio,
+        retrieval_mode=retrieval_mode,
+        maximum_edit_ratio=(
+            maximum_edit_ratio if retrieval_mode == "operating" else None
+        ),
         posterior_weight=posterior_weight,
-        minimum_posterior_confidence=minimum_posterior_confidence,
-        minimum_top1_margin=minimum_top1_margin,
+        minimum_posterior_confidence=(
+            minimum_posterior_confidence if retrieval_mode == "operating" else None
+        ),
+        minimum_top1_margin=(
+            minimum_top1_margin if retrieval_mode == "operating" else None
+        ),
+        source_operating_config=(
+            None
+            if retrieval_mode == "operating"
+            else {
+                "threshold": threshold,
+                "maximum_edit_ratio": maximum_edit_ratio,
+                "minimum_posterior_confidence": minimum_posterior_confidence,
+                "minimum_top1_margin": minimum_top1_margin,
+                "note": "recorded for source-score identity; ignored by forced_topk",
+            }
+        ),
         prompt_template=prompt_template,
         language=language,
         dtype=dtype,
@@ -229,6 +253,7 @@ def run_streaming_rag_evaluation(
             device=device,
             dtype=dtype,
             scoring_config=scoring,
+            retrieval_mode=retrieval_mode,
         )
     backend = None
     if missing_streaming_groups:
@@ -320,6 +345,7 @@ def _validate_offline_control(
     paths: Mapping[str, Path],
     threshold: float,
     top_k: int,
+    retrieval_mode: str,
     maximum_edit_ratio: float,
     posterior_weight: float,
     minimum_posterior_confidence: float,
@@ -343,25 +369,42 @@ def _validate_offline_control(
     if report.get("test_set_used") is not False:
         raise ValueError("offline control report must not use the sealed test set")
 
+    guards_applied = retrieval_mode == "operating"
     expected_retrieval: dict[str, object] = {
-        "threshold": threshold,
+        "mode": retrieval_mode,
+        "threshold": threshold if guards_applied else None,
         "top_k": top_k,
-        "maximum_edit_ratio": maximum_edit_ratio,
-        "minimum_posterior_confidence": minimum_posterior_confidence,
-        "minimum_top1_margin": minimum_top1_margin,
+        "maximum_edit_ratio": maximum_edit_ratio if guards_applied else None,
+        "minimum_posterior_confidence": (
+            minimum_posterior_confidence if guards_applied else None
+        ),
+        "minimum_top1_margin": minimum_top1_margin if guards_applied else None,
     }
     if offline_format == "multi_nested_v3":
         expected_retrieval["posterior_weight"] = posterior_weight
+        expected_retrieval["minimum_phonemes"] = 4
+        expected_retrieval["guards_applied"] = guards_applied
+        expected_retrieval["candidate_source"] = (
+            "operating_matches" if guards_applied else f"ranked_matches[:{top_k}]"
+        )
     retrieval = report.get("retrieval_config")
     mismatches = []
     if not isinstance(retrieval, dict):
         mismatches.append("missing retrieval_config")
     else:
-        mismatches.extend(
-            f"retrieval_config.{key}: offline={retrieval.get(key)!r}, streaming={value!r}"
-            for key, value in expected_retrieval.items()
-            if retrieval.get(key) != value
-        )
+        for key, value in expected_retrieval.items():
+            offline_value = retrieval.get(key)
+            if key == "mode" and "mode" not in retrieval:
+                offline_value = "operating"
+            if key in {"minimum_phonemes", "guards_applied", "candidate_source"} and (
+                key not in retrieval and retrieval_mode == "operating"
+            ):
+                continue
+            if offline_value != value:
+                mismatches.append(
+                    f"retrieval_config.{key}: "
+                    f"offline={offline_value!r}, streaming={value!r}"
+                )
 
     prompt = report.get("prompt_interface")
     if not isinstance(prompt, dict):

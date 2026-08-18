@@ -6,6 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from qwen_hotword.hotwords.scoring import (
+    HotwordMatch,
+    HotwordScoringConfig,
+    HotwordScoringResult,
+)
+from qwen_hotword.inference.streaming_backends import select_streaming_ctc_matches
 from qwen_hotword.inference.streaming_core import StreamingSample
 from qwen_hotword.inference.streaming_rag import (
     _build_latency_summary,
@@ -29,6 +35,41 @@ def _sample() -> StreamingSample:
         active_hotword_ids=("hot",),
         audio_path="/ignored/audio.wav",
     )
+
+
+def test_forced_topk_uses_ranked_matches_without_operating_guards() -> None:
+    def match(index: int) -> HotwordMatch:
+        return HotwordMatch(
+            hotword_id=f"h{index}",
+            language="pt-BR",
+            surface=f"term {index}",
+            score=1.0 - index * 0.1,
+            edit_similarity=1.0 - index * 0.1,
+            edit_distance=index,
+            edit_ratio=index * 0.1,
+            posterior_confidence=0.9,
+            decoded_start=0,
+            decoded_end=1,
+            start_step=0,
+            end_step=1,
+        )
+
+    ranked = tuple(match(index) for index in range(6))
+    scored = HotwordScoringResult(
+        effective_time_steps=10,
+        decoded_token_ids=(1,),
+        decoded_confidences=(0.9,),
+        ranked_matches=ranked,
+        selected_matches=(ranked[0],),
+        suppressed_reason=None,
+    )
+    config = HotwordScoringConfig(top_k=5, score_threshold=0.86)
+    assert select_streaming_ctc_matches(
+        scored, scoring_config=config, retrieval_mode="operating"
+    ) == (ranked[0],)
+    assert select_streaming_ctc_matches(
+        scored, scoring_config=config, retrieval_mode="forced_topk"
+    ) == ranked[:5]
 
 
 def test_sample_shards_are_resumable_and_collect_deterministically(tmp_path: Path) -> None:
@@ -187,6 +228,7 @@ def test_multi_nested_offline_control_requires_exact_top5_and_inputs(tmp_path: P
         paths=paths,
         threshold=0.86,
         top_k=5,
+        retrieval_mode="operating",
         maximum_edit_ratio=0.35,
         posterior_weight=0.25,
         minimum_posterior_confidence=0.0,
@@ -205,6 +247,7 @@ def test_multi_nested_offline_control_requires_exact_top5_and_inputs(tmp_path: P
             paths=paths,
             threshold=0.86,
             top_k=3,
+            retrieval_mode="operating",
             maximum_edit_ratio=0.35,
             posterior_weight=0.25,
             minimum_posterior_confidence=0.0,
@@ -214,3 +257,96 @@ def test_multi_nested_offline_control_requires_exact_top5_and_inputs(tmp_path: P
             dtype="bfloat16",
             max_new_tokens=None,
         )
+
+
+def test_multi_nested_offline_control_accepts_explicit_forced_topk(tmp_path: Path) -> None:
+    offline = tmp_path / "offline"
+    offline.mkdir()
+    model = tmp_path / "Qwen3-ASR-1.7B"
+    model.mkdir()
+    paths = {
+        "offline": offline,
+        "model": model,
+        "validation": tmp_path / "validation.jsonl",
+        "vocab": tmp_path / "vocab.json",
+        "hotwords": tmp_path / "hotwords.jsonl",
+        "cases": tmp_path / "cases.jsonl",
+        "families": tmp_path / "families.jsonl",
+        "checkpoint": tmp_path / "ctc.pt",
+        "ctc_report": tmp_path / "ctc_report.json",
+    }
+    for key in ("validation", "vocab", "hotwords", "cases", "families", "checkpoint"):
+        paths[key].write_text(key + "\n", encoding="utf-8")
+    paths["ctc_report"].write_text(
+        json.dumps(
+            {
+                "checkpoint_sha256": _file_identity(paths["checkpoint"])["sha256"],
+                "scoring_config": {
+                    "threshold": 0.86,
+                    "top_k": 5,
+                    "maximum_edit_ratio": 0.35,
+                    "posterior_weight": 0.25,
+                    "minimum_posterior_confidence": 0.0,
+                    "minimum_phonemes": 4,
+                    "minimum_top1_margin": 0.0,
+                    "time_axis": "temporal_upsample_2x_only",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        version = importlib.metadata.version("qwen-asr")
+    except importlib.metadata.PackageNotFoundError:
+        version = "not-installed-local"
+    report = {
+        "status": "pass",
+        "test_set_used": False,
+        "qwen_asr_version": version,
+        "retrieval_config": {
+            "mode": "forced_topk",
+            "threshold": None,
+            "top_k": 5,
+            "maximum_edit_ratio": None,
+            "posterior_weight": 0.25,
+            "minimum_posterior_confidence": None,
+            "minimum_top1_margin": None,
+            "minimum_phonemes": 4,
+            "guards_applied": False,
+            "candidate_source": "ranked_matches[:5]",
+        },
+        "prompt_interface": {"template": "Reference: {hotwords}", "language": "Portuguese"},
+        "model": {"path": str(model), "dtype": "bfloat16", "max_new_tokens": 128},
+        "selection": {"profile": "formal100", "total_cases": 100},
+        "inputs": {
+            report_key: _file_identity(paths[path_key])
+            for report_key, path_key in {
+                "validation_manifest": "validation",
+                "vocab": "vocab",
+                "hotword_table": "hotwords",
+                "cases": "cases",
+                "hotword_families": "families",
+                "ctc_report": "ctc_report",
+            }.items()
+        },
+    }
+    (offline / "multi_nested_prompt_report.json").write_text(
+        json.dumps(report), encoding="utf-8"
+    )
+    control = _validate_offline_control(
+        offline_format="multi_nested_v3",
+        paths=paths,
+        threshold=0.86,
+        top_k=5,
+        retrieval_mode="forced_topk",
+        maximum_edit_ratio=0.35,
+        posterior_weight=0.25,
+        minimum_posterior_confidence=0.0,
+        minimum_top1_margin=0.0,
+        prompt_template="Reference: {hotwords}",
+        language="Portuguese",
+        dtype="bfloat16",
+        max_new_tokens=None,
+    )
+    assert control["validated_retrieval_config"]["threshold"] is None
+    assert control["validated_retrieval_config"]["candidate_source"] == "ranked_matches[:5]"

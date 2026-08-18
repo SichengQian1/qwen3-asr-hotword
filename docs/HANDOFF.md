@@ -1,6 +1,29 @@
 # 工作交接记录
 
-## 0.16 2026-08-17 v3 Top-5 流式正式100条控制实验（代码完成，待 H200 运行）
+## 0.17 2026-08-18 v3 Raw/Forced Top-5 无门控消融
+
+正式100条 `0.86 / Operating Top-5` 离线与流式评测均已在H200完成并保持
+`status=pass`。最终精确热词Recall A/B/C/D/E = 89.53%/91.28%/89.53%/
+93.02%/93.60%；流式D比离线B高1.74个百分点，D与流式Oracle E仅差0.58个百分点。
+自然100条没有人工确认或强制对齐时间戳，因此其Recall/WER/CER有效，但
+`boundary_summary`为空，声学结束相对延迟为null；这不表示CTC没有检出。
+
+为验证早期无阈值Ranking Top-5的记忆口径，新增显式
+`--retrieval-mode forced_topk`。该模式不是把threshold简单设为0，而是离线直接读取
+`ranking_top5`、流式每个累计音频step直接使用`ranked_matches[:5]`；0.86 score、
+0.35 edit ratio、posterior confidence和margin门控均不参与候选选择。`minimum_phonemes=4`
+与`posterior_weight=0.25`仍用于生成原始排名。样本仍为同一formal100，旧Operating
+目录不覆盖，新报告显式记录`threshold=null`、`guards_applied=false`和候选来源。
+
+必须先生成独立的离线Forced控制目录，再以它作为流式A/B导入和配置校验来源。
+工作区命令见`docs/STREAMING_RAG_EVAL.md`“Raw/Forced Top-5消融”。该消融用于观察
+Recall收益和错误注入/WER代价，不替代0.86部署基线，也不读取sealed test。
+
+本地实际验证：Forced/流式定向pytest 24项通过；全量pytest通过；本轮文件Ruff
+通过；54个source模块全量Mypy通过；两个CLI `--help`和`git diff --check`通过。
+全仓库Ruff仍只有9个既有UP038，不在本轮改动范围。
+
+## 0.16 2026-08-17 v3 Top-5 流式正式100条控制实验（H200 已完成）
 
 首次 Top-3 50条流式smoke已在H200完成，A/B/C/D/E均为50条且
 `status=pass`。该次使用v2 `stratified_100/retrieved_rag_v1`，最终精确热词

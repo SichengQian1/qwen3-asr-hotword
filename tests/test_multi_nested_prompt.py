@@ -327,6 +327,14 @@ def test_formal_100_profile_is_deterministic_two_x_expansion(tmp_path: Path) -> 
         scores,
         group_quotas=FORMAL_100_GROUP_QUOTAS,
     )
+    forced = select_multi_nested_prompt_samples(
+        records,
+        hotwords,
+        cases,
+        scores,
+        group_quotas=FORMAL_100_GROUP_QUOTAS,
+        retrieval_mode="forced_topk",
+    )
     assert len(formal) == 100
     assert {
         group: sum(item.primary_group == group for item in formal)
@@ -334,6 +342,15 @@ def test_formal_100_profile_is_deterministic_two_x_expansion(tmp_path: Path) -> 
     } == FORMAL_100_GROUP_QUOTAS
     assert {item.rag_sample.case_id for item in smoke}.issubset(
         item.rag_sample.case_id for item in formal
+    )
+    assert [item.rag_sample.case_id for item in forced] == [
+        item.rag_sample.case_id for item in formal
+    ]
+    score_by_case = {score.case_id: score for score in scores}
+    assert all(
+        len(item.rag_sample.selected_matches)
+        == min(5, len(score_by_case[item.rag_sample.case_id].ranked_matches))
+        for item in forced
     )
     references = {row.sample_id: row.reference_text for row in records.values()}
     report = run_multi_nested_prompt_eval(
@@ -355,3 +372,30 @@ def test_formal_100_profile_is_deterministic_two_x_expansion(tmp_path: Path) -> 
     assert report["selection"]["positive_cases"] == 80
     assert report["selection"]["negative_cases"] == 20
     assert report["model"]["max_new_tokens"] == 128
+
+
+def test_forced_topk_report_records_unthresholded_candidates(tmp_path: Path) -> None:
+    paths = _assets(tmp_path)
+    references = {
+        row.sample_id: row.reference_text
+        for row in load_validation_manifest(paths["manifest"]).values()
+    }
+    report = run_multi_nested_prompt_eval(
+        model_path=paths["model"],
+        validation_manifest_path=paths["manifest"],
+        vocab_path=paths["vocab"],
+        hotword_table_path=paths["hotwords"],
+        families_path=paths["families"],
+        cases_path=paths["cases"],
+        ctc_case_scores_path=paths["scores"],
+        ctc_report_path=paths["report"],
+        output_dir=tmp_path / "forced-output",
+        retrieval_mode="forced_topk",
+        model_loader=lambda _config: _FakeWrapper(references),
+        print_progress=False,
+    )
+    assert report["retrieval_config"]["mode"] == "forced_topk"
+    assert report["retrieval_config"]["threshold"] is None
+    assert report["retrieval_config"]["guards_applied"] is False
+    assert report["retrieval_config"]["candidate_source"] == "ranked_matches[:5]"
+    assert report["selection"]["prompted_cases"] == 50

@@ -5,7 +5,12 @@ from typing import Any
 
 from qwen_hotword.config import EXPECTED_MODEL_NAME, ModelConfig
 from qwen_hotword.hotwords.registry import HotwordEntry
-from qwen_hotword.hotwords.scoring import HotwordScoringConfig, score_hotwords
+from qwen_hotword.hotwords.scoring import (
+    HotwordMatch,
+    HotwordScoringConfig,
+    HotwordScoringResult,
+    score_hotwords,
+)
 from qwen_hotword.inference.streaming_core import StreamingCandidate
 from qwen_hotword.modeling.qwen_backbone import load_asr_model
 from qwen_hotword.phonemes.coverage import PhonemeVocab
@@ -71,6 +76,7 @@ class CumulativeAudioCtcDetector:
         hotwords: tuple[HotwordEntry, ...],
         language: str,
         scoring_config: HotwordScoringConfig,
+        retrieval_mode: str,
         device: str,
     ) -> None:
         self.wrapper = encoder_wrapper
@@ -80,6 +86,9 @@ class CumulativeAudioCtcDetector:
             raise ValueError("hotword IDs must be unique")
         self.language = language
         self.scoring_config = scoring_config
+        if retrieval_mode not in {"operating", "forced_topk"}:
+            raise ValueError(f"unknown CTC retrieval mode: {retrieval_mode}")
+        self.retrieval_mode = retrieval_mode
         self.device = device
 
     def __call__(
@@ -129,6 +138,11 @@ class CumulativeAudioCtcDetector:
             config=self.scoring_config,
             blank_id=0,
         )
+        matches = select_streaming_ctc_matches(
+            scored,
+            scoring_config=self.scoring_config,
+            retrieval_mode=self.retrieval_mode,
+        )
         return tuple(
             StreamingCandidate(
                 hotword_id=match.hotword_id,
@@ -137,8 +151,21 @@ class CumulativeAudioCtcDetector:
                 edit_ratio=match.edit_ratio,
                 posterior_confidence=match.posterior_confidence,
             )
-            for match in scored.selected_matches
+            for match in matches
         )
+
+
+def select_streaming_ctc_matches(
+    scored: HotwordScoringResult,
+    *,
+    scoring_config: HotwordScoringConfig,
+    retrieval_mode: str,
+) -> tuple[HotwordMatch, ...]:
+    if retrieval_mode == "operating":
+        return scored.selected_matches
+    if retrieval_mode == "forced_topk":
+        return scored.ranked_matches[: scoring_config.top_k]
+    raise ValueError(f"unknown CTC retrieval mode: {retrieval_mode}")
 
 
 def load_cumulative_ctc_detector(
@@ -151,6 +178,7 @@ def load_cumulative_ctc_detector(
     device: str,
     dtype: str,
     scoring_config: HotwordScoringConfig,
+    retrieval_mode: str = "operating",
 ) -> CumulativeAudioCtcDetector:
     import torch
 
@@ -189,5 +217,6 @@ def load_cumulative_ctc_detector(
         hotwords=hotwords,
         language=language,
         scoring_config=scoring_config,
+        retrieval_mode=retrieval_mode,
         device=device,
     )

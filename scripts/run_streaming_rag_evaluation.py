@@ -49,6 +49,15 @@ def main() -> int:
     parser.add_argument("--unfixed-token-num", type=int, default=5)
     parser.add_argument("--threshold", type=float, default=0.86)
     parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("operating", "forced_topk"),
+        default="operating",
+        help=(
+            "Use thresholded Operating candidates or raw ranked Top-K candidates. "
+            "The mode must match the offline control report."
+        ),
+    )
     parser.add_argument("--maximum-edit-ratio", type=float, default=0.35)
     parser.add_argument("--posterior-weight", type=float, default=0.25)
     parser.add_argument("--minimum-posterior-confidence", type=float, default=0.0)
@@ -89,6 +98,7 @@ def main() -> int:
             unfixed_token_num=args.unfixed_token_num,
             threshold=args.threshold,
             top_k=args.top_k,
+            retrieval_mode=args.retrieval_mode,
             maximum_edit_ratio=args.maximum_edit_ratio,
             posterior_weight=args.posterior_weight,
             minimum_posterior_confidence=args.minimum_posterior_confidence,

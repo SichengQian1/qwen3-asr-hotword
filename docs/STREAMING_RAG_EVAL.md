@@ -93,6 +93,66 @@ CUDA_VISIBLE_DEVICES=4 python scripts/run_streaming_rag_evaluation.py \
 离线入口仍要求新空目录。
 正式输出使用 streaming schema v2；Top-3 smoke50 保持 schema v1，不回写。
 
+## Raw/Forced Top-5 无门控消融
+
+该消融必须保留上面的0.86基线，并写入新目录。`forced_topk`直接使用原始排名前5：
+不应用score threshold、maximum edit ratio、posterior confidence或top-1 margin；
+它不是`--threshold 0`的别名。排名本身仍使用既有`minimum_phonemes=4`和
+`posterior_weight=0.25`。先运行同一formal100的离线A/B/Oracle：
+
+```bash
+V3_ROOT=outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested
+FORCED_OFFLINE_ROOT="$V3_ROOT/prompt_multi_nested_formal100_forced_top5_v1"
+
+CUDA_VISIBLE_DEVICES=4 python scripts/run_multi_nested_prompt_eval.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --ctc-case-scores "$V3_ROOT/hotword_case_scores_v3.jsonl" \
+  --ctc-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --output-dir "$FORCED_OFFLINE_ROOT" \
+  --selection-profile formal100 \
+  --retrieval-mode forced_topk \
+  --language Portuguese \
+  --device cuda:0 \
+  --dtype bfloat16
+```
+
+确认离线报告`status=pass`、`retrieval_config.mode=forced_topk`、
+`threshold=null`、`prompted_cases=100`后，再运行同一选择的流式A/B/C/D/E：
+
+```bash
+FORCED_STREAM_ROOT="$V3_ROOT/streaming_rag_2s_u2_t5_forced_top5_formal100_v1"
+
+CUDA_VISIBLE_DEVICES=4 python scripts/run_streaming_rag_evaluation.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --hotword-families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --ctc-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --offline-rag-dir "$FORCED_OFFLINE_ROOT" \
+  --offline-format multi_nested_v3 \
+  --ctc-checkpoint outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt \
+  --output-dir "$FORCED_STREAM_ROOT" \
+  --groups A,B,C,D,E \
+  --retrieval-mode forced_topk \
+  --chunk-size-sec 2.0 \
+  --unfixed-chunk-num 2 \
+  --unfixed-token-num 5 \
+  --top-k 5 \
+  --posterior-weight 0.25 \
+  --language Portuguese \
+  --gpu-memory-utilization 0.50
+```
+
+流式命令不传`--threshold`；内部仍用原CTC报告的0.86字段做来源身份核对，但
+`forced_topk`候选选择不读取该阈值。中断后在完全相同命令末尾加`--resume`。
+
 ## 固定基线
 
 ```text

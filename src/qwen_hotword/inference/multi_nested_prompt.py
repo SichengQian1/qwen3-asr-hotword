@@ -56,6 +56,7 @@ SELECTION_PROFILES: dict[str, dict[str, int]] = {
     "smoke50": DEFAULT_GROUP_QUOTAS,
     "formal100": FORMAL_100_GROUP_QUOTAS,
 }
+RETRIEVAL_MODES = {"operating", "forced_topk"}
 OUTPUT_FILENAMES = (
     "sample_selection.json",
     "baseline_predictions.jsonl",
@@ -88,6 +89,7 @@ def select_multi_nested_prompt_samples(
     *,
     seed: int = DEFAULT_MULTI_PROMPT_SEED,
     group_quotas: Mapping[str, int] | None = None,
+    retrieval_mode: str = "operating",
 ) -> tuple[MultiPromptSample, ...]:
     quotas = dict(group_quotas or DEFAULT_GROUP_QUOTAS)
     matching_profiles = [
@@ -97,6 +99,8 @@ def select_multi_nested_prompt_samples(
         raise ValueError(
             "multi-nested Prompt selection requires the fixed smoke50 or formal100 quotas"
         )
+    if retrieval_mode not in RETRIEVAL_MODES:
+        raise ValueError(f"unknown retrieval mode: {retrieval_mode}")
     expected_total = sum(quotas.values())
     hotword_by_id = {entry.hotword_id: entry for entry in hotwords}
     score_by_id = {score.case_id: score for score in scores}
@@ -136,7 +140,12 @@ def select_multi_nested_prompt_samples(
                     raise ValueError(
                         f"case {case.case_id} reference does not contain {entry.surface!r}"
                     )
-            matches = tuple(_retrieved_match(match) for match in score.operating_matches)
+            source_matches = (
+                score.operating_matches
+                if retrieval_mode == "operating"
+                else score.ranked_matches[:5]
+            )
+            matches = tuple(_retrieved_match(match) for match in source_matches)
             rag_sample = RetrievedRagSample(
                 case_id=case.case_id,
                 sample_id=case.sample_id,
@@ -149,7 +158,8 @@ def select_multi_nested_prompt_samples(
                 case_type="negative" if group == "negative" else "positive",
                 selection_reason=(
                     f"deterministic_seed={seed}; primary_group={group}; "
-                    "prioritize_operating_wrong_candidate_stress"
+                    "prioritize_operating_wrong_candidate_stress; "
+                    f"retrieval_mode={retrieval_mode}"
                 ),
             )
             selected.append(
@@ -184,6 +194,7 @@ def run_multi_nested_prompt_eval(
     output_dir: str | Path,
     seed: int = DEFAULT_MULTI_PROMPT_SEED,
     selection_profile: str = "smoke50",
+    retrieval_mode: str = "operating",
     prompt_template: str = DEFAULT_PT_BR_PROMPT_TEMPLATE,
     language: str = "Portuguese",
     dtype: str = "bfloat16",
@@ -198,6 +209,8 @@ def run_multi_nested_prompt_eval(
         raise ValueError("dtype must be bfloat16 or float16")
     if selection_profile not in SELECTION_PROFILES:
         raise ValueError(f"unknown multi-nested selection profile: {selection_profile}")
+    if retrieval_mode not in RETRIEVAL_MODES:
+        raise ValueError(f"unknown retrieval mode: {retrieval_mode}")
     group_quotas = SELECTION_PROFILES[selection_profile]
     build_hotword_prompt(("probe",), template=prompt_template)
     destination = Path(output_dir).expanduser()
@@ -232,6 +245,7 @@ def run_multi_nested_prompt_eval(
         scores,
         seed=seed,
         group_quotas=group_quotas,
+        retrieval_mode=retrieval_mode,
     )
     hotword_by_id = {entry.hotword_id: entry for entry in hotwords}
 
@@ -322,6 +336,7 @@ def run_multi_nested_prompt_eval(
         language=language,
         seed=seed,
         selection_profile=selection_profile,
+        retrieval_mode=retrieval_mode,
         group_quotas=group_quotas,
         elapsed=time.monotonic() - started,
         inputs={
@@ -341,6 +356,7 @@ def run_multi_nested_prompt_eval(
         "test_set_used": False,
         "seed": seed,
         "selection_profile": selection_profile,
+        "retrieval_mode": retrieval_mode,
         "target_group_counts": group_quotas,
         "actual_group_counts": {
             group: sum(item.primary_group == group for item in samples)
@@ -375,6 +391,7 @@ def _build_report(
     language: str,
     seed: int,
     selection_profile: str,
+    retrieval_mode: str,
     group_quotas: Mapping[str, int],
     elapsed: float,
     inputs: Mapping[str, Path],
@@ -485,13 +502,23 @@ def _build_report(
             "language": language,
         },
         "retrieval_config": {
-            "threshold": 0.86,
+            "mode": retrieval_mode,
+            "threshold": 0.86 if retrieval_mode == "operating" else None,
             "top_k": 5,
-            "maximum_edit_ratio": 0.35,
+            "maximum_edit_ratio": 0.35 if retrieval_mode == "operating" else None,
             "posterior_weight": 0.25,
-            "minimum_posterior_confidence": 0.0,
-            "minimum_top1_margin": 0.0,
-            "fixed": True,
+            "minimum_posterior_confidence": (
+                0.0 if retrieval_mode == "operating" else None
+            ),
+            "minimum_top1_margin": 0.0 if retrieval_mode == "operating" else None,
+            "minimum_phonemes": 4,
+            "guards_applied": retrieval_mode == "operating",
+            "candidate_source": (
+                "operating_matches"
+                if retrieval_mode == "operating"
+                else "ranked_matches[:5]"
+            ),
+            "fixed": retrieval_mode == "operating",
             "tuning_performed": False,
         },
         "selection": {
@@ -565,7 +592,11 @@ def _build_report(
         "limitations": [
             f"{len(samples)} deterministic validation cases; not a production benchmark.",
             "Longest-match is the final nested target; contained short hits are redundant.",
-            "Fixed threshold and Top-5; no tuning is performed.",
+            (
+                "Fixed threshold and Top-5; no tuning is performed."
+                if retrieval_mode == "operating"
+                else "Raw forced Top-5 diagnostic; score/edit/posterior guards are not applied."
+            ),
             "No sealed test data are read.",
         ],
         "next_step": "inspect outputs before any threshold or Top-K tuning",

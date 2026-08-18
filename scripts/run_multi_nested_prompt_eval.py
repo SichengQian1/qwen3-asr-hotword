@@ -44,6 +44,15 @@ def main() -> int:
             "2x 100-case expansion."
         ),
     )
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("operating", "forced_topk"),
+        default="operating",
+        help=(
+            "Use thresholded Operating matches or the raw ranked Top-5. "
+            "forced_topk is a diagnostic ablation and applies no score/edit/posterior guards."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=DEFAULT_MULTI_PROMPT_SEED)
     parser.add_argument("--language", default="Portuguese")
     parser.add_argument("--prompt-template", default=DEFAULT_PT_BR_PROMPT_TEMPLATE)
@@ -64,6 +73,7 @@ def main() -> int:
             output_dir=args.output_dir,
             seed=args.seed,
             selection_profile=args.selection_profile,
+            retrieval_mode=args.retrieval_mode,
             prompt_template=args.prompt_template,
             language=args.language,
             dtype=args.dtype,
