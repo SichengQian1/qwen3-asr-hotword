@@ -91,7 +91,6 @@ def _capacity_inputs(tmp_path: Path) -> dict[str, Path]:
         json.dumps(
             {
                 "selection_profile": "formal100",
-                "retrieval_mode": "operating",
                 "test_set_used": False,
                 "samples": [
                     {
@@ -320,6 +319,29 @@ def test_capacity_asset_builder_rejects_sealed_test_manifest(tmp_path: Path) -> 
             vocab_path=paths["vocab"],
             base_hotwords_path=paths["base_hotwords"],
             base_cases_path=paths["base_cases"],
+            output_dir=tmp_path / "assets",
+            sizes=(100, 101),
+            candidate_pool_multiplier=2,
+            print_progress=False,
+        )
+
+
+def test_capacity_asset_builder_rejects_explicit_forced_selection(
+    tmp_path: Path,
+) -> None:
+    paths = _capacity_inputs(tmp_path)
+    selection = json.loads(paths["selection"].read_text(encoding="utf-8"))
+    selection["retrieval_mode"] = "forced_topk"
+    paths["selection"].write_text(json.dumps(selection), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="legacy formal100 or operating"):
+        build_hotword_capacity_assets(
+            training_manifest_path=paths["train"],
+            dictionary_path=paths["dictionary"],
+            vocab_path=paths["vocab"],
+            base_hotwords_path=paths["base_hotwords"],
+            base_cases_path=paths["base_cases"],
+            selection_path=paths["selection"],
             output_dir=tmp_path / "assets",
             sizes=(100, 101),
             candidate_pool_multiplier=2,

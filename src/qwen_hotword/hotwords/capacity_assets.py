@@ -284,8 +284,9 @@ def _select_capacity_cases(
         raise ValueError("capacity selection must explicitly record test_set_used=false")
     if raw.get("selection_profile") != "formal100":
         raise ValueError("capacity selection must use the sealed formal100 profile")
-    if raw.get("retrieval_mode") != "operating":
-        raise ValueError("capacity selection must come from the operating retrieval run")
+    retrieval_mode = raw.get("retrieval_mode")
+    if retrieval_mode not in {None, "operating"}:
+        raise ValueError("capacity selection must be legacy formal100 or operating retrieval")
     samples = raw.get("samples")
     if not isinstance(samples, list) or not samples:
         raise ValueError("capacity selection has no samples")

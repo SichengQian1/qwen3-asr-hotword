@@ -47,8 +47,10 @@ Operating/Forced评测。
 该步骤是CPU任务。新增候选来自Noah葡语train-only Manifest中的真实1至4词连续
 n-gram；base 100来自既有v3 case。`--selection`把case严格限制为既有Operating
 formal100的同一批80正例+20负例。
-构建器还会拒绝非`formal100`或非`operating`的选择文件，并以选择文件中的最长匹配
-真值覆盖原始case真值；正式结果应为100条case、172个`base_expected_hotwords`。
+构建器还会拒绝非`formal100`或明确标记为`forced_topk`的选择文件；2026-08-18
+以前生成、尚无`retrieval_mode`字段的旧Operating formal100兼容放行。选择文件中的
+最长匹配真值会覆盖原始case真值；正式结果应为100条case、172个
+`base_expected_hotwords`。
 
 ```bash
 python scripts/build_hotword_capacity_assets.py \

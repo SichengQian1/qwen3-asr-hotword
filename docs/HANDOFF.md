@@ -13,8 +13,9 @@ sealed test。
 - `src/qwen_hotword/hotwords/capacity_assets.py`：从Noah葡语train-only Manifest
   确定性采样真实1至4词连续n-gram，校验MFA/phone覆盖，构建Representative与
   Hard-negative两套严格嵌套active词库；支持读取既有formal100
-  `sample_selection.json`，并强制formal100/operating语义，以选择文件中的最长匹配
-  真值覆盖原始多真值，防止扩容时悄悄改变case集合或真值口径。
+  `sample_selection.json`，强制formal100并拒绝明确的forced选择，同时兼容尚无
+  `retrieval_mode`字段的旧Operating formal100；以选择文件中的最长匹配真值覆盖
+  原始多真值，防止扩容时悄悄改变case集合或真值口径。
 - `src/qwen_hotword/hotwords/capacity_replay.py`：生成完整Validation feature-cache
   离线CTC replay，或真实累计0-2/0-4/...音频的流式CTC replay；后者分段记录
   processor、Encoder、CTC Head、posterior decode和GPU内存，尾部不足2秒保留。
