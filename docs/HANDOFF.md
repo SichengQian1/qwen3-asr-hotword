@@ -35,7 +35,8 @@ checkpoint、评分公式、0.86阈值、Top-5、Prompt或模型：
 本地张量测试使用仓库`.conda`的Torch 2.10真实执行，已覆盖float16分片
 round-trip、严格校验和greedy等价；基础Python无Torch时对应测试会正常skip。
 完整H200命令和验收条件见`docs/HOTWORD_CAPACITY_EVAL.md`第7–8节。第一步先用
-旧streaming replay生成诊断；第二步在新目录生成20条Posterior smoke。预期旧case
+旧formal100离线replay生成2k排名挤出主诊断，再用旧smoke20流式replay生成跨chunk
+前缀与时延诊断；第二步在新目录生成20条Posterior smoke。预期旧case
 未变时仍是67个step/17个tail flush，必须看到
 `greedy_equivalence_mismatches=0`后才能开始GPU Top-128/256 scorer。
 

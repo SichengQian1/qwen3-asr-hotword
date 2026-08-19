@@ -262,13 +262,31 @@ rank_displacement_cases.jsonl
 rank_displacement_summary.json
 ```
 
-只重放现有流式replay即可生成第一项，不加载Qwen：
+排名挤出以完整formal100离线replay为主，不加载Qwen：
 
 ```bash
 CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
 ASSET_ROOT="$CAP_ROOT/assets"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
 STREAM_REPLAY_SMOKE_ROOT="$CAP_ROOT/replay_streaming_smoke20_v1"
 
+python scripts/benchmark_hotword_capacity.py \
+  --assets-root "$ASSET_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 100,500,1000,2000 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --stop-retrieval-p95-seconds 2.0 \
+  --output-dir "$CAP_ROOT/benchmark_offline_formal100_diagnostics_v2"
+```
+
+再对20条流式replay生成分阶段时延和跨chunk前缀稳定性：
+
+```bash
 python scripts/benchmark_hotword_capacity.py \
   --assets-root "$ASSET_ROOT" \
   --replay "$STREAM_REPLAY_SMOKE_ROOT/ctc_replay.jsonl" \
@@ -282,6 +300,9 @@ python scripts/benchmark_hotword_capacity.py \
   --stop-retrieval-p95-seconds 2.0 \
   --output-dir "$CAP_ROOT/benchmark_streaming_smoke20_diagnostics_v2"
 ```
+
+formal100离线结果是2k排名质量主证据；smoke20只用于补充真实累计
+流式的前缀改写和时延证据，不得用其替代完整100条质量结论。
 
 ## 8. 生成帧级Posterior Replay
 
