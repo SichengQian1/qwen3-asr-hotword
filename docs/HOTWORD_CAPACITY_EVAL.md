@@ -149,6 +149,9 @@ quality_summary.json
 performance_summary.json
 capacity_recommendation.json
 query_results.jsonl
+ctc_prefix_stability.json
+rank_displacement_cases.jsonl
+rank_displacement_summary.json
 summary.json
 sha256.txt
 ```
@@ -223,3 +226,102 @@ P95约2.070秒，因此按保护策略停止；该结果必须保留为slow-back
 模型容量为0。后续实现保持窗口、距离、排序和门控完全不变，只把Levenshtein距离
 换成项目已锁定的RapidFuzz 3.x等价C++后端。新benchmark的`run_config.json`和
 `summary.json`必须显示`edit_distance_backend=rapidfuzz`，并使用新输出目录。
+
+## 7. 已冻结的RapidFuzz基线与2k目标
+
+2026-08-19已完成Representative基线。质量数字来自同一份formal100离线replay；
+流式工程数字来自20条真实累计音频、67个step（含17个tail flush）。以下结果必须
+保留，后续GPU候选器以它们为对照，不能通过改阈值或改Top-5重写基线：
+
+| active词数 | Raw Recall@5 | Operating Recall@5 | 负例FPR | 流式retrieval P95 | CTC+retrieval P95 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 95.35% | 81.40% | 0% | 109 ms | 514 ms |
+| 500 | 94.19% | 81.40% | 0% | 720 ms | 1.051 s |
+| 1,000 | 91.86% | 81.40% | 5% | 1.097 s | 1.411 s |
+| 2,000 | 88.37% | 80.23% | 20% | 2.893 s | 3.021 s |
+
+因此2k不能只靠增量编辑距离解决：matching时延和Top-5排序/FPR都已经失效。下一版
+目标架构固定为“GPU帧级CTC候选召回 -> Top-128/256 -> CPU/GPU精确重排 ->
+Operating Top-5”。在实现候选器前先完成两项不改语义的证据建设：
+
+1. 从既有decoded replay导出processor/Encoder/Head/decode分阶段分布、累计CTC前缀
+   稳定性，以及每个目标词被挤出Top-5或被Operating guard拦下的逐例记录。
+2. 重新生成float16帧级`log_softmax` Posterior Replay，供后续GPU packed CTC scorer
+   复用；每个分片必须通过SHA256、shape、有效长度、归一化和greedy collapse等价校验。
+
+新benchmark输出会额外包含：
+
+```text
+performance_summary.json
+  -> performance.source_latency_seconds.{processor,encoder,ctc_head,ctc_decode,source_ctc}
+ctc_prefix_stability.json
+  -> 每个相邻累计chunk的LCP、被改写后缀长度、append-only率
+rank_displacement_cases.jsonl
+  -> expected_displaced_below_raw_top5 / raw_top5_rejected_by_operating_guards /
+     negative_false_positive等逐例证据
+rank_displacement_summary.json
+```
+
+只重放现有流式replay即可生成第一项，不加载Qwen：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_ROOT="$CAP_ROOT/assets"
+STREAM_REPLAY_SMOKE_ROOT="$CAP_ROOT/replay_streaming_smoke20_v1"
+
+python scripts/benchmark_hotword_capacity.py \
+  --assets-root "$ASSET_ROOT" \
+  --replay "$STREAM_REPLAY_SMOKE_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 100,500,1000,2000 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --stop-retrieval-p95-seconds 2.0 \
+  --output-dir "$CAP_ROOT/benchmark_streaming_smoke20_diagnostics_v2"
+```
+
+## 8. 生成帧级Posterior Replay
+
+Posterior Replay仍使用0-2/0-4/...累计音频和原Temporal 2× Head。它不改变检测结果，
+只在原`ctc_replay.jsonl`旁新增张量资产：
+
+```text
+posterior_shards/part-00000.pt ...  # [N,Tmax,90] float16 log-softmax
+posterior_index.jsonl               # case/chunk -> shard row
+posterior_shards.json               # shape、长度、SHA256和分片元数据
+```
+
+先在20条smoke上生成，输出必须使用新目录：
+
+```bash
+POSTERIOR_SMOKE_ROOT="$CAP_ROOT/replay_streaming_posterior_smoke20_v1"
+
+CUDA_VISIBLE_DEVICES=4 python scripts/build_hotword_capacity_replay.py \
+  --mode streaming \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --ctc-checkpoint outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt \
+  --cases "$ASSET_ROOT/representative/size_100/cases.jsonl" \
+  --output-dir "$POSTERIOR_SMOKE_ROOT" \
+  --device cuda:0 \
+  --dtype bfloat16 \
+  --language Portuguese \
+  --chunk-size-sec 2.0 \
+  --max-samples 20 \
+  --save-log-posteriors \
+  --posterior-shard-size 32
+
+cat "$POSTERIOR_SMOKE_ROOT/summary.json"
+cat "$POSTERIOR_SMOKE_ROOT/posterior_shards.json"
+(cd "$POSTERIOR_SMOKE_ROOT" && sha256sum -c sha256.txt)
+```
+
+验收条件：`posterior_replay.status=pass`、`num_classes=90`、
+`storage_dtype=float16`、`greedy_equivalence_mismatches=0`、全部SHA256通过，且20条
+smoke应仍为67个step/17个tail flush（若输入case未变）。这些资产确认后才进入
+GPU packed CTC Top-128/256候选器；本阶段不实现候选保留、TTL、阈值调整或轻量
+reranker。

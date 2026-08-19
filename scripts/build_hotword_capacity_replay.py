@@ -43,6 +43,15 @@ def main() -> int:
     parser.add_argument("--language", default="Portuguese")
     parser.add_argument("--chunk-size-sec", type=float, default=2.0)
     parser.add_argument("--max-samples", type=int, default=0)
+    parser.add_argument(
+        "--save-log-posteriors",
+        action="store_true",
+        help=(
+            "For streaming mode, also save causal frame-level log-softmax values "
+            "as validated float16 tensor shards."
+        ),
+    )
+    parser.add_argument("--posterior-shard-size", type=int, default=32)
     parser.add_argument("--quiet-progress", action="store_true")
     args = parser.parse_args()
     try:
@@ -76,6 +85,8 @@ def main() -> int:
                 language=args.language,
                 chunk_size_sec=args.chunk_size_sec,
                 max_samples=args.max_samples,
+                save_log_posteriors=args.save_log_posteriors,
+                posterior_shard_size=args.posterior_shard_size,
                 print_progress=not args.quiet_progress,
             )
     except (FileExistsError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:

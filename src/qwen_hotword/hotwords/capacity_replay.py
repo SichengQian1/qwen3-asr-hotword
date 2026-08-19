@@ -168,12 +168,16 @@ def build_streaming_capacity_replay(
     language: str = "Portuguese",
     chunk_size_sec: float = 2.0,
     max_samples: int = 0,
+    save_log_posteriors: bool = False,
+    posterior_shard_size: int = 32,
     print_progress: bool = True,
 ) -> dict[str, object]:
     if chunk_size_sec != 2.0:
         raise ValueError("capacity v1 streaming replay is sealed to 2.0 second chunks")
     if max_samples < 0:
         raise ValueError("max_samples must not be negative")
+    if posterior_shard_size <= 0:
+        raise ValueError("posterior_shard_size must be positive")
     paths = _validated_paths(
         validation_manifest=validation_manifest_path,
         vocab=vocab_path,
@@ -209,6 +213,15 @@ def build_streaming_capacity_replay(
         cases = cases[:max_samples]
 
     rows: list[dict[str, object]] = []
+    posterior_writer = (
+        PosteriorReplayShardWriter(
+            destination,
+            num_classes=len(vocab.tokens),
+            shard_size=posterior_shard_size,
+        )
+        if save_log_posteriors
+        else None
+    )
     started = time.monotonic()
     for case_index, case in enumerate(cases, start=1):
         manifest = manifest_rows.get(case.sample_id)
@@ -262,30 +275,34 @@ def build_streaming_capacity_replay(
             )
             decode_seconds = time.perf_counter() - decode_started
             gpu_memory = _gpu_memory_snapshot(device)
-            rows.append(
-                _replay_row(
-                    case,
-                    chunk_id=chunk.chunk_id,
-                    cumulative_audio_sec=chunk.end_sec,
-                    is_final=chunk == chunks[-1],
-                    is_tail_flush=chunk.is_tail_flush,
-                    effective_time_steps=int(effective[0].item()),
-                    decoded=decoded,
-                    source_timings={
-                        "processor_seconds": processor_seconds,
-                        "encoder_seconds": encoder_seconds,
-                        "ctc_head_seconds": head_seconds,
-                        "ctc_decode_seconds": decode_seconds,
-                        **gpu_memory,
-                    },
-                )
+            replay_row = _replay_row(
+                case,
+                chunk_id=chunk.chunk_id,
+                cumulative_audio_sec=chunk.end_sec,
+                is_final=chunk == chunks[-1],
+                is_tail_flush=chunk.is_tail_flush,
+                effective_time_steps=int(effective[0].item()),
+                decoded=decoded,
+                source_timings={
+                    "processor_seconds": processor_seconds,
+                    "encoder_seconds": encoder_seconds,
+                    "ctc_head_seconds": head_seconds,
+                    "ctc_decode_seconds": decode_seconds,
+                    **gpu_memory,
+                },
             )
+            rows.append(replay_row)
+            if posterior_writer is not None:
+                effective_steps = int(effective[0].item())
+                log_posteriors = logits[0, :effective_steps].float().log_softmax(dim=-1)
+                posterior_writer.add(replay_row, log_posteriors)
         if print_progress:
             print(
                 f"capacity streaming replay={case_index}/{len(cases)} "
                 f"case={case.case_id} chunks={len(chunks)}",
                 flush=True,
             )
+    posterior_summary = posterior_writer.finalize() if posterior_writer is not None else None
     return _finalize_replay(
         destination,
         rows,
@@ -306,8 +323,253 @@ def build_streaming_capacity_replay(
             "chunk_size_sec": chunk_size_sec,
             "ctc_input_strategy": "cumulative_audio",
             "max_samples": max_samples,
+            "posterior_replay": (
+                {
+                    "enabled": True,
+                    "values": "log_softmax",
+                    "storage_dtype": "float16",
+                    "shard_size": posterior_shard_size,
+                    "blank_id": 0,
+                }
+                if posterior_writer is not None
+                else {"enabled": False}
+            ),
         },
+        posterior_summary=posterior_summary,
     )
+
+
+class PosteriorReplayShardWriter:
+    """Write variable-length frame posteriors as hash-checked padded tensor shards."""
+
+    def __init__(self, destination: str | Path, *, num_classes: int, shard_size: int) -> None:
+        if num_classes <= 1:
+            raise ValueError("num_classes must include blank and at least one phone")
+        if shard_size <= 0:
+            raise ValueError("posterior shard_size must be positive")
+        self.destination = Path(destination).expanduser()
+        self.shard_dir = self.destination / "posterior_shards"
+        self.shard_dir.mkdir(parents=True, exist_ok=False)
+        self.num_classes = num_classes
+        self.shard_size = shard_size
+        self.pending: list[tuple[dict[str, object], Any]] = []
+        self.index_rows: list[dict[str, object]] = []
+        self.shards: list[dict[str, object]] = []
+
+    def add(self, replay_row: Mapping[str, object], log_posteriors: Any) -> None:
+        import torch
+
+        if not isinstance(log_posteriors, torch.Tensor) or log_posteriors.ndim != 2:
+            raise ValueError("log_posteriors must be a rank-2 torch.Tensor")
+        raw_steps = replay_row.get("effective_time_steps")
+        if not isinstance(raw_steps, int) or isinstance(raw_steps, bool) or raw_steps <= 0:
+            raise ValueError("replay row has invalid effective_time_steps")
+        expected_steps = raw_steps
+        if tuple(log_posteriors.shape) != (expected_steps, self.num_classes):
+            raise ValueError(
+                "posterior shape differs from replay metadata: "
+                f"{tuple(log_posteriors.shape)} != {(expected_steps, self.num_classes)}"
+            )
+        if not bool(torch.isfinite(log_posteriors).all()):
+            raise ValueError("log_posteriors contain non-finite values")
+        tensor = log_posteriors.detach().to(device="cpu", dtype=torch.float16).contiguous()
+        self.pending.append((dict(replay_row), tensor))
+        if len(self.pending) >= self.shard_size:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self.pending:
+            return
+        import torch
+
+        shard_id = len(self.shards)
+        lengths = torch.tensor([tensor.shape[0] for _, tensor in self.pending], dtype=torch.int64)
+        max_steps = int(lengths.max().item())
+        padded = torch.full(
+            (len(self.pending), max_steps, self.num_classes),
+            fill_value=float("-inf"),
+            dtype=torch.float16,
+        )
+        for row_index, (_, tensor) in enumerate(self.pending):
+            padded[row_index, : tensor.shape[0]] = tensor
+        relative_path = Path("posterior_shards") / f"part-{shard_id:05d}.pt"
+        path = self.destination / relative_path
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        torch.save(
+            {
+                "schema_version": torch.tensor(1, dtype=torch.int64),
+                "log_posteriors": padded,
+                "lengths": lengths,
+            },
+            temporary,
+        )
+        temporary.replace(path)
+        for shard_row, (replay_row, _) in enumerate(self.pending):
+            self.index_rows.append(
+                {
+                    "schema_version": 1,
+                    "case_id": replay_row["case_id"],
+                    "sample_id": replay_row["sample_id"],
+                    "chunk_id": replay_row["chunk_id"],
+                    "cumulative_audio_sec": replay_row["cumulative_audio_sec"],
+                    "is_final": replay_row["is_final"],
+                    "is_tail_flush": replay_row["is_tail_flush"],
+                    "effective_time_steps": replay_row["effective_time_steps"],
+                    "decoded": replay_row["decoded"],
+                    "shard_id": shard_id,
+                    "shard_path": str(relative_path),
+                    "shard_row": shard_row,
+                }
+            )
+        self.shards.append(
+            {
+                "shard_id": shard_id,
+                "path": str(relative_path),
+                "records": len(self.pending),
+                "padded_shape": list(padded.shape),
+                "storage_dtype": "float16",
+                "total_effective_time_steps": int(lengths.sum().item()),
+                "size_bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        )
+        self.pending.clear()
+
+    def finalize(self) -> dict[str, object]:
+        self._flush()
+        if not self.index_rows:
+            raise ValueError("posterior replay is empty")
+        _write_jsonl(self.destination / "posterior_index.jsonl", self.index_rows)
+        _write_json(
+            self.destination / "posterior_shards.json",
+            {
+                "schema_version": 1,
+                "values": "log_softmax",
+                "storage_dtype": "float16",
+                "blank_id": 0,
+                "num_classes": self.num_classes,
+                "shard_size": self.shard_size,
+                "records": len(self.index_rows),
+                "shards": self.shards,
+            },
+        )
+        return validate_posterior_replay(self.destination)
+
+
+def validate_posterior_replay(root: str | Path) -> dict[str, object]:
+    """Strictly validate posterior shard hashes, shapes, normalization, and greedy decode."""
+    import torch
+
+    destination = Path(root).expanduser()
+    manifest_path = destination / "posterior_shards.json"
+    index_path = destination / "posterior_index.jsonl"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or manifest.get("storage_dtype") != "float16":
+        raise ValueError("posterior shard manifest is invalid")
+    num_classes = manifest.get("num_classes")
+    if not isinstance(num_classes, int) or num_classes <= 1:
+        raise ValueError("posterior shard manifest has invalid num_classes")
+    rows = _load_posterior_index(index_path)
+    rows_by_shard: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        rows_by_shard.setdefault(int(row["shard_id"]), []).append(row)
+    mismatches = 0
+    maximum_logsumexp_error = 0.0
+    total_steps = 0
+    maximum_steps = 0
+    descriptors = manifest.get("shards")
+    if not isinstance(descriptors, list) or not descriptors:
+        raise ValueError("posterior shard manifest contains no shards")
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict):
+            raise ValueError("posterior shard descriptor must be an object")
+        shard_id = int(descriptor["shard_id"])
+        path = destination / str(descriptor["path"])
+        if _sha256_file(path) != descriptor.get("sha256"):
+            raise ValueError(f"posterior shard SHA256 mismatch: {path}")
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        posteriors = payload.get("log_posteriors")
+        lengths = payload.get("lengths")
+        shard_rows = sorted(rows_by_shard.get(shard_id, []), key=lambda row: row["shard_row"])
+        if (
+            not isinstance(posteriors, torch.Tensor)
+            or posteriors.ndim != 3
+            or posteriors.dtype != torch.float16
+            or posteriors.shape[2] != num_classes
+            or not isinstance(lengths, torch.Tensor)
+            or lengths.dtype != torch.int64
+            or lengths.ndim != 1
+            or posteriors.shape[0] != lengths.shape[0]
+            or len(shard_rows) != lengths.shape[0]
+        ):
+            raise ValueError(f"posterior shard tensor layout is invalid: {path}")
+        for row_index, row in enumerate(shard_rows):
+            length = int(lengths[row_index].item())
+            if length != int(row["effective_time_steps"]) or not 0 < length <= posteriors.shape[1]:
+                raise ValueError(f"posterior shard length mismatch: {path} row {row_index}")
+            values = posteriors[row_index, :length].float()
+            if not bool(torch.isfinite(values).all()):
+                raise ValueError(f"posterior shard contains non-finite active values: {path}")
+            error = float(torch.logsumexp(values, dim=-1).abs().max().item())
+            maximum_logsumexp_error = max(maximum_logsumexp_error, error)
+            if error > 0.01:
+                raise ValueError(f"posterior shard is not normalized: {path} error={error}")
+            decoded = decode_ctc_posterior(values, input_length=length, blank_id=0)
+            expected = row["decoded"]
+            actual_keys = [(item.token_id, item.start_step, item.end_step) for item in decoded]
+            expected_keys = [
+                (int(item["token_id"]), int(item["start_step"]), int(item["end_step"]))
+                for item in expected
+            ]
+            if actual_keys != expected_keys:
+                mismatches += 1
+            total_steps += length
+            maximum_steps = max(maximum_steps, length)
+    if mismatches:
+        raise ValueError(f"posterior replay greedy equivalence failed for {mismatches} rows")
+    if len(rows) != int(manifest.get("records", -1)):
+        raise ValueError("posterior index record count differs from shard manifest")
+    return {
+        "schema_version": 1,
+        "status": "pass",
+        "records": len(rows),
+        "shards": len(descriptors),
+        "num_classes": num_classes,
+        "storage_dtype": "float16",
+        "total_effective_time_steps": total_steps,
+        "maximum_effective_time_steps": maximum_steps,
+        "maximum_logsumexp_error": maximum_logsumexp_error,
+        "greedy_equivalence_mismatches": mismatches,
+    }
+
+
+def _load_posterior_index(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            row = _load_object(line, path, line_number)
+            key = (_required_string(row, "case_id", line_number), int(row.get("chunk_id", -1)))
+            if key in seen:
+                raise ValueError(f"duplicate posterior replay case/chunk: {key}")
+            effective = row.get("effective_time_steps")
+            if not isinstance(effective, int) or effective <= 0:
+                raise ValueError(f"posterior index row {line_number} has invalid length")
+            row["decoded"] = [
+                asdict_decoded(item, effective_time_steps=effective, line_number=line_number)
+                for item in _object_list(row, "decoded", line_number)
+            ]
+            for key_name in ("shard_id", "shard_row"):
+                value = row.get(key_name)
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise ValueError(f"posterior index row {line_number} has invalid {key_name}")
+            rows.append(row)
+            seen.add(key)
+    if not rows:
+        raise ValueError("posterior replay index is empty")
+    return rows
 
 
 def load_capacity_replay(path: str | Path) -> tuple[dict[str, Any], ...]:
@@ -441,6 +703,7 @@ def _finalize_replay(
     inputs: Mapping[str, Path],
     elapsed_seconds: float,
     extra_config: Mapping[str, object],
+    posterior_summary: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     replay_path = destination / "ctc_replay.jsonl"
     config_path = destination / "run_config.json"
@@ -465,6 +728,7 @@ def _finalize_replay(
         "elapsed_seconds": elapsed_seconds,
         "replay_path": str(replay_path),
         "replay_sha256": _sha256_file(replay_path),
+        "posterior_replay": dict(posterior_summary) if posterior_summary is not None else None,
         "test_set_used": False,
     }
     _write_json(config_path, config)

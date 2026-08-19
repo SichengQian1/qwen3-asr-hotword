@@ -1,5 +1,50 @@
 # 工作交接记录
 
+## 0.20 2026-08-19 2k葡语热词库：诊断冻结与Posterior Replay
+
+用户将本阶段产品目标固定为2,000个在线葡语热词。已有RapidFuzz精确全扫描
+基线表明，仅做增量编辑距离不足以达标：2k的Raw Recall@5从100词的95.35%
+降到88.37%，Operating Recall@5为80.23%，负例FPR为20%；20条真实累计流式
+replay上retrieval P95为2.893秒，CTC+retrieval P95为3.021秒。对照的100词
+分别为109毫秒和514毫秒。
+
+已确认的工程路线是：
+
+```text
+float16 frame-level CTC log posteriors
+-> GPU packed CTC candidate recall over 2k
+-> Top-128/256
+-> recent-window exact rerank + explicit retention/family diversity
+-> unchanged Operating Top-5
+```
+
+本轮只完成上述架构的输入证据层，没有实现GPU scorer，也没有改变CTC
+checkpoint、评分公式、0.86阈值、Top-5、Prompt或模型：
+
+- `capacity_benchmark.py`新增每阶段source时延分布，不再只保存合计值。
+- 新增`ctc_prefix_stability.json`：按case衡量相邻累计chunk的最长公共前缀、
+  旧后缀被改写token数、append-only率与case级不稳定率。
+- 新增`rank_displacement_cases.jsonl`/`rank_displacement_summary.json`：逐例区分
+  正确词被挤出Raw Top-5、Raw Top-5内但被Operating guard拦下，以及负例误触发。
+- `capacity_replay.py`新增可选`--save-log-posteriors`：将每个因果累计step的
+  `[T,90]` log-softmax以float16填充分片保存，JSONL只存索引与decoded对照。
+- Posterior分片在写入后立即做SHA256、shape/dtype、有效长度、有限值、
+  logsumexp归一化和greedy token/span 100%等价校验；任一不一致直接失败。
+- CLI新增`--posterior-shard-size`，默认32个step一个分片。旧replay默认行为不变。
+
+本地张量测试使用仓库`.conda`的Torch 2.10真实执行，已覆盖float16分片
+round-trip、严格校验和greedy等价；基础Python无Torch时对应测试会正常skip。
+完整H200命令和验收条件见`docs/HOTWORD_CAPACITY_EVAL.md`第7–8节。第一步先用
+旧streaming replay生成诊断；第二步在新目录生成20条Posterior smoke。预期旧case
+未变时仍是67个step/17个tail flush，必须看到
+`greedy_equivalence_mismatches=0`后才能开始GPU Top-128/256 scorer。
+
+本轮本地验证：任务文件Ruff通过；定向pytest 8项通过且已用仓库
+`.conda`的Torch实跑；全量pytest 169项通过；57个source模块全量
+Mypy strict通过；两个CLI `--help`和`git diff --check`通过。全仓库Ruff仍报
+9个既有UP038，位于本轮未改动的multi-nested/prompt/retrieved/temporal文件；
+本轮没有把它们纳入交付。
+
 ## 0.19 2026-08-18 葡语100至10k热词库容量评测（代码完成，待H200）
 
 按照已确认的容量阶梯`100/500/1k/2k/5k/10k`新增葡语单语热词库容量评测。

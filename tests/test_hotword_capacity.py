@@ -7,7 +7,15 @@ from pathlib import Path
 import pytest
 
 from qwen_hotword.hotwords.capacity_assets import build_hotword_capacity_assets
-from qwen_hotword.hotwords.capacity_benchmark import benchmark_hotword_capacity
+from qwen_hotword.hotwords.capacity_benchmark import (
+    _rank_displacement_diagnostics,
+    analyze_ctc_prefix_stability,
+    benchmark_hotword_capacity,
+)
+from qwen_hotword.hotwords.capacity_replay import (
+    PosteriorReplayShardWriter,
+    validate_posterior_replay,
+)
 from qwen_hotword.hotwords.registry import HotwordEntry, load_hotword_table, write_hotword_table
 from qwen_hotword.hotwords.scoring import (
     DecodedPhoneme,
@@ -214,6 +222,148 @@ def test_fast_edit_distance_is_exactly_equivalent_to_editops() -> None:
         )
 
 
+def test_posterior_replay_shards_round_trip_and_preserve_greedy_decode(
+    tmp_path: Path,
+) -> None:
+    torch = pytest.importorskip("torch")
+    output = tmp_path / "posterior"
+    output.mkdir()
+    writer = PosteriorReplayShardWriter(output, num_classes=4, shard_size=1)
+    logits = torch.tensor(
+        [
+            [8.0, -8.0, -8.0, -8.0],
+            [-8.0, 8.0, -8.0, -8.0],
+            [-8.0, 8.0, -8.0, -8.0],
+            [8.0, -8.0, -8.0, -8.0],
+            [-8.0, -8.0, 8.0, -8.0],
+        ]
+    )
+    row = {
+        "case_id": "case-1",
+        "sample_id": "sample-1",
+        "chunk_id": 0,
+        "cumulative_audio_sec": 2.0,
+        "is_final": True,
+        "is_tail_flush": False,
+        "effective_time_steps": 5,
+        "decoded": [
+            {
+                "token_id": 1,
+                "confidence": 0.99,
+                "start_step": 1,
+                "end_step": 3,
+            },
+            {
+                "token_id": 2,
+                "confidence": 0.99,
+                "start_step": 4,
+                "end_step": 5,
+            },
+        ],
+    }
+    writer.add(row, logits.log_softmax(dim=-1))
+    summary = writer.finalize()
+
+    assert summary["status"] == "pass"
+    assert summary["records"] == 1
+    assert summary["greedy_equivalence_mismatches"] == 0
+    assert summary["storage_dtype"] == "float16"
+    assert validate_posterior_replay(output) == summary
+    shard = output / "posterior_shards" / "part-00000.pt"
+    assert shard.is_file()
+    shard.write_bytes(shard.read_bytes() + b"corrupt")
+    with pytest.raises(ValueError, match="SHA256 mismatch"):
+        validate_posterior_replay(output)
+
+
+def test_ctc_prefix_stability_detects_revised_suffix() -> None:
+    common = {
+        "case_id": "case-1",
+        "sample_id": "sample-1",
+        "is_final": False,
+        "is_tail_flush": False,
+    }
+    report = analyze_ctc_prefix_stability(
+        [
+            {
+                **common,
+                "chunk_id": 0,
+                "cumulative_audio_sec": 2.0,
+                "decoded": [{"token_id": 1}, {"token_id": 2}, {"token_id": 3}],
+            },
+            {
+                **common,
+                "chunk_id": 1,
+                "cumulative_audio_sec": 4.0,
+                "decoded": [{"token_id": 1}, {"token_id": 2}, {"token_id": 4}],
+            },
+            {
+                **common,
+                "chunk_id": 2,
+                "cumulative_audio_sec": 6.0,
+                "is_final": True,
+                "decoded": [
+                    {"token_id": 1},
+                    {"token_id": 2},
+                    {"token_id": 4},
+                    {"token_id": 5},
+                ],
+            },
+        ]
+    )
+
+    summary = report["summary"]
+    assert summary["transitions"] == 2
+    assert summary["cases_with_prefix_revision"] == 1
+    assert summary["append_only_rate"] == 0.5
+    assert report["transitions"][0]["previous_suffix_revised_tokens"] == 1
+
+
+def test_rank_displacement_diagnostics_separate_ranking_guards_and_false_positives() -> None:
+    common = {
+        "profile": "representative",
+        "size": 2_000,
+        "case_id": "positive",
+        "sample_id": "sample-positive",
+        "primary_group": "single_hotword",
+        "chunk_id": 0,
+        "cumulative_audio_sec": 4.0,
+        "is_final": True,
+        "raw_top5_ids": ["a", "b", "c", "d", "e"],
+        "operating_ids": ["a", "b"],
+        "top5_floor_score": 0.8,
+        "top_matches": [],
+        "negative_false_positive": False,
+    }
+    failures, summary = _rank_displacement_diagnostics(
+        [
+            {
+                **common,
+                "expected_hotword_ids": ["target-low", "e"],
+                "expected_ranks": {"target-low": 9, "e": 5},
+                "expected_scores": {"target-low": 0.7, "e": 0.8},
+            },
+            {
+                **common,
+                "case_id": "negative",
+                "sample_id": "sample-negative",
+                "expected_hotword_ids": [],
+                "expected_ranks": {},
+                "expected_scores": {},
+                "operating_ids": ["wrong"],
+                "negative_false_positive": True,
+            },
+        ]
+    )
+
+    assert {row["reason"] for row in failures} == {
+        "expected_displaced_below_raw_top5",
+        "expected_raw_top5_rejected_by_operating_guards",
+        "negative_false_positive",
+    }
+    assert summary["failures"] == 3
+
+
 def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_deterministic(
     tmp_path: Path,
 ) -> None:
@@ -315,9 +465,18 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     assert quality["representative"]["101"]["raw_recall_at_5"] == 1.0
     performance = json.loads((benchmark / "performance_summary.json").read_text())
     assert performance["representative"]["101"]["registry_load"]["entries"] >= 101
+    assert (
+        performance["representative"]["101"]["performance"]["source_latency_seconds"][
+            "encoder_seconds"
+        ]["count"]
+        == 0
+    )
     recommendation = json.loads((benchmark / "capacity_recommendation.json").read_text())
     assert recommendation["verified_maximum"] == 101
     assert recommendation["recommended_online_cap"] == 100
+    assert (benchmark / "ctc_prefix_stability.json").is_file()
+    assert (benchmark / "rank_displacement_cases.jsonl").is_file()
+    assert (benchmark / "rank_displacement_summary.json").is_file()
     assert (benchmark / "sha256.txt").is_file()
 
 

@@ -11,7 +11,7 @@ import tracemalloc
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from statistics import mean, median
-from typing import Any
+from typing import Any, cast
 
 from qwen_hotword.hotwords.capacity_assets import (
     PROFILE_NAMES,
@@ -80,6 +80,7 @@ def benchmark_hotword_capacity(
 
     vocab = load_phoneme_vocab(paths["vocab"])
     replay_rows = load_capacity_replay(paths["replay"])
+    prefix_stability = analyze_ctc_prefix_stability(replay_rows)
     config = HotwordScoringConfig(
         score_threshold=threshold,
         top_k=top_k,
@@ -224,12 +225,16 @@ def benchmark_hotword_capacity(
         level_summaries[profile] = profile_summaries
 
     recommendation = _capacity_recommendation(level_summaries, resolved_sizes)
+    rank_displacement_rows, rank_displacement_summary = _rank_displacement_diagnostics(query_rows)
     query_path = destination / "query_results.jsonl"
     quality_path = destination / "quality_summary.json"
     performance_path = destination / "performance_summary.json"
     recommendation_path = destination / "capacity_recommendation.json"
     run_config_path = destination / "run_config.json"
     _write_jsonl(query_path, query_rows)
+    _write_jsonl(destination / "rank_displacement_cases.jsonl", rank_displacement_rows)
+    _write_json(destination / "rank_displacement_summary.json", rank_displacement_summary)
+    _write_json(destination / "ctc_prefix_stability.json", prefix_stability)
     quality_summary = {
         profile: {size: value["quality"] for size, value in summaries.items()}
         for profile, summaries in level_summaries.items()
@@ -279,6 +284,8 @@ def benchmark_hotword_capacity(
         "edit_distance_backend": edit_distance_backend,
         "levels": level_summaries,
         "recommendation": recommendation,
+        "ctc_prefix_stability": prefix_stability["summary"],
+        "rank_displacement_failures": len(rank_displacement_rows),
         "test_set_used": False,
     }
     _write_json(run_config_path, run_config)
@@ -424,6 +431,7 @@ def _summarize_level(
         for row in rows
         if row["ctc_plus_retrieval_seconds"] is not None
     ]
+    source_latency = _source_latency_breakdown(rows)
     rank_hits = {
         k: sum(sum(float(rank) <= k for rank in row["expected_ranks"].values()) for row in final)
         for k in (1, 3, 5, 10, 20)
@@ -464,6 +472,7 @@ def _summarize_level(
         "sorting_seconds": _distribution(sorting),
         "selection_seconds": _distribution(selection),
         "ctc_plus_retrieval_seconds": _distribution(detector),
+        "source_latency_seconds": source_latency,
         "retrieval_over_100ms_rate": _ratio(
             sum(value > 0.1 for value in retrieval), len(retrieval)
         ),
@@ -559,6 +568,190 @@ def _capacity_recommendation(
         "hard_negative_profile_is_diagnostic": True,
         "test_set_used": False,
     }
+
+
+def analyze_ctc_prefix_stability(
+    replay_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, object]:
+    """Measure how cumulative greedy CTC token sequences change between chunks."""
+    by_case: dict[str, list[Mapping[str, Any]]] = {}
+    for row in replay_rows:
+        by_case.setdefault(str(row["case_id"]), []).append(row)
+    transitions: list[dict[str, object]] = []
+    for case_id, case_rows in sorted(by_case.items()):
+        ordered = sorted(case_rows, key=lambda row: int(row["chunk_id"]))
+        for previous, current in zip(ordered, ordered[1:], strict=False):
+            previous_ids = _decoded_token_ids(previous)
+            current_ids = _decoded_token_ids(current)
+            lcp = _longest_common_prefix(previous_ids, current_ids)
+            revised = len(previous_ids) - lcp
+            added = len(current_ids) - lcp
+            transitions.append(
+                {
+                    "schema_version": 1,
+                    "case_id": case_id,
+                    "sample_id": current["sample_id"],
+                    "from_chunk_id": int(previous["chunk_id"]),
+                    "to_chunk_id": int(current["chunk_id"]),
+                    "from_cumulative_audio_sec": float(previous["cumulative_audio_sec"]),
+                    "to_cumulative_audio_sec": float(current["cumulative_audio_sec"]),
+                    "is_tail_flush": bool(current["is_tail_flush"]),
+                    "previous_token_count": len(previous_ids),
+                    "current_token_count": len(current_ids),
+                    "longest_common_prefix_tokens": lcp,
+                    "previous_suffix_revised_tokens": revised,
+                    "current_suffix_added_tokens": added,
+                    "previous_prefix_retention_rate": (
+                        lcp / len(previous_ids) if previous_ids else 1.0
+                    ),
+                    "append_only": revised == 0,
+                    "identical": previous_ids == current_ids,
+                }
+            )
+    revised_values = [
+        float(cast(int, row["previous_suffix_revised_tokens"])) for row in transitions
+    ]
+    retention_values = [cast(float, row["previous_prefix_retention_rate"]) for row in transitions]
+    cases_with_revision = {
+        str(row["case_id"])
+        for row in transitions
+        if cast(int, row["previous_suffix_revised_tokens"]) > 0
+    }
+    summary = {
+        "cases": len(by_case),
+        "transitions": len(transitions),
+        "append_only_rate": _ratio(
+            sum(bool(row["append_only"]) for row in transitions), len(transitions)
+        ),
+        "identical_rate": _ratio(
+            sum(bool(row["identical"]) for row in transitions), len(transitions)
+        ),
+        "cases_with_prefix_revision": len(cases_with_revision),
+        "case_prefix_revision_rate": _ratio(len(cases_with_revision), len(by_case)),
+        "previous_suffix_revised_tokens": _distribution(revised_values),
+        "previous_prefix_retention_rate": _distribution(retention_values),
+    }
+    return {"schema_version": 1, "summary": summary, "transitions": transitions}
+
+
+def _rank_displacement_diagnostics(
+    query_rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    failures: list[dict[str, object]] = []
+    reason_counts: dict[str, int] = {}
+    level_counts: dict[str, dict[str, int]] = {}
+    for row in query_rows:
+        if not bool(row["is_final"]):
+            continue
+        expected_ids = row["expected_hotword_ids"]
+        ranks = row["expected_ranks"]
+        scores = row["expected_scores"]
+        if (
+            not isinstance(expected_ids, list)
+            or not isinstance(ranks, dict)
+            or not isinstance(scores, dict)
+        ):
+            raise ValueError("capacity query has invalid rank diagnostic fields")
+        operating = set(row["operating_ids"])
+        top5 = set(row["raw_top5_ids"])
+        common = {
+            "schema_version": 1,
+            "profile": row["profile"],
+            "size": row["size"],
+            "case_id": row["case_id"],
+            "sample_id": row["sample_id"],
+            "primary_group": row["primary_group"],
+            "chunk_id": row["chunk_id"],
+            "cumulative_audio_sec": row["cumulative_audio_sec"],
+            "raw_top5_ids": row["raw_top5_ids"],
+            "operating_ids": row["operating_ids"],
+            "top5_floor_score": row["top5_floor_score"],
+            "top5_matches": list(row["top_matches"])[:5],
+        }
+        for hotword_id in expected_ids:
+            rank = ranks.get(hotword_id)
+            if hotword_id in operating:
+                continue
+            if rank is None:
+                reason = "expected_absent_from_ranking"
+            elif hotword_id not in top5:
+                reason = "expected_displaced_below_raw_top5"
+            else:
+                reason = "expected_raw_top5_rejected_by_operating_guards"
+            failures.append(
+                {
+                    **common,
+                    "reason": reason,
+                    "expected_hotword_id": hotword_id,
+                    "expected_rank": rank,
+                    "expected_score": scores.get(hotword_id),
+                }
+            )
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            key = f"{row['profile']}/size_{row['size']}"
+            level = level_counts.setdefault(key, {})
+            level[reason] = level.get(reason, 0) + 1
+        if not expected_ids and bool(row["negative_false_positive"]):
+            reason = "negative_false_positive"
+            failures.append(
+                {
+                    **common,
+                    "reason": reason,
+                    "expected_hotword_id": None,
+                    "expected_rank": None,
+                    "expected_score": None,
+                }
+            )
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            key = f"{row['profile']}/size_{row['size']}"
+            level = level_counts.setdefault(key, {})
+            level[reason] = level.get(reason, 0) + 1
+    return failures, {
+        "schema_version": 1,
+        "failures": len(failures),
+        "reason_counts": dict(sorted(reason_counts.items())),
+        "by_level": {key: dict(sorted(value.items())) for key, value in level_counts.items()},
+    }
+
+
+def _decoded_token_ids(row: Mapping[str, Any]) -> tuple[int, ...]:
+    decoded = row.get("decoded")
+    if not isinstance(decoded, list):
+        raise ValueError("capacity replay row has invalid decoded sequence")
+    return tuple(int(item["token_id"]) for item in decoded)
+
+
+def _longest_common_prefix(left: Sequence[int], right: Sequence[int]) -> int:
+    length = 0
+    for left_token, right_token in zip(left, right, strict=False):
+        if left_token != right_token:
+            break
+        length += 1
+    return length
+
+
+def _source_latency_breakdown(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, float | int | None]]:
+    keys = (
+        "processor_seconds",
+        "encoder_seconds",
+        "ctc_head_seconds",
+        "ctc_decode_seconds",
+    )
+    values: dict[str, list[float]] = {key: [] for key in keys}
+    values["source_ctc_seconds"] = []
+    for row in rows:
+        timings = row.get("source_timings")
+        if isinstance(timings, dict):
+            for key in keys:
+                value = timings.get(key)
+                if isinstance(value, int | float) and not isinstance(value, bool):
+                    values[key].append(float(value))
+        total = _source_ctc_seconds(timings)
+        if total is not None:
+            values["source_ctc_seconds"].append(total)
+    return {key: _distribution(items) for key, items in values.items()}
 
 
 def _source_ctc_seconds(value: object) -> float | None:
