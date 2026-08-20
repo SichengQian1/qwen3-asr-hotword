@@ -1,5 +1,29 @@
 # 工作交接记录
 
+## 0.21 2026-08-20 Posterior Replay float16近并列修复
+
+第2步Posterior Replay首次H200 smoke完成20条、67个step和3个float16分片，
+但严格验证在67个row中发现1个greedy token/span不等价，因而正确中止，
+没有生成`summary.json`。pynvml弃用和generation temperature都是无关警告。
+
+本地已用近并列frame稳定复现：float32中phone 2略大于phone 1，转float16后
+两者变成相同数值，`argmax`因索引顺序改选phone 1。这是量化边界，不是CTC
+模型或音频失败。
+
+修复不放宽校验，而是将存储定义改为显式
+`argmax_preserving_float16`：先记录float32每帧赢家，常规转float16，只对舍入后
+赢家改变的帧将冲突值下调一个float16 ULP。Manifest新增总体和每分片
+`argmax_correction_frames`、`maximum_abs_quantization_error`；索引也记录每个row的
+修正数和误差。验证仍要求SHA256、shape/dtype、长度、有限值、logsumexp和
+greedy token/span全部通过；若再失败，额外写入带case/chunk的
+`posterior_validation_failure.json`。
+
+失败的`replay_streaming_posterior_smoke20_v1`保留，不覆盖。修复后必须在
+`replay_streaming_posterior_smoke20_v2`重跑。只有v2报告
+`greedy_equivalence_mismatches=0`后，才继续第3步GPU Top-256候选器。
+本地任务文件Ruff、定向pytest 8项、全量pytest 169项、57个source模块
+Mypy strict、CLI help smoke和`git diff --check`均通过。
+
 ## 0.20 2026-08-19 2k葡语热词库：诊断冻结与Posterior Replay
 
 用户将本阶段产品目标固定为2,000个在线葡语热词。已有RapidFuzz精确全扫描

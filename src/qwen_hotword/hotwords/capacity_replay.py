@@ -355,6 +355,8 @@ class PosteriorReplayShardWriter:
         self.pending: list[tuple[dict[str, object], Any]] = []
         self.index_rows: list[dict[str, object]] = []
         self.shards: list[dict[str, object]] = []
+        self.argmax_correction_frames = 0
+        self.maximum_abs_quantization_error = 0.0
 
     def add(self, replay_row: Mapping[str, object], log_posteriors: Any) -> None:
         import torch
@@ -372,8 +374,15 @@ class PosteriorReplayShardWriter:
             )
         if not bool(torch.isfinite(log_posteriors).all()):
             raise ValueError("log_posteriors contain non-finite values")
-        tensor = log_posteriors.detach().to(device="cpu", dtype=torch.float16).contiguous()
-        self.pending.append((dict(replay_row), tensor))
+        tensor, corrected_frames, maximum_error = _argmax_preserving_float16(log_posteriors)
+        stored_row = dict(replay_row)
+        stored_row["argmax_correction_frames"] = corrected_frames
+        stored_row["maximum_abs_quantization_error"] = maximum_error
+        self.argmax_correction_frames += corrected_frames
+        self.maximum_abs_quantization_error = max(
+            self.maximum_abs_quantization_error, maximum_error
+        )
+        self.pending.append((stored_row, tensor))
         if len(self.pending) >= self.shard_size:
             self._flush()
 
@@ -416,6 +425,8 @@ class PosteriorReplayShardWriter:
                     "is_tail_flush": replay_row["is_tail_flush"],
                     "effective_time_steps": replay_row["effective_time_steps"],
                     "decoded": replay_row["decoded"],
+                    "argmax_correction_frames": replay_row["argmax_correction_frames"],
+                    "maximum_abs_quantization_error": replay_row["maximum_abs_quantization_error"],
                     "shard_id": shard_id,
                     "shard_path": str(relative_path),
                     "shard_row": shard_row,
@@ -429,6 +440,14 @@ class PosteriorReplayShardWriter:
                 "padded_shape": list(padded.shape),
                 "storage_dtype": "float16",
                 "total_effective_time_steps": int(lengths.sum().item()),
+                "argmax_correction_frames": sum(
+                    cast(int, replay_row["argmax_correction_frames"])
+                    for replay_row, _ in self.pending
+                ),
+                "maximum_abs_quantization_error": max(
+                    cast(float, replay_row["maximum_abs_quantization_error"])
+                    for replay_row, _ in self.pending
+                ),
                 "size_bytes": path.stat().st_size,
                 "sha256": _sha256_file(path),
             }
@@ -446,14 +465,43 @@ class PosteriorReplayShardWriter:
                 "schema_version": 1,
                 "values": "log_softmax",
                 "storage_dtype": "float16",
+                "quantization": "argmax_preserving_float16",
                 "blank_id": 0,
                 "num_classes": self.num_classes,
                 "shard_size": self.shard_size,
                 "records": len(self.index_rows),
+                "argmax_correction_frames": self.argmax_correction_frames,
+                "maximum_abs_quantization_error": self.maximum_abs_quantization_error,
                 "shards": self.shards,
             },
         )
         return validate_posterior_replay(self.destination)
+
+
+def _argmax_preserving_float16(log_posteriors: Any) -> tuple[Any, int, float]:
+    """Quantize log posteriors while retaining the float32 winner at every frame."""
+    import torch
+
+    source = log_posteriors.detach().to(device="cpu", dtype=torch.float32).contiguous()
+    quantized = source.to(dtype=torch.float16)
+    expected_ids = source.argmax(dim=-1)
+    mismatch_rows = (quantized.argmax(dim=-1) != expected_ids).nonzero(as_tuple=False)
+    negative_infinity = torch.tensor(float("-inf"), dtype=torch.float16)
+    for raw_row in mismatch_rows.flatten().tolist():
+        row_index = int(raw_row)
+        target_id = int(expected_ids[row_index].item())
+        row = quantized[row_index]
+        maximum = row.max()
+        row[target_id] = maximum
+        conflicts = row >= row[target_id]
+        conflicts[target_id] = False
+        if bool(conflicts.any()):
+            row[conflicts] = torch.nextafter(row[target_id], negative_infinity)
+    remaining = int((quantized.argmax(dim=-1) != expected_ids).sum().item())
+    if remaining:
+        raise RuntimeError(f"argmax-preserving float16 quantization failed for {remaining} frames")
+    maximum_error = float((quantized.float() - source).abs().max().item())
+    return quantized.contiguous(), int(mismatch_rows.numel()), maximum_error
 
 
 def validate_posterior_replay(root: str | Path) -> dict[str, object]:
@@ -464,7 +512,11 @@ def validate_posterior_replay(root: str | Path) -> dict[str, object]:
     manifest_path = destination / "posterior_shards.json"
     index_path = destination / "posterior_index.jsonl"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict) or manifest.get("storage_dtype") != "float16":
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("storage_dtype") != "float16"
+        or manifest.get("quantization") != "argmax_preserving_float16"
+    ):
         raise ValueError("posterior shard manifest is invalid")
     num_classes = manifest.get("num_classes")
     if not isinstance(num_classes, int) or num_classes <= 1:
@@ -473,7 +525,7 @@ def validate_posterior_replay(root: str | Path) -> dict[str, object]:
     rows_by_shard: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
         rows_by_shard.setdefault(int(row["shard_id"]), []).append(row)
-    mismatches = 0
+    mismatch_details: list[dict[str, object]] = []
     maximum_logsumexp_error = 0.0
     total_steps = 0
     maximum_steps = 0
@@ -522,11 +574,33 @@ def validate_posterior_replay(root: str | Path) -> dict[str, object]:
                 for item in expected
             ]
             if actual_keys != expected_keys:
-                mismatches += 1
+                mismatch_details.append(
+                    {
+                        "case_id": row["case_id"],
+                        "chunk_id": row["chunk_id"],
+                        "shard_id": shard_id,
+                        "shard_row": row_index,
+                        "expected": expected_keys,
+                        "actual": actual_keys,
+                    }
+                )
             total_steps += length
             maximum_steps = max(maximum_steps, length)
-    if mismatches:
-        raise ValueError(f"posterior replay greedy equivalence failed for {mismatches} rows")
+    if mismatch_details:
+        _write_json(
+            destination / "posterior_validation_failure.json",
+            {
+                "schema_version": 1,
+                "status": "fail",
+                "greedy_equivalence_mismatches": len(mismatch_details),
+                "mismatches": mismatch_details,
+            },
+        )
+        first = mismatch_details[0]
+        raise ValueError(
+            "posterior replay greedy equivalence failed for "
+            f"{len(mismatch_details)} rows; first={first['case_id']}/chunk_{first['chunk_id']}"
+        )
     if len(rows) != int(manifest.get("records", -1)):
         raise ValueError("posterior index record count differs from shard manifest")
     return {
@@ -536,10 +610,15 @@ def validate_posterior_replay(root: str | Path) -> dict[str, object]:
         "shards": len(descriptors),
         "num_classes": num_classes,
         "storage_dtype": "float16",
+        "quantization": "argmax_preserving_float16",
+        "argmax_correction_frames": int(manifest.get("argmax_correction_frames", 0)),
+        "maximum_abs_quantization_error": float(
+            manifest.get("maximum_abs_quantization_error", 0.0)
+        ),
         "total_effective_time_steps": total_steps,
         "maximum_effective_time_steps": maximum_steps,
         "maximum_logsumexp_error": maximum_logsumexp_error,
-        "greedy_equivalence_mismatches": mismatches,
+        "greedy_equivalence_mismatches": len(mismatch_details),
     }
 
 

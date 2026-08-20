@@ -235,7 +235,7 @@ def test_posterior_replay_shards_round_trip_and_preserve_greedy_decode(
             [-8.0, 8.0, -8.0, -8.0],
             [-8.0, 8.0, -8.0, -8.0],
             [8.0, -8.0, -8.0, -8.0],
-            [-8.0, -8.0, 8.0, -8.0],
+            [-8.0, -0.100001, -0.1, -8.0],
         ]
     )
     row = {
@@ -268,6 +268,8 @@ def test_posterior_replay_shards_round_trip_and_preserve_greedy_decode(
     assert summary["records"] == 1
     assert summary["greedy_equivalence_mismatches"] == 0
     assert summary["storage_dtype"] == "float16"
+    assert summary["quantization"] == "argmax_preserving_float16"
+    assert summary["argmax_correction_frames"] == 1
     assert validate_posterior_replay(output) == summary
     shard = output / "posterior_shards" / "part-00000.pt"
     assert shard.is_file()

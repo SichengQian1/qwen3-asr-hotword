@@ -318,7 +318,7 @@ posterior_shards.json               # shape、长度、SHA256和分片元数据
 先在20条smoke上生成，输出必须使用新目录：
 
 ```bash
-POSTERIOR_SMOKE_ROOT="$CAP_ROOT/replay_streaming_posterior_smoke20_v1"
+POSTERIOR_SMOKE_ROOT="$CAP_ROOT/replay_streaming_posterior_smoke20_v2"
 
 CUDA_VISIBLE_DEVICES=4 python scripts/build_hotword_capacity_replay.py \
   --mode streaming \
@@ -342,7 +342,17 @@ cat "$POSTERIOR_SMOKE_ROOT/posterior_shards.json"
 ```
 
 验收条件：`posterior_replay.status=pass`、`num_classes=90`、
-`storage_dtype=float16`、`greedy_equivalence_mismatches=0`、全部SHA256通过，且20条
+`storage_dtype=float16`、`quantization=argmax_preserving_float16`、
+`greedy_equivalence_mismatches=0`、全部SHA256通过，且20条
 smoke应仍为67个step/17个tail flush（若输入case未变）。这些资产确认后才进入
 GPU packed CTC Top-128/256候选器；本阶段不实现候选保留、TTL、阈值调整或轻量
 reranker。
+
+2026-08-20的首次原始float16 smoke写內容器完成67个step和3个分片，但严格
+校验发现1个row的greedy collapse不等价，因而正确拒绝生成
+`summary.json`。原因是float32近乎并列的两个frame log posterior转float16后变成
+相同值，`argmax`因索引顺序翻转。修复使用显式argmax保持量化：只对发生舍入
+并列的帧做一个float16 ULP级调整，并记录`argmax_correction_frames`和
+`maximum_abs_quantization_error`。修正帧数可以非零，但greedy token/span必须仍为
+100%等价。失败的`replay_streaming_posterior_smoke20_v1`保留为证据，不删除、
+不覆盖；修复后使用上述`v2`新目录重跑。
