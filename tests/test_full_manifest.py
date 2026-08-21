@@ -178,6 +178,72 @@ def test_full_manifest_supports_independent_train_corpus_identity(
         )
 
 
+def test_full_manifest_preserves_per_row_source_splits(tmp_path: Path) -> None:
+    tsv, audio_root, dictionary, vocab = _write_fixture(tmp_path)
+    tsv.write_text(
+        "audio\ttext\tsource_split\n"
+        "ready.wav\tBom dia\ttrain\n"
+        "connector.wav\tBom dia\tvalidation\n"
+        "h.wav\tBom dia\ttest\n",
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "split-column-output"
+    summary = build_full_training_manifest(
+        tsv,
+        audio_root,
+        dictionary,
+        vocab,
+        output_dir,
+        split_column="source_split",
+        shard_size=2,
+        workers=1,
+    )
+
+    assert summary.split == "mixed"
+    assert summary.split_column == "source_split"
+    assert summary.split_counts == {"test": 1, "train": 1, "validation": 1}
+    records = _read_jsonl(output_dir / "train_ready.jsonl")
+    assert {str(record["audio_relative"]): record["split"] for record in records} == {
+        "connector.wav": "validation",
+        "h.wav": "test",
+        "ready.wav": "train",
+    }
+
+
+def test_full_manifest_rejects_invalid_or_ambiguous_split_configuration(
+    tmp_path: Path,
+) -> None:
+    tsv, audio_root, dictionary, vocab = _write_fixture(tmp_path)
+    tsv.write_text(
+        "audio\ttext\tsource_split\nready.wav\tBom dia\tdev\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="invalid split"):
+        build_full_training_manifest(
+            tsv,
+            audio_root,
+            dictionary,
+            vocab,
+            tmp_path / "invalid-split-output",
+            split_column="source_split",
+            workers=1,
+        )
+
+    with pytest.raises(ValueError, match="cannot both be set"):
+        build_full_training_manifest(
+            tsv,
+            audio_root,
+            dictionary,
+            vocab,
+            tmp_path / "ambiguous-split-output",
+            split="train",
+            split_column="source_split",
+            workers=1,
+        )
+
+
 def test_full_manifest_can_allow_exact_dictionary_connectors(tmp_path: Path) -> None:
     tsv, audio_root, dictionary, vocab = _write_fixture(tmp_path)
     output_dir = tmp_path / "connector-output"

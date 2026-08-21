@@ -41,6 +41,7 @@ class SourceRow:
     row_number: int
     audio_relative: str
     text: str
+    split: str
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,8 @@ class FullManifestSummary:
     dataset: str
     id_prefix: str
     split: str
+    split_column: str | None
+    split_counts: dict[str, int]
     allow_exact_dictionary_connectors: bool
     shard_size: int
     workers: int
@@ -170,6 +173,7 @@ def build_full_training_manifest(
     dataset: str = DEFAULT_DATASET,
     id_prefix: str = DEFAULT_ID_PREFIX,
     split: str = DEFAULT_SPLIT,
+    split_column: str | None = None,
     audio_column: str = "audio",
     text_column: str = "text",
     shard_size: int = 5_000,
@@ -197,6 +201,12 @@ def build_full_training_manifest(
         raise ValueError("id_prefix must be non-empty and contain no whitespace")
     if split not in ALLOWED_SPLITS:
         raise ValueError(f"split must be one of {sorted(ALLOWED_SPLITS)}")
+    if split_column is not None:
+        split_column = split_column.strip()
+        if not split_column:
+            raise ValueError("split_column must be non-empty when provided")
+        if split != DEFAULT_SPLIT:
+            raise ValueError("split and split_column cannot both be set")
 
     dictionary = normalized_dictionary(dictionary_file)
     vocab = load_phoneme_vocab(vocab_file)
@@ -223,6 +233,8 @@ def build_full_training_manifest(
         build_settings["id_prefix"] = id_prefix
     if split != DEFAULT_SPLIT:
         build_settings["split"] = split
+    if split_column is not None:
+        build_settings["split_column"] = split_column
     if allow_exact_dictionary_connectors:
         build_settings["allow_exact_dictionary_connectors"] = True
     build_config = _build_config(
@@ -281,7 +293,6 @@ def build_full_training_manifest(
                         language=language,
                         dataset=dataset,
                         id_prefix=id_prefix,
-                        split=split,
                         allow_exact_dictionary_connectors=allow_exact_dictionary_connectors,
                         dictionary=dictionary,
                         vocab=vocab,
@@ -308,6 +319,7 @@ def build_full_training_manifest(
             "ready_audio_seconds": sum(
                 float(record.get("duration_seconds") or 0.0) for record in ready_records
             ),
+            "split_counts": dict(sorted(Counter(record["split"] for record in records).items())),
             "issue_counts": dict(sorted(issue_counts.items())),
             "first_row_number": batch[0].row_number,
             "last_row_number": batch[-1].row_number,
@@ -326,14 +338,25 @@ def build_full_training_manifest(
         missing_columns = {
             column for column in (audio_column, text_column) if column not in fieldnames
         }
+        if split_column is not None and split_column not in fieldnames:
+            missing_columns.add(split_column)
         if missing_columns:
             raise ValueError(f"TSV is missing required columns: {sorted(missing_columns)}")
         for row_number, row in enumerate(reader, start=2):
+            row_split = split
+            if split_column is not None:
+                row_split = str(row.get(split_column) or "").strip()
+                if row_split not in ALLOWED_SPLITS:
+                    raise ValueError(
+                        f"TSV row {row_number} has invalid split in {split_column!r}: "
+                        f"{row_split!r}; expected one of {sorted(ALLOWED_SPLITS)}"
+                    )
             rows.append(
                 SourceRow(
                     row_number=row_number,
                     audio_relative=str(row.get(audio_column) or "").strip(),
                     text=str(row.get(text_column) or "").strip(),
+                    split=row_split,
                 )
             )
             if len(rows) == shard_size:
@@ -360,6 +383,15 @@ def build_full_training_manifest(
     source_records = sum(int(report["source_records"]) for report in reports)
     ready_records = sum(int(report["ready_records"]) for report in reports)
     review_records = sum(int(report["review_records"]) for report in reports)
+    split_counts: Counter[str] = Counter()
+    for report in reports:
+        report_split_counts = report.get("split_counts")
+        if isinstance(report_split_counts, dict):
+            split_counts.update(
+                {str(key): int(value) for key, value in report_split_counts.items()}
+            )
+        else:
+            split_counts[split] += int(report["source_records"])
     index_path = destination / "shard_index.json"
     _write_json(
         index_path,
@@ -380,7 +412,9 @@ def build_full_training_manifest(
         language=language,
         dataset=dataset,
         id_prefix=id_prefix,
-        split=split,
+        split="mixed" if split_column is not None else split,
+        split_column=split_column,
+        split_counts=dict(sorted(split_counts.items())),
         allow_exact_dictionary_connectors=allow_exact_dictionary_connectors,
         shard_size=shard_size,
         workers=workers,
@@ -411,7 +445,6 @@ def _process_source_row(
     language: str,
     dataset: str,
     id_prefix: str,
-    split: str,
     allow_exact_dictionary_connectors: bool,
     dictionary: dict[str, tuple[str, ...]],
     vocab: PhonemeVocab,
@@ -449,7 +482,7 @@ def _process_source_row(
     record: dict[str, Any] = {
         "schema_version": 1,
         "dataset": dataset,
-        "split": split,
+        "split": source.split,
         "id": f"{id_prefix}_{source.row_number}",
         "source_tsv": str(source_tsv),
         "row_number": source.row_number,

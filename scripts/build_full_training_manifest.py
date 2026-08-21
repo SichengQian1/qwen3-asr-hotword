@@ -41,6 +41,13 @@ def main() -> int:
         default="unsplit",
         help="Split label stored in every output record (default: unsplit).",
     )
+    parser.add_argument(
+        "--split-column",
+        help=(
+            "Read each record's split from this TSV column. Values must be train, "
+            "validation, test, or unsplit; cannot be combined with a non-default --split."
+        ),
+    )
     parser.add_argument("--audio-column", default="audio")
     parser.add_argument("--text-column", default="text")
     parser.add_argument("--shard-size", type=int, default=5_000)
@@ -67,6 +74,7 @@ def main() -> int:
             dataset=args.dataset,
             id_prefix=args.id_prefix,
             split=args.split,
+            split_column=args.split_column,
             audio_column=args.audio_column,
             text_column=args.text_column,
             shard_size=args.shard_size,

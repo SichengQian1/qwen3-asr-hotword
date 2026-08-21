@@ -1,5 +1,71 @@
 # 工作交接记录
 
+## 0.26 2026-08-21 阿根廷/拉普拉塔西语修复审计与Manifest入口
+
+共享增量修复已在H200完成。共享代理词3,264个，MFA模型、代理词表和代理字典
+SHA256均已保存；prepare、finalize及全部输出SHA256校验通过。修复后结果：
+
+- SLR61：3,486/3,487个词可用，missing 1、phone OOV 0、duplicate 0，token覆盖
+  99.998087%。唯一未解析词为单次出现的`smart-phone`（`no_safe_proxy`）。
+- Common Voice Rioplatense v26：18,520/18,786个词可用，missing 266、phone OOV 0、
+  duplicate 0，token覆盖99.729417%。剩余原因是228个`no_safe_proxy`、32个
+  `missing_proxy_pronunciation`和6个`unsupported_diaeresis_context`，共278个
+  corpus token。样本以连字符复合词、葡语/其他外语专名和异常字符为主，不应为追求
+  100%覆盖而强制生成低可信西语发音。
+
+因此不再重跑或扩大MFA代理规则。完整Manifest必须保留所有源行：可解析行进入
+`train_ready.jsonl`，包含上述低可信词的少量行进入`needs_review.jsonl`，不得静默
+删除。`training_labels_ready=false`在这里表示词典并非100%覆盖，不能把整套词典称为
+全量ready；它不再阻止使用保留式Manifest builder量化逐行ready/review影响。
+
+Rioplatense的规范`source.tsv`同时含官方`source_split`，不能把整份文件标成一个固定
+split。`build_full_training_manifest.py`和`full_manifest.py`新增显式
+`--split-column`：逐行只接受`train/validation/test/unsplit`，与非默认`--split`
+互斥，并在summary中记录`split=mixed`、`split_column`与`split_counts`。旧固定split
+调用和旧resumable配置保持兼容。此阶段只构建和审计Manifest，不训练；Rioplatense
+test在下一步按记录中的官方split单独导出并封存。
+
+工作区使用新目录，分别构建，不合并：
+
+```bash
+ES_AR_ROOT=outputs/es_ar_train_sources_v1
+ES_MANIFEST_ROOT=outputs/es_ar_full_manifests_v1
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+
+python scripts/build_full_training_manifest.py \
+  --tsv "$ES_AR_ROOT/slr61/source.tsv" \
+  --audio-root /host_home \
+  --dictionary "$ES_AR_ROOT/repaired_mfa_v1/slr61/slr61_spanish_latin_america_repaired.v1.dict" \
+  --vocab "$VOCAB" \
+  --output-dir "$ES_MANIFEST_ROOT/slr61" \
+  --language es \
+  --dataset slr61_argentinian_spanish \
+  --id-prefix slr61_es_row \
+  --split unsplit \
+  --allow-exact-dictionary-connectors \
+  --shard-size 5000 \
+  --workers 16
+
+python scripts/build_full_training_manifest.py \
+  --tsv "$ES_AR_ROOT/common_voice_rioplatense_v26/source.tsv" \
+  --audio-root /host_home \
+  --dictionary "$ES_AR_ROOT/repaired_mfa_v1/common_voice_rioplatense_v26/common_voice_rioplatense_v26_spanish_latin_america_repaired.v1.dict" \
+  --vocab "$VOCAB" \
+  --output-dir "$ES_MANIFEST_ROOT/common_voice_rioplatense_v26" \
+  --language es \
+  --dataset common_voice_rioplatense_v26 \
+  --id-prefix cv_rio_v26_es_row \
+  --split-column source_split \
+  --allow-exact-dictionary-connectors \
+  --shard-size 5000 \
+  --workers 16
+```
+
+下一轮先返回两套`summary.json`、各自`wc -l train_ready.jsonl needs_review.jsonl`，
+以及Rioplatense summary中的`split_counts`。确认source=ready+review、missing audio为0、
+SLR仍为unsplit且Rioplatense为9,903/266/224后，再实现SLR speaker-disjoint划分与
+Rioplatense官方split封存；当前不合并两套语料，也不加入MLS/通用Common Voice。
+
 ## 0.25 2026-08-21 热词容量/50 ms任务暂停点与六步恢复路线
 
 本任务目前暂时让位于西语数据处理，但以下路线已经确认，后续恢复时不要重新讨论或
