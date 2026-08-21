@@ -16,6 +16,11 @@ from qwen_hotword.hotwords.capacity_replay import (
     PosteriorReplayShardWriter,
     validate_posterior_replay,
 )
+from qwen_hotword.hotwords.exact_automaton import (
+    IntegerAhoCorasick,
+    rank_unique_exact_matches,
+)
+from qwen_hotword.hotwords.exact_capacity import benchmark_exact_hotword_capacity
 from qwen_hotword.hotwords.registry import HotwordEntry, load_hotword_table, write_hotword_table
 from qwen_hotword.hotwords.scoring import (
     DecodedPhoneme,
@@ -220,6 +225,65 @@ def test_fast_edit_distance_is_exactly_equivalent_to_editops() -> None:
         assert sequence_edit_distance(reference, hypothesis) == len(
             sequence_editops(reference, hypothesis)
         )
+
+
+def test_integer_aho_corasick_filters_contained_matches_and_ranks_deterministically() -> None:
+    def entry(hotword_id: str, token_ids: tuple[int, ...]) -> HotwordEntry:
+        tokens = tuple(str(token_id) for token_id in token_ids)
+        return HotwordEntry(
+            hotword_id=hotword_id,
+            language="pt-BR",
+            surface=hotword_id,
+            normalized=hotword_id,
+            words=(hotword_id,),
+            pronunciation=" ".join(tokens),
+            phoneme_tokens=tokens,
+            token_ids=token_ids,
+            source="test",
+            validation_occurrences=1,
+        )
+
+    matcher = IntegerAhoCorasick(
+        [
+            entry("short", (1, 2)),
+            entry("long", (1, 2, 3)),
+            entry("tail", (4, 5)),
+        ]
+    )
+    matches = matcher.find(
+        (1, 2, 3, 4, 5),
+        confidences=(0.99, 0.98, 0.97, 0.70, 0.60),
+    )
+    ranked = rank_unique_exact_matches(matches)
+
+    assert matcher.pattern_count == 3
+    assert matcher.node_count == 6
+    assert {match.hotword_id for match in matches} == {"long", "tail"}
+    assert [match.hotword_id for match in ranked] == ["long", "tail"]
+    assert ranked[0].start_token == 0
+    assert ranked[0].end_token == 3
+    assert ranked[0].minimum_confidence == 0.97
+
+
+def test_integer_aho_corasick_respects_active_registry() -> None:
+    def entry(hotword_id: str, token_ids: tuple[int, ...]) -> HotwordEntry:
+        return HotwordEntry(
+            hotword_id=hotword_id,
+            language="pt-BR",
+            surface=hotword_id,
+            normalized=hotword_id,
+            words=(hotword_id,),
+            pronunciation="a",
+            phoneme_tokens=("a",),
+            token_ids=token_ids,
+            source="test",
+            validation_occurrences=1,
+        )
+
+    matcher = IntegerAhoCorasick([entry("active", (1, 2)), entry("inactive", (2, 3))])
+    matches = matcher.find((1, 2, 3), active_hotword_ids={"active"})
+
+    assert [match.hotword_id for match in matches] == ["active"]
 
 
 def test_posterior_replay_shards_round_trip_and_preserve_greedy_decode(
@@ -464,7 +528,17 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     assert report["status"] == "pass"
     quality = json.loads((benchmark / "quality_summary.json").read_text())
     assert quality["representative"]["100"]["raw_recall_at_5"] == 1.0
+    assert quality["representative"]["100"]["raw_recall_at_7"] == 1.0
+    assert quality["representative"]["100"]["raw_recall_at_10"] == 1.0
     assert quality["representative"]["101"]["raw_recall_at_5"] == 1.0
+    query_rows = [
+        json.loads(line)
+        for line in (benchmark / "query_results.jsonl").read_text().splitlines()
+    ]
+    assert all("raw_top7_ids" in row for row in query_rows)
+    assert all("raw_top10_ids" in row for row in query_rows)
+    assert all("raw_expected_hits_at_7" in row for row in query_rows)
+    assert all("raw_expected_hits_at_10" in row for row in query_rows)
     performance = json.loads((benchmark / "performance_summary.json").read_text())
     assert performance["representative"]["101"]["registry_load"]["entries"] >= 101
     assert (
@@ -480,6 +554,31 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     assert (benchmark / "rank_displacement_cases.jsonl").is_file()
     assert (benchmark / "rank_displacement_summary.json").is_file()
     assert (benchmark / "sha256.txt").is_file()
+
+    exact_benchmark = tmp_path / "exact-benchmark"
+    exact_report = benchmark_exact_hotword_capacity(
+        assets_root=assets,
+        replay_path=replay,
+        vocab_path=paths["vocab"],
+        output_dir=exact_benchmark,
+        profiles=("representative",),
+        sizes=(100, 101),
+        warmup_queries=0,
+        print_progress=False,
+    )
+    assert exact_report["status"] == "pass"
+    exact_quality = json.loads((exact_benchmark / "quality_summary.json").read_text())
+    assert exact_quality["representative"]["100"]["exact_recall"] == 1.0
+    assert exact_quality["representative"]["101"]["exact_recall_at_5"] == 1.0
+    exact_performance = json.loads(
+        (exact_benchmark / "performance_summary.json").read_text()
+    )
+    assert exact_performance["representative"]["101"]["index"]["patterns"] >= 101
+    assert exact_performance["representative"]["101"]["performance"][
+        "retrieval_seconds"
+    ]["count"] == 2
+    assert (exact_benchmark / "query_results.jsonl").is_file()
+    assert (exact_benchmark / "sha256.txt").is_file()
 
 
 def test_capacity_asset_builder_rejects_sealed_test_manifest(tmp_path: Path) -> None:

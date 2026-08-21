@@ -31,6 +31,8 @@ from qwen_hotword.hotwords.scoring import (
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
 from qwen_hotword.training.edit_distance import sequence_edit_distance_backend
 
+RAW_RANK_OBSERVATION_KS = (1, 3, 5, 7, 10, 20)
+
 
 def benchmark_hotword_capacity(
     *,
@@ -134,6 +136,8 @@ def benchmark_hotword_capacity(
                 expected = set(case.expected_hotword_ids)
                 ranking_ids = tuple(match.hotword_id for match in result.ranked_matches)
                 raw_top5 = ranking_ids[:top_k]
+                raw_top7 = ranking_ids[:7]
+                raw_top10 = ranking_ids[:10]
                 operating_ids = tuple(match.hotword_id for match in result.selected_matches)
                 ranks = {
                     hotword_id: ranking_ids.index(hotword_id) + 1
@@ -176,8 +180,12 @@ def benchmark_hotword_capacity(
                     "expected_top5_margins": expected_top5_margins,
                     "top5_floor_score": top5_floor_score,
                     "raw_top5_ids": list(raw_top5),
+                    "raw_top7_ids": list(raw_top7),
+                    "raw_top10_ids": list(raw_top10),
                     "operating_ids": list(operating_ids),
                     "raw_expected_hits_at_5": len(expected & set(raw_top5)),
+                    "raw_expected_hits_at_7": len(expected & set(raw_top7)),
+                    "raw_expected_hits_at_10": len(expected & set(raw_top10)),
                     "operating_expected_hits_at_5": len(expected & set(operating_ids)),
                     "negative_false_positive": not expected and bool(operating_ids),
                     "raw_top5_churn": churn,
@@ -434,17 +442,28 @@ def _summarize_level(
     source_latency = _source_latency_breakdown(rows)
     rank_hits = {
         k: sum(sum(float(rank) <= k for rank in row["expected_ranks"].values()) for row in final)
-        for k in (1, 3, 5, 10, 20)
+        for k in RAW_RANK_OBSERVATION_KS
     }
     quality = {
         "expected_hotwords": expected_total,
-        **{f"raw_correct_at_{k}": rank_hits[k] for k in (1, 3, 5, 10, 20)},
-        **{f"raw_recall_at_{k}": _ratio(rank_hits[k], expected_total) for k in (1, 3, 5, 10, 20)},
+        **{f"raw_correct_at_{k}": rank_hits[k] for k in RAW_RANK_OBSERVATION_KS},
+        **{
+            f"raw_recall_at_{k}": _ratio(rank_hits[k], expected_total)
+            for k in RAW_RANK_OBSERVATION_KS
+        },
         "operating_correct_at_5": operating_hits,
         "operating_recall_at_5": _ratio(operating_hits, expected_total),
         "positive_cases": len(positive),
         "raw_positive_case_hit_rate": _ratio(
             sum(int(row["raw_expected_hits_at_5"]) > 0 for row in positive),
+            len(positive),
+        ),
+        "raw_positive_case_hit_rate_at_7": _ratio(
+            sum(int(row["raw_expected_hits_at_7"]) > 0 for row in positive),
+            len(positive),
+        ),
+        "raw_positive_case_hit_rate_at_10": _ratio(
+            sum(int(row["raw_expected_hits_at_10"]) > 0 for row in positive),
             len(positive),
         ),
         "operating_positive_case_hit_rate": _ratio(

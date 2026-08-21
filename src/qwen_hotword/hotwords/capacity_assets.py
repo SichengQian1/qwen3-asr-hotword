@@ -23,7 +23,7 @@ from qwen_hotword.phonemes.coverage import (
 from qwen_hotword.training.edit_distance import sequence_edit_distance
 from qwen_hotword.training.mfa_audit import load_mfa_dictionary
 
-DEFAULT_SIZES = (100, 500, 1_000, 2_000, 5_000, 10_000)
+DEFAULT_SIZES = (100, 500, 1_000, 2_000, 4_000, 5_000, 10_000)
 DEFAULT_WORD_COUNT_WEIGHTS = {1: 0.50, 2: 0.30, 3: 0.15, 4: 0.05}
 PROFILE_NAMES = ("representative", "hard_negative")
 

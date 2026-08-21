@@ -1,5 +1,76 @@
 # 工作交接记录
 
+## 0.23 2026-08-21 Posterior v2封存与4k/50 ms AC基线
+
+H200已完成`replay_streaming_posterior_smoke20_v2`：20个case、67个replay row、
+20个final row、17个tail flush、3个float16分片、90个class和7,552个有效时间帧。
+量化为`argmax_preserving_float16`，只有1帧需要argmax保持修正，
+`greedy_equivalence_mismatches=0`、总体及分片`status=pass`，`sha256.txt`
+内全部8项均为OK，且没有读取sealed test。Step 2正式封存。
+
+领导目标明确为4,000个active热词下“已有CTC decoded音素到检索Top-K”的纯检索
+P95不超过50毫秒；不包含processor、Encoder、CTC Head或LLM。产品仍保持
+Operating Top-5/threshold 0.86，Raw Top-7/10只作扩容后排名观察。
+
+新增纯Python整数音素Aho-Corasick精确检索基线和独立CLI。它每个step重扫完整
+当前greedy音素序列，不假设CTC前缀append-only；支持case active词库、最长匹配、
+span置信度排序和去重。独立benchmark输出Exact availability、Exact Top-5/7/10、
+正例case hit rate、负例FPR、匹配数、索引构建/内存和50毫秒deadline miss。
+
+用用户上传的formal100/2k包做本地只读实测：表中2,402个唯一entry建成
+14,916个节点，构建约12.28毫秒；查询平均/P95/P99/最大值约为
+0.101/0.156/0.201/0.305毫秒，表明纯AC通道有充足时延余量。但当前CTC
+纯exact只覆盖132/172期望词（76.74%），2k负例中3/20有精确误触发，
+因此不能用AC单路替代近似检索。
+
+容量资产默认档位新增4,000，但仍保留10k为最大采样池，以保持旧
+100/500/1k/2k/5k/10k档确定性不变。工作区必须写新目录
+`assets_with_4000_v2`，先比较旧新共有档SHA256，再运行
+`benchmark_exact_hotword_capacity.py`的formal100 100/500/1k/2k/4k曲线。详细命令见
+`docs/HOTWORD_CAPACITY_EVAL.md`第9节。AC通过后再实现Anchor shortlist；GPU Posterior
+scorer保留为Anchor召回不足时的后备。
+
+本轮任务文件Ruff、容量定向pytest、59个source模块Mypy strict、CLI help和
+`git diff --check`均通过；全量pytest共收集171项并通过（依赖不可用项按既有规则
+skip）。全仓Ruff仍只有9个既有UP038，位于未改动的multi-nested、prompt、retrieved
+和temporal模块，本轮没有纳入无关机械修改。
+
+## 0.22 2026-08-20 2k容量Step 1收口与Top-7/10观察口径
+
+Step 1分析包`capacity_analysis_bundle_step1_v1.tar`已完整校验，共26个预期
+文件，SHA256为
+`17c60ef30b427d3550917d3f80aa038385c86613c250bd009692c3584b8a82df`。
+本阶段不再需要补传文件。
+
+formal100的100/500/1k/2k词Raw Recall@5分别为95.35%/94.19%/91.86%/
+88.37%，Operating Recall@5为81.40%/81.40%/81.40%/80.23%，负例FPR为
+0%/0%/5%/20%。从100扩到2k后，原本已通过Operating Top-5而新掉出的
+目标只有`temos`和`pro pão ficar`，都是rank 5变rank 6；其余新增
+displacement多为100词时已被0.86门控拒绝的目标。2k负例误检包括
+`saque`、`dispositivos`和两次`e essa`；其中`e essa`暴露了通用低信息
+短语及跨词边界音素匹配问题，不能用降低0.86阈值掩盖。
+
+47个相邻流式step中31个改写旧CTC后缀，append-only rate仅34.04%，
+17/20个case至少改写一次；尾部flush改写率13/17=76.47%。根据step位置
+和累计音频时长的近似诊断（不是强制对齐时间戳），2/4/6秒lookback分别
+覆盖约64.5%/87.1%/96.8%的历史修订。因此第4步必须比较2/4/6秒，
+不能只做append-only或默认固定2秒精排。
+
+稳态Encoder/CTC Head/decode的P95约为45.8/7.7/2.6毫秒，2k全扫描matching
+P95约2.29秒，证明主瓶颈是逐词CPU精确匹配。第3步预定同时评估
+GPU shortlist Top-128/256/512，主方案Top-256，Top-128为速度消融，Top-512为
+召回诊断/后备；验收以“是否覆盖CPU完整扫描的精确Top-5”为主，不只看
+期望热词是否进shortlist。
+
+产品口径继续封存为Top-5/threshold 0.86，不改Prompt注入数。从现在开始
+容量评测额外保存Raw Top-7和Top-10作为观察范围，用于分析增容后的
+rank 6至10轻度掉队。`capacity_benchmark.py`新增逐query
+`raw_top7_ids`/`raw_top10_ids`、对应命中数，以及汇总Raw correct/recall和
+positive-case hit rate。Operating决策、FPR和容量通过标准仍只使用Top-5。
+
+当前六步状态：Step 1已收口；Step 2的argmax-preserving float16代码已完成，
+等待H200在新目录`replay_streaming_posterior_smoke20_v2`重跑；Step 3至6尚未开始。
+
 ## 0.21 2026-08-20 Posterior Replay float16近并列修复
 
 第2步Posterior Replay首次H200 smoke完成20条、67个step和3个float16分片，

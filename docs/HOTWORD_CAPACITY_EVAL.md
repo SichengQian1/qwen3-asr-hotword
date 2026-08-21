@@ -215,6 +215,12 @@ Operating Recall@5相对100词下降 <= 1个百分点
 有真实逐chunk source timing时，CTC+retrieval P95 < 2 s
 ```
 
+Top-5仍是封存的产品决策与Prompt注入口径，不随词库扩容改变。从第2步开始所有
+容量评测同时保存Raw Top-7和Top-10作为观察范围：记录逐query候选ID、期望热词
+命中数、总体Recall和正例case hit rate。Top-7/10只用于判断容量增加后目标词是
+“轻度掉出Top-5”还是“候选召回失败”，不用于降低0.86门控，也不扩大本轮
+Operating/Prompt的Top-5。
+
 `verified_maximum`是实际全部通过的最大规模；`recommended_online_cap`默认退回一个
 已测试档位保留工程余量。例如10k通过建议先上线5k，5k通过但10k失败建议先上线2k。
 
@@ -241,8 +247,9 @@ P95约2.070秒，因此按保护策略停止；该结果必须保留为slow-back
 | 2,000 | 88.37% | 80.23% | 20% | 2.893 s | 3.021 s |
 
 因此2k不能只靠增量编辑距离解决：matching时延和Top-5排序/FPR都已经失效。下一版
-目标架构固定为“GPU帧级CTC候选召回 -> Top-128/256 -> CPU/GPU精确重排 ->
-Operating Top-5”。在实现候选器前先完成两项不改语义的证据建设：
+目标架构固定为“GPU帧级CTC候选召回 -> Top-128/256（Top-512诊断） ->
+CPU/GPU精确重排 -> Operating Top-5”。精确重排同时输出Raw Top-7/10观察值，
+但实际注入仍只取Operating Top-5。在实现候选器前先完成两项不改语义的证据建设：
 
 1. 从既有decoded replay导出processor/Encoder/Head/decode分阶段分布、累计CTC前缀
    稳定性，以及每个目标词被挤出Top-5或被Operating guard拦下的逐例记录。
@@ -345,8 +352,8 @@ cat "$POSTERIOR_SMOKE_ROOT/posterior_shards.json"
 `storage_dtype=float16`、`quantization=argmax_preserving_float16`、
 `greedy_equivalence_mismatches=0`、全部SHA256通过，且20条
 smoke应仍为67个step/17个tail flush（若输入case未变）。这些资产确认后才进入
-GPU packed CTC Top-128/256候选器；本阶段不实现候选保留、TTL、阈值调整或轻量
-reranker。
+AC精确基线与音素Anchor Top-64/128/256候选器；GPU packed Posterior scorer改为
+Anchor召回不足时的后备。本阶段不实现候选保留、TTL、阈值调整或轻量reranker。
 
 2026-08-20的首次原始float16 smoke写內容器完成67个step和3个分片，但严格
 校验发现1个row的greedy collapse不等价，因而正确拒绝生成
@@ -356,3 +363,80 @@ reranker。
 `maximum_abs_quantization_error`。修正帧数可以非零，但greedy token/span必须仍为
 100%等价。失败的`replay_streaming_posterior_smoke20_v1`保留为证据，不删除、
 不覆盖；修复后使用上述`v2`新目录重跑。
+
+## 9. 4,000词/50 ms目标与Aho-Corasick精确基线
+
+2026-08-21将当前产品目标定义为：已有CTC decoded音素序列到热词候选完成的
+纯检索延迟，在4,000个active热词下P95不超过50毫秒。该数字不包含音频
+processor、Qwen Encoder、CTC Head或LLM解码。Operating仍使用Top-5/0.86，
+Raw Top-7/10只作观察。
+
+Posterior Replay v2已在H200通过：20个case、67个step、17个tail flush、3个
+float16分片和7,552个有效时间帧；`argmax_correction_frames=1`、
+`greedy_equivalence_mismatches=0`、`quantization=argmax_preserving_float16`，
+全部`sha256.txt`条目为OK，且`test_set_used=false`。Step 2因此封存完成。
+
+新增整数音素Aho-Corasick精确基线：
+
+```text
+src/qwen_hotword/hotwords/exact_automaton.py
+src/qwen_hotword/hotwords/exact_capacity.py
+scripts/benchmark_exact_hotword_capacity.py
+```
+
+自动机对每个replay step的完整当前greedy音素序列重新扫描，不假设累计CTC前缀
+append-only；查询后做最长匹配过滤，再以span平均置信度、音素长度和最小置信度做
+确定性排序。报告同时保存未过滤/最长匹配数、Exact availability、Exact
+Top-5/7/10、负例FPR、索引节点/转移/构建内存及50毫秒deadline miss。
+
+本地对上传的formal100/2k资产做过只读探针：热词表实际共2,402个唯一entry、
+14,916个自动机节点，构建约12.28毫秒；100条完整序列扫描的平均/P95/P99/最大值
+约为0.101/0.156/0.201/0.305毫秒。该时间只说明纯AC实现不是50毫秒瓶颈，不能
+替代工作区Linux CPU实测。纯精确子串在当前CTC上只覆盖132/172期望词
+（76.74%），2k负例有3/20精确误触发，因此AC只是快速通道/诊断基线，不直接
+替代近似召回。
+
+旧`assets`不覆盖。为保持旧曲线可比，新资产仍以10k为最大采样池，只在2k与5k
+之间新增4k档：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+
+python scripts/build_hotword_capacity_assets.py \
+  --training-manifest outputs/noah_pt_full_training_v1/full_ctc_train.jsonl \
+  --dictionary outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --base-hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --base-cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --selection "$FORMAL100_ROOT/sample_selection.json" \
+  --sizes 100,500,1000,2000,4000,5000,10000 \
+  --candidate-pool-multiplier 3 \
+  --output-dir "$ASSET_4K_ROOT"
+```
+
+构建后必须先比较旧新共有档的hotwords/cases SHA256；种子、最大容量和输入没变时，
+100/500/1k/2k/5k/10k应保持一致。然后用已有offline formal100 replay运行纯AC：
+
+```bash
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+EXACT_4K_ROOT="$CAP_ROOT/benchmark_exact_ac_offline_formal100_4000_v1"
+
+python scripts/benchmark_exact_hotword_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 100,500,1000,2000,4000 \
+  --deadline-ms 50 \
+  --output-dir "$EXACT_4K_ROOT"
+
+cat "$EXACT_4K_ROOT/quality_summary.json"
+cat "$EXACT_4K_ROOT/performance_summary.json"
+cat "$EXACT_4K_ROOT/summary.json"
+(cd "$EXACT_4K_ROOT" && sha256sum -c sha256.txt)
+```
+
+这一步用于确认4k下AC纯检索P95距离50毫秒的余量，并封存精确通道的Recall/FPR
+上限，不用它直接替代Operating结果。通过后再实现音素Anchor Top-64/128/256
+shortlist和现有近似评分精排。
