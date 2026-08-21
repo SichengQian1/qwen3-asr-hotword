@@ -35,13 +35,26 @@ Unique words: 76,744
 
 ## 2. MFA 与 G2P
 
-MFA 环境和巴西葡萄牙语 G2P 模型：
+MFA 环境和已固定的多语言 G2P 模型：
 
 ```text
 Conda env: aligner
-Model:
-/host_home/star/q00933266/qwen3-asr-hotword/models/mfa/g2p/portuguese_brazil_mfa.zip
+MFA version: 3.4.0
+Model directory:
+/host_home/star/q00933266/qwen3-asr-hotword/models/mfa/g2p
+
+Brazilian Portuguese:
+  portuguese_brazil_mfa.zip
+English (US):
+  english_us_mfa.zip
+Spanish (Latin America):
+  spanish_latin_america_mfa.zip
 ```
+
+英语和拉美西语模型由用户于 2026-08-04 确认已下载到上述目录，与巴葡模型并列
+保存。三个模型必须按各自语言使用，不能跨语言复用。开始英语或西语正式 G2P
+前仍需记录实际文件大小和 SHA256；拉美西语模型是阿根廷西语第一版的候选基线，
+不应表述为专门的阿根廷口音模型。
 
 执行形式：
 
@@ -500,3 +513,39 @@ split。新清单保留来源与原始语言标签，拒绝跨语料重复ID/绝
 生成后封存。所有记录绑定 `ctc_time_upsampling_factor=2`，因此该版本只用于
 Temporal 2× Head，不用于线性1× Head。第一版暂按样本自然比例合并，没有实现
 corpus重采样权重；MLS的地域变体限制仍需在正式产品结论中注明。
+
+## 13. 西语候选原始数据
+
+2026-08-04 用户提供两份与既有 Swift JSON 数据相同格式的西语候选来源：
+
+```text
+MLS Spanish:
+/data/h00911716/code/ms-swift/self_test/datalist/es/mls/swift_librispeech_es.json
+
+Common Voice Spanish:
+/data/h00911716/code/ms-swift/self_test/datalist/es/cv/swift_cv_es.json
+```
+
+原始 JSON 只读，第一阶段分别转换并输出到新的西语目录，不覆盖葡语产物。处理
+时使用 `spanish_latin_america_mfa.zip` 生成候选发音标签，并继续绑定
+`en_es_ptbr_precision_ipa_vocab.v0.2.json` 做覆盖审计。
+
+这两份文件目前只登记为 `Spanish` 候选来源，不能仅凭文件名声明为阿根廷西语：
+MLS Spanish 通常属于西班牙来源，Common Voice `es` 也可能包含多个地区。正式
+合并前必须根据可用元数据或语料来源确认方言范围；在确认前输出标签使用 `es`，
+不使用 `es-AR`，也不把生成字典视为阿根廷口音准确性的证明。
+
+## 14. 阿根廷/拉普拉塔西语增量MFA修复
+
+SLR61 Argentinian与Common Voice Rioplatense v26已分别完成原始词表的MFA G2P，
+现有字典不得覆盖。首轮覆盖不足主要来自MFA模型不接受带acute accent、`ñ`或`ü`
+的输入；发音中的`U+0303 COMBINING TILDE`在本项目西语输出中为非音位性phone OOV。
+
+修复使用一个跨两套语料去重的增量代理词表，不重跑完整MFA。原始文本和最终字典键
+始终保留正确西语拼写；去acute、`ñ -> ni`与`gü -> gw`只发生在G2P代理层。
+`ñ`代理产生的`ɲ j`只在相应规则下还原为`ɲ`，`U+0303`只从最终西语候选发音中
+删除，不能修改共享CTC词表或葡语鼻元音处理。
+
+修复后每套字典自动运行`audit_mfa_dictionary`。存在任何缺词、多发音、空发音或
+phone OOV时保持`training_labels_ready=false`并写入未解析清单；在两套审计均通过
+前不构建完整Manifest，也不合并MLS Spanish或通用Common Voice Spanish。

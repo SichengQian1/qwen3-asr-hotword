@@ -1,5 +1,74 @@
 # 工作交接记录
 
+## 0.24 2026-08-21 阿根廷西语共享增量MFA修复
+
+SLR61与Common Voice Rioplatense的完整MFA G2P已经运行过，现有字典保持只读，
+不重新处理全部3,487/18,786个输入词。当前阻塞是首轮字典分别仍缺656/3,445个词，
+且已生成发音包含西语非音位性的`U+0303 COMBINING TILDE`。修复流程缩减为一个
+跨语料共享增量批次：先复用原词或去acute后已存在的唯一发音，只把仍缺失的`ñ/ü`
+等安全代理词去重写入一个`proxy_words.txt`；MFA只对这个小文件运行一次；最后分别
+回映射两套原始词形并自动运行共享v0.2 CTC词表审计。
+
+新增：
+
+- `src/qwen_hotword/training/spanish_mfa_repair.py`
+- `scripts/prepare_spanish_mfa_repairs.py`
+- `scripts/finalize_spanish_mfa_repairs.py`
+- `tests/test_spanish_mfa_repair.py`
+
+代理规则只作用于G2P输入，不修改训练文本：acute accent只在代理中移除；`ñ`使用
+探针较可靠的`ni`代理，并只在该规则下把代理输出的`ɲ j`还原为`ɲ`；`gü`使用`gw`
+代理。最终西语候选发音只删除`U+0303`，不会改变葡语词典或共享词表。任何没有安全
+代理、多发音、代理G2P失败、空发音或仍有phone OOV的词继续写入
+`unresolved_words.tsv`，`training_labels_ready=false`，不得构建完整Manifest。
+
+工作区使用两个新目录，不覆盖现有MFA字典或审计：
+
+```bash
+ES_AR_ROOT=outputs/es_ar_train_sources_v1
+SLR_ROOT="$ES_AR_ROOT/slr61"
+CV_RIO_ROOT="$ES_AR_ROOT/common_voice_rioplatense_v26"
+SLR_DICT="$SLR_ROOT/mfa_g2p/slr61_spanish_latin_america_mfa.v1.dict"
+CV_RIO_DICT="$CV_RIO_ROOT/mfa_g2p/common_voice_rioplatense_v26_spanish_latin_america_mfa.v1.dict"
+ES_REPAIR_ROOT="$ES_AR_ROOT/shared_mfa_repair_v1"
+ES_REPAIRED_ROOT="$ES_AR_ROOT/repaired_mfa_v1"
+
+python scripts/prepare_spanish_mfa_repairs.py \
+  --corpus slr61="$SLR_ROOT/mfa_g2p" \
+  --dictionary slr61="$SLR_DICT" \
+  --corpus common_voice_rioplatense_v26="$CV_RIO_ROOT/mfa_g2p" \
+  --dictionary common_voice_rioplatense_v26="$CV_RIO_DICT" \
+  --output-dir "$ES_REPAIR_ROOT"
+
+conda run --no-capture-output -n aligner mfa g2p \
+  --verbose \
+  --num_jobs 16 \
+  --num_pronunciations 1 \
+  "$ES_REPAIR_ROOT/proxy_words.txt" \
+  models/mfa/g2p/spanish_latin_america_mfa.zip \
+  "$ES_REPAIR_ROOT/proxy_spanish_latin_america_mfa.v1.dict"
+
+python scripts/finalize_spanish_mfa_repairs.py \
+  --corpus slr61="$SLR_ROOT/mfa_g2p" \
+  --dictionary slr61="$SLR_DICT" \
+  --corpus common_voice_rioplatense_v26="$CV_RIO_ROOT/mfa_g2p" \
+  --dictionary common_voice_rioplatense_v26="$CV_RIO_DICT" \
+  --repair-root "$ES_REPAIR_ROOT" \
+  --proxy-dictionary "$ES_REPAIR_ROOT/proxy_spanish_latin_america_mfa.v1.dict" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir "$ES_REPAIRED_ROOT"
+```
+
+先返回共享`prepare_summary.json`、最终`summary.json`以及两套
+`mfa_audit/summary.json`。只有两套审计的missing、OOV、duplicate均为0且
+`training_labels_ready=true`后，才分别构建SLR61与Rioplatense完整Manifest；当前
+仍不合并MLS/通用Common Voice，也不读取或重分Rioplatense官方test。
+
+本地验证：全仓Ruff通过；西语修复/诊断/来源/phone normalization定向pytest 10项
+通过；全量pytest 175项通过；新模块Mypy strict通过；两个CLI help和
+`git diff --check`通过。全仓Mypy仍有12项既有Torch/可选RapidFuzz类型问题，均位于
+本轮未修改模块，新模块为0。
+
 ## 0.23 2026-08-21 Posterior v2封存与4k/50 ms AC基线
 
 H200已完成`replay_streaming_posterior_smoke20_v2`：20个case、67个replay row、
