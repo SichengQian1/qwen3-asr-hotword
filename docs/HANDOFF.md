@@ -1,5 +1,53 @@
 # 工作交接记录
 
+## 0.25 2026-08-21 热词容量/50 ms任务暂停点与六步恢复路线
+
+本任务目前暂时让位于西语数据处理，但以下路线已经确认，后续恢复时不要重新讨论或
+从全词库RapidFuzz扫描重新开始。目标口径是：4,000个active葡语热词下，从已有CTC
+输出到检索Top-K的纯检索P95不超过50毫秒；不含audio processor、Qwen Encoder、
+CTC Head和LLM。产品决策仍使用Operating Top-5、threshold 0.86、maximum edit
+ratio 0.35和既有posterior/margin门控；Raw Top-7/10只作扩容观察，不能增加Prompt
+注入数量或改变正式通过标准。
+
+固定六步如下：
+
+1. **证据与慢基线冻结（已完成）**：封存formal100离线质量、smoke20累计流式时延、
+   CTC前缀稳定性、rank displacement和负例碰撞证据。已确认2k全词库逐词近似匹配
+   P95约2.29秒，瓶颈在CPU全扫描；累计CTC并非append-only，2/4/6秒lookback覆盖
+   率约64.5%/87.1%/96.8%。
+2. **可复用Posterior Replay（已完成并封存）**：H200的
+   `replay_streaming_posterior_smoke20_v2`共20个case、67个step、17个tail flush，
+   `argmax_preserving_float16`分片全部SHA256通过，
+   `greedy_equivalence_mismatches=0`。后续候选器和精排必须复用这份因果资产，避免
+   每次重新跑Qwen/CTC造成计时噪声。
+3. **快速候选召回层（进行到诊断子步骤）**：已完成Aho-Corasick精确快路径与4k
+   基线，工作区4k纯查询P95约0.258毫秒，证明50毫秒工程预算可达；但精确召回仅
+   127/172（73.84%），正例case hit 69/80（86.25%），负例FPR 3/20（15%），不能
+   单独上线。恢复入口是实现音素2/3/4-gram Anchor倒排索引，比较Top-64/128/256
+   候选集；Top-128为速度消融、Top-256为主方案，必要时用更大候选或Posterior
+   scorer作诊断/后备。候选层验收必须同时统计对CPU完整扫描Top-5的覆盖率、目标
+   热词召回率、无Anchor率和候选集大小。
+4. **小候选集近似精排与流式窗口消融（未开始）**：只对Anchor候选运行现有近似
+   音素评分器，不再扫描4,000词；分别比较完整当前CTC序列以及2/4/6秒recent
+   lookback。保留AC exact命中作为低延迟证据，但不能让未来音频或离线结果进入
+   当前step。记录各阶段P50/P95/P99，并确认4k总检索P95仍低于50毫秒。
+5. **排序稳定性与误报控制（未开始）**：在不改0.86、Top-5和Prompt模板的前提下，
+   评估显式候选retention、family diversity/最长匹配和低信息短语控制；任何TTL、
+   跨chunk保留或去重策略都必须成为显式配置并单独做消融。正式输出仍为Operating
+   Top-5，同时保存Raw Top-7/10，重点复核`e essa`等跨词边界误触发及新增容量造成
+   的回归。
+6. **4k正式验收与上线建议（未开始）**：在同一formal100与累计流式replay上比较
+   100/500/1k/2k/4k，报告Raw Top-5/7/10、Operating Top-5、正例case hit、负例
+   FPR、检索P50/P95/P99、deadline miss、索引构建时间和RSS。通过条件至少包括4k
+   纯检索P95小于50毫秒、质量相对冻结基线的变化可解释且没有静默使用sealed test；
+   最终再决定默认Anchor规模、lookback和是否启用Posterior fallback。
+
+因此，**下次恢复直接从Step 3的Anchor shortlist实现开始**，不是重跑Step 1/2，
+也不是把AC exact通道误当成最终检索器。恢复前可补充一个短诊断JSON，集中输出45个
+exact miss、3个负例误检和2个扩容回归的原因，以及Anchor Recall@64/128/256；该
+诊断不需要上传音频、完整文本或Posterior张量。详细冻结结果与命令分别见本文件
+0.20至0.23和`docs/HOTWORD_CAPACITY_EVAL.md`第7至9节。
+
 ## 0.24 2026-08-21 阿根廷西语共享增量MFA修复
 
 SLR61与Common Voice Rioplatense的完整MFA G2P已经运行过，现有字典保持只读，
