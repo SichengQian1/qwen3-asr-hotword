@@ -610,3 +610,8 @@ speaker整体排除，从而在clip去重之外再防止speaker泄漏。输出`s
 本轮选170小时辅助池，加核心Temporal 2×候选合计约193.7小时。这是
 过滤前的余量设计，不得预先声称最终train已达150小时；必须完成MFA修复、
 完整Manifest和Temporal 2×审计后才做最终判定。
+
+工作区实际选样为118,177条、171.594529小时，train/validation/test分别为
+164.102775/3.819581/3.672173小时，所有speaker跨split重叠为0。该子集与核心
+Temporal 2×候选合计约195.29小时，但最终可训小时数仍以后续MFA、Manifest和
+Temporal 2×审计为准。

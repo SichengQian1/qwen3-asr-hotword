@@ -1,5 +1,61 @@
 # 工作交接记录
 
+## 0.30 2026-08-24 西语明确拉美CV辅助池选样通过
+
+0.29修正后的170小时辅助池选样在工作区通过，全部SHA256校验通过：
+
+- 输出：`outputs/es_latam_cv_auxiliary_170h_v1`；
+- 118,177条、171.594529小时、1,523个speaker；
+- train：113,108条、164.102775小时、1,483个speaker；
+- validation：2,540条、3.819581小时、26个speaker；
+- test：2,529条、3.672173小时、14个speaker；
+- 三类speaker跨split重叠均为0；169个与核心集共有的speaker只出现在train；
+- 所有1,352条额外Rioplatense（2.110041小时）全部保留；
+- 选中其他明确拉美116,825条、169.484488小时；
+- 2小时speaker上限后可用容量176.391071小时，选样后仍留4.796542小时
+  同级quota余量；未使用未知、半岛或MLS。
+
+`source.tsv`和`selected_inventory.tsv`均为118,178行（含header），与summary一致。
+此阶段只冻结了音频/文本/speaker/split选择，尚未证明该子集MFA/CTC label ready。
+
+下一步先提取选中子集词表，并用早先已生成的通用Common Voice Spanish完整
+MFA字典做定向基线审计，暂不重跑MFA：
+
+```bash
+ES_AUX_ROOT=outputs/es_latam_cv_auxiliary_170h_v1
+ES_CANDIDATE_ROOT=outputs/es_candidate_train_sources_v1
+ES_AUX_G2P="$ES_AUX_ROOT/mfa_g2p"
+ES_AUX_BASE_AUDIT="$ES_AUX_ROOT/mfa_audit_base_v1"
+ES_CV_BASE_DICT="$ES_CANDIDATE_ROOT/common_voice/mfa_g2p/common_voice_spanish_latin_america_mfa.dict"
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+
+test -f "$ES_CV_BASE_DICT"
+test ! -e "$ES_AUX_G2P"
+test ! -e "$ES_AUX_BASE_AUDIT"
+
+python scripts/prepare_mfa_g2p.py \
+  --tsv "$ES_AUX_ROOT/source.tsv" \
+  --output-dir "$ES_AUX_G2P" \
+  --text-column text \
+  --max-records 0 \
+  --minimum-word-count 1
+
+python scripts/audit_mfa_dictionary.py \
+  --words "$ES_AUX_G2P/words.txt" \
+  --word-counts "$ES_AUX_G2P/word_counts.tsv" \
+  --dictionary "$ES_CV_BASE_DICT" \
+  --vocab "$VOCAB" \
+  --output-dir "$ES_AUX_BASE_AUDIT"
+
+cat "$ES_AUX_G2P/summary.json"
+cat "$ES_AUX_BASE_AUDIT/summary.json"
+cat "$ES_AUX_BASE_AUDIT/oov_phone_counts.tsv"
+sed -n '1,81p' "$ES_AUX_BASE_AUDIT/missing_words.tsv"
+```
+
+先返回两个summary、phone OOV计数和前80个缺词。下一轮再只对选中词表生成
+共享增量修复计划，不要重跑全部Common Voice的MFA G2P。
+
 ## 0.29 2026-08-24 西语170小时选样的speaker配额修正
 
 工作区首次运行0.28命令在写出产物前停止，报错：
