@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+import qwen_hotword.hotwords.anchor_capacity as anchor_capacity_module
 from qwen_hotword.hotwords.anchor_capacity import benchmark_anchor_hotword_capacity
 from qwen_hotword.hotwords.anchor_index import AnchorIndexConfig, PhonemeAnchorIndex
 from qwen_hotword.hotwords.registry import HotwordEntry, write_hotword_table
@@ -72,6 +76,7 @@ def test_anchor_index_is_active_only_nested_and_deterministic() -> None:
 
 def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokens = ["<blank>"] + [f"p{index}" for index in range(1, 41)]
     vocab = tmp_path / "vocab.json"
@@ -144,6 +149,21 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
         )
     _write_jsonl(replay, replay_rows)
 
+    events: list[str] = []
+    original_query = PhonemeAnchorIndex.query
+    original_reference = anchor_capacity_module.profile_decoded_hotwords
+
+    def tracked_query(self: PhonemeAnchorIndex, *args: Any, **kwargs: Any) -> Any:
+        events.append("anchor")
+        return original_query(self, *args, **kwargs)
+
+    def tracked_reference(*args: Any, **kwargs: Any) -> Any:
+        events.append("reference")
+        return original_reference(*args, **kwargs)
+
+    monkeypatch.setattr(PhonemeAnchorIndex, "query", tracked_query)
+    monkeypatch.setattr(anchor_capacity_module, "profile_decoded_hotwords", tracked_reference)
+
     output = tmp_path / "benchmark"
     report = benchmark_anchor_hotword_capacity(
         assets_root=assets,
@@ -157,6 +177,7 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     )
 
     assert report["status"] == "pass"
+    assert events == ["anchor", "anchor", "reference", "reference"]
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     level_summary = summary["levels"]["representative"]["100"]
     assert level_summary["quality"]["expected_recall_at_8"] == 1.0
@@ -165,6 +186,7 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     assert level_summary["performance"]["latency_scope"] == (
         "anchor_index_query_only_excludes_full_scan_reference"
     )
+    assert summary["timing_protocol"] == "all_anchor_queries_before_full_scan_reference"
     rows = [
         json.loads(line)
         for line in (output / "query_results.jsonl").read_text(encoding="utf-8").splitlines()

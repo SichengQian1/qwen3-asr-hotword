@@ -522,3 +522,26 @@ diagnostic_cases.jsonl
 case、chunk、累计时长、posting访问量和候选rank。v1目录保持只读，v2输出使用
 `benchmark_anchor_offline_formal100_4000_v2`。正式计时应等待Feature Cache结束并
 保持CPU/存储空闲；否则只能比较质量，不能据此验收50 ms。
+
+## 12. v2诊断与v3两阶段计时
+
+v2质量与v1完全一致，证明等价加速没有改变候选。4个Top-256 expected miss由3个
+唯一热词构成，其中`sim_v3_hw_ptbr_0169`出现两次；4项均不在对应完整CPU Raw
+Top-5。另4个未覆盖的Raw Top-5项均为非truth distractor。因此Top-256相对现有
+完整扫描的正式正确项没有发现新增损失，后续仍以Top-256为主精排候选集。
+
+v2 P50/P90/P95为24.07/39.23/82.21 ms。8个超时查询存在明显非算法性双峰：部分
+低posting查询反而比高posting查询慢。v1/v2逐case执行顺序是“完整CPU扫描→Anchor
+计时”，3至8秒的慢参考会污染下一次Anchor的GC、分配器和调度状态。
+
+v3改为：
+
+1. 构建索引并warmup；
+2. `gc.collect()`；
+3. 连续完成全部Anchor计时；
+4. Anchor计时全部结束后才执行完整CPU参考；
+5. 按case合并质量字段。
+
+该变更不改变任何候选结果，只修复benchmark测量协议。输出显式记录
+`timing_protocol=all_anchor_queries_before_full_scan_reference`。v3仍需在CPU空闲时
+运行；若P95仍超过50 ms，才允许进入会改变召回的高DF posting cap消融。

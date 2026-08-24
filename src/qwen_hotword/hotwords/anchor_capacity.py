@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import math
@@ -10,7 +11,7 @@ import tracemalloc
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from statistics import mean, median
-from typing import Any
+from typing import Any, cast
 
 from qwen_hotword.hotwords.anchor_index import AnchorIndexConfig, PhonemeAnchorIndex
 from qwen_hotword.hotwords.capacity_assets import (
@@ -127,22 +128,12 @@ def benchmark_anchor_hotword_capacity(
                     active_hotword_ids=case.active_hotword_ids,
                     maximum_candidates=maximum_candidates,
                 )
+            gc.collect()
 
             level_rows: list[dict[str, object]] = []
             for query_number, replay in enumerate(replay_rows, start=1):
                 case = case_by_id[str(replay["case_id"])]
-                active_entries = tuple(entry_by_id[item] for item in case.active_hotword_ids)
                 decoded = replay_decoded_phonemes(replay)
-
-                reference = profile_decoded_hotwords(
-                    decoded,
-                    effective_time_steps=int(replay["effective_time_steps"]),
-                    hotwords=active_entries,
-                    config=scoring_config,
-                )
-                reference_top5 = tuple(
-                    match.hotword_id for match in reference.result.ranked_matches[:top_k]
-                )
                 anchor_started = time.perf_counter()
                 result = index.query(
                     tuple(item.token_id for item in decoded),
@@ -168,20 +159,13 @@ def benchmark_anchor_hotword_capacity(
                     "cumulative_audio_sec": float(replay["cumulative_audio_sec"]),
                     "is_final": bool(replay["is_final"]),
                     "is_tail_flush": bool(replay["is_tail_flush"]),
-                    "active_hotwords": len(active_entries),
+                    "active_hotwords": len(case.active_hotword_ids),
                     "expected_hotword_ids": sorted(expected),
                     "expected_candidate_ranks": {
                         hotword_id: candidate_ranks[hotword_id]
                         for hotword_id in sorted(expected)
                         if hotword_id in candidate_ranks
                     },
-                    "reference_raw_top5_ids": list(reference_top5),
-                    "reference_top5_candidate_ranks": {
-                        hotword_id: candidate_ranks[hotword_id]
-                        for hotword_id in reference_top5
-                        if hotword_id in candidate_ranks
-                    },
-                    "reference_expected_hits_at_5": len(expected & set(reference_top5)),
                     "exact_hotword_ids": list(result.exact_hotword_ids),
                     "exact_expected_hits": len(expected & set(result.exact_hotword_ids)),
                     "anchored_hotwords": len(result.anchored_hotword_ids),
@@ -189,7 +173,6 @@ def benchmark_anchor_hotword_capacity(
                     "postings_visited": result.postings_visited,
                     "candidate_count": result.total_candidate_count,
                     "anchor_retrieval_seconds": anchor_seconds,
-                    "full_scan_reference_seconds": reference.retrieval_seconds,
                     "top_anchor_candidates": [
                         candidate.to_dict() for candidate in result.candidates[:20]
                     ],
@@ -199,11 +182,7 @@ def benchmark_anchor_hotword_capacity(
                     row[f"candidate_ids_at_{shortlist_size}"] = list(shortlist)
                     row[f"candidate_count_at_{shortlist_size}"] = len(shortlist)
                     row[f"expected_hits_at_{shortlist_size}"] = len(expected & set(shortlist))
-                    row[f"reference_top5_hits_at_{shortlist_size}"] = len(
-                        set(reference_top5) & set(shortlist)
-                    )
                 level_rows.append(row)
-                all_query_rows.append(row)
                 if print_progress and (
                     query_number == len(replay_rows) or query_number % 20 == 0
                 ):
@@ -212,6 +191,54 @@ def benchmark_anchor_hotword_capacity(
                         f"queries={query_number}/{len(replay_rows)}",
                         flush=True,
                     )
+            for reference_number, (replay, row) in enumerate(
+                zip(replay_rows, level_rows, strict=True), start=1
+            ):
+                case = case_by_id[str(replay["case_id"])]
+                active_entries = tuple(entry_by_id[item] for item in case.active_hotword_ids)
+                decoded = replay_decoded_phonemes(replay)
+                reference = profile_decoded_hotwords(
+                    decoded,
+                    effective_time_steps=int(replay["effective_time_steps"]),
+                    hotwords=active_entries,
+                    config=scoring_config,
+                )
+                reference_top5 = tuple(
+                    match.hotword_id for match in reference.result.ranked_matches[:top_k]
+                )
+                for shortlist_size in resolved_shortlists:
+                    reference_shortlist = set(
+                        cast(list[str], row[f"candidate_ids_at_{shortlist_size}"])
+                    )
+                    row[f"reference_top5_hits_at_{shortlist_size}"] = len(
+                        set(reference_top5) & reference_shortlist
+                    )
+                maximum_candidate_ids = cast(
+                    list[str], row[f"candidate_ids_at_{maximum_candidates}"]
+                )
+                maximum_ranks = {
+                    str(hotword_id): rank
+                    for rank, hotword_id in enumerate(maximum_candidate_ids, start=1)
+                }
+                row["reference_raw_top5_ids"] = list(reference_top5)
+                row["reference_top5_candidate_ranks"] = {
+                    hotword_id: maximum_ranks[hotword_id]
+                    for hotword_id in reference_top5
+                    if hotword_id in maximum_ranks
+                }
+                row["reference_expected_hits_at_5"] = len(
+                    set(case.expected_hotword_ids) & set(reference_top5)
+                )
+                row["full_scan_reference_seconds"] = reference.retrieval_seconds
+                if print_progress and (
+                    reference_number == len(replay_rows) or reference_number % 20 == 0
+                ):
+                    print(
+                        f"anchor reference profile={profile} size={size} "
+                        f"queries={reference_number}/{len(replay_rows)}",
+                        flush=True,
+                    )
+            all_query_rows.extend(level_rows)
             profile_summaries[str(size)] = _summarize_level(
                 profile=profile,
                 size=size,
@@ -243,6 +270,7 @@ def benchmark_anchor_hotword_capacity(
         "shortlist_sizes": list(resolved_shortlists),
         "deadline_seconds": deadline_seconds,
         "latency_scope": "anchor_index_query_only_excludes_full_scan_reference",
+        "timing_protocol": "all_anchor_queries_before_full_scan_reference",
         "test_set_used": False,
     }
     diagnostic_rows, diagnostic_summary = _build_diagnostics(
@@ -282,6 +310,7 @@ def benchmark_anchor_hotword_capacity(
             "warmup_queries": warmup_queries,
             "deadline_seconds": deadline_seconds,
             "latency_scope": "anchor_index_query_only_excludes_full_scan_reference",
+            "timing_protocol": "all_anchor_queries_before_full_scan_reference",
             "inputs": {
                 "asset_summary": _file_identity(paths["assets"] / "asset_summary.json"),
                 "replay": _file_identity(paths["replay"]),

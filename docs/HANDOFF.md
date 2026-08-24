@@ -1,5 +1,73 @@
 # 工作交接记录
 
+## 0.41 2026-08-24 4k Anchor v2诊断与两阶段计时v3
+
+工作区`benchmark_anchor_offline_formal100_4000_v2`全部SHA256通过，质量与v1完全
+一致：Top-64为164/172（95.35%），Top-128/256均为168/172（97.67%），Top-256
+覆盖完整CPU Raw Top-5的99.2%，test未使用。4个expected miss明确为：
+
+```text
+sim_v3_hw_ptbr_0169  两个case
+sim_v3_hw_ptbr_0436  一个case
+sim_v3_hw_ptbr_0073  一个case
+```
+
+这4项均不在对应完整CPU Raw Top-5中；因此它们是更上游的声学/近似排序难例，并非
+Top-256相对现有正式Top-5造成的新增损失。另4个Raw Top-5未覆盖项全部是非expected
+capacity distractor，包括1个negative case；Top-256没有漏掉这些case里的正确热词。
+
+v2 P50/P90/P95/P99/max约为24.07/39.23/82.21/90.51/119.21 ms，8%查询超过
+50 ms，仍未通过。但慢查询与posting量不单调：2,686和3,615 posting的查询也约
+72 ms，而6,000至7,700 posting的正常查询约20至26 ms。根因是benchmark v1/v2
+在每个case内先执行3至8秒完整CPU参考扫描，再立即计时Anchor；参考扫描的GC、分配器
+和调度抖动污染了下一次“纯Anchor”测量。
+
+v3不改索引、候选或排序，唯一变化是严格两阶段：完成warmup和一次`gc.collect()`后，
+先连续计时全部100次Anchor查询；所有Anchor计时结束后，再单独执行100次慢参考并
+合并质量字段。`summary.json`和`run_config.json`显式记录：
+
+```text
+timing_protocol: all_anchor_queries_before_full_scan_reference
+```
+
+新输出不得覆盖v1/v2：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+ANCHOR_4K_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v3"
+
+test ! -e "$ANCHOR_4K_ROOT"
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 4000 \
+  --shortlist-sizes 64,128,256 \
+  --ngram-sizes 2,3,4 \
+  --anchors-per-entry 24 \
+  --offset-tolerance 1 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --deadline-ms 50 \
+  --output-dir "$ANCHOR_4K_ROOT"
+
+(cd "$ANCHOR_4K_ROOT" && sha256sum -c sha256.txt)
+cat "$ANCHOR_4K_ROOT/quality_summary.json"
+cat "$ANCHOR_4K_ROOT/performance_summary.json"
+cat "$ANCHOR_4K_ROOT/diagnostic_summary.json"
+```
+
+正式计时仍需避开Feature Cache或其他CPU高负载。只有v3隔离计时后P95仍超过50 ms，
+才进入高DF posting cap等质量会变化的消融。
+
 ## 0.40 2026-08-24 4k Anchor v1结果与等价加速v2
 
 工作区`benchmark_anchor_offline_formal100_4000_v1`全部SHA256通过，test未使用。
