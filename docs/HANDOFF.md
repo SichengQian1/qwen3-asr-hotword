@@ -1,5 +1,69 @@
 # 工作交接记录
 
+## 0.37 2026-08-24 三语150小时v2通过与4小时平衡validation入口
+
+工作区的`outputs/en_es_pt_balanced_150h_temporal2x_v2`已通过全部SHA256
+校验。v2与v1的选中结果完全一致：英/西/葡分别为106,440/
+103,318/100,499条和150.001423/150.001511/150.000337小时，合计
+310,257条、450.003271小时。重复ID/音频均为0，test未读取。
+
+v2记录契约已生效：`experiment=full-ctc-v1`、
+`dataset_version=en-es-pt-temporal2x-balanced-v2`，并保留
+`source_dataset_version`和`balanced_language_bucket`。该train现可作为后续
+Feature Cache的固定输入。四个Manifest SHA256为：
+
+```text
+combined: def68274fe9af3497d46c38161de40f772dcc1d0c23811a9f4da3f59de0df7e2
+en:       1fb8b494a591cbcfd138efdc678f108de850e04eb99518d7fdc766a19a4e519b
+es:       dca9ac1d30c4f4a9fde96a74a6a562c6bcf17bbdf045e2a9f95843ef2eeb214b
+pt:       f35bd38aa4f60610383ecc676f2f6dafedd6a1d3cc3177a9c7d7c3d119f00e2e
+```
+
+三语来源validation分别约为10.165238/4.368367/16.239131小时。为保持
+对称且不迫近西语上限，首个validation固定为每语言4小时，合计约12小时。
+新增：
+
+- `scripts/build_balanced_multilingual_validation.py`
+- `build_balanced_multilingual_validation()` in
+  `src/qwen_hotword/training/balanced_multilingual.py`
+
+构建器显式读取三个validation Manifest并按稳定SHA256优先级选到至少4小时；
+只从summary记录test身份，不打开test内容。它会校验来源validation的SHA/条数/
+时长，扫描v2 train的ID和音频身份，并拒绝任何train-validation重叠。
+输出同样补齐`full-ctc-v1`契约，可直接作为Feature Cache的validation输入。
+
+工作区命令：
+
+```bash
+BALANCED_TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+
+test ! -e "$BALANCED_VALIDATION_ROOT"
+
+python scripts/build_balanced_multilingual_validation.py \
+  --language-pool en=outputs/en_us_swift_temporal2x_v1 \
+  --language-pool es=outputs/es_combined_temporal2x_v1 \
+  --language-pool pt=outputs/pt_combined_temporal2x_v1 \
+  --training-root "$BALANCED_TRAIN_ROOT" \
+  --target-hours 4 \
+  --seed 20260824 \
+  --output-dir "$BALANCED_VALIDATION_ROOT"
+
+(cd "$BALANCED_VALIDATION_ROOT" && sha256sum -c sha256.txt)
+cat "$BALANCED_VALIDATION_ROOT/selection_summary.json"
+cat "$BALANCED_VALIDATION_ROOT/selection_config.json"
+wc -l "$BALANCED_VALIDATION_ROOT"/full_ctc_validation*.jsonl
+```
+
+验收标准：每语言至少4小时且超出量不大于该语言最长选中clip；跨train
+ID/音频重叠、validation内重复均为0；`test_set_used=false`、
+`test_set_content_read=false`。返回SHA、summary/config和行数后，再启动单H200
+Encoder Feature Cache。
+
+本地验证：相关4个代码/测试文件Ruff与严格Mypy通过，定向pytest 3项
+通过，全量pytest为193 passed，全仓Ruff与`git diff --check`通过。全仓
+严格Mypy仍为23个既有文件的113项错误，本轮文件为0项。
+
 ## 0.36 2026-08-24 三语150小时v1选样通过与v2 Manifest契约修正
 
 工作区已成功生成`outputs/en_es_pt_balanced_150h_temporal2x_v1`并通过

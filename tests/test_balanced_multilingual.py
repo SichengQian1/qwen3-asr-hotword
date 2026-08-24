@@ -10,6 +10,7 @@ import pytest
 from qwen_hotword.training.balanced_multilingual import (
     LanguagePool,
     build_balanced_multilingual_training,
+    build_balanced_multilingual_validation,
 )
 
 
@@ -110,6 +111,64 @@ def test_balanced_multilingual_rejects_used_test_pool(tmp_path: Path) -> None:
         )
 
 
+def test_balanced_validation_is_equal_duration_disjoint_and_cache_compatible(
+    tmp_path: Path,
+) -> None:
+    pools = [
+        _write_pool(
+            tmp_path,
+            language,
+            {"en": "en-US", "es": "es", "pt": "pt-BR"}[language],
+            [
+                (f"{language}_{index}", f"{language}_source", 10.0)
+                for index in range(5)
+            ],
+        )
+        for language in ("en", "es", "pt")
+    ]
+    training_root = tmp_path / "training"
+    build_balanced_multilingual_training(
+        pools,
+        training_root,
+        target_hours=0.01,
+        seed=17,
+    )
+
+    output = tmp_path / "validation"
+    summary = build_balanced_multilingual_validation(
+        pools,
+        training_root,
+        output,
+        target_hours=0.005,
+        seed=17,
+    )
+
+    combined = _read_jsonl(output / "full_ctc_validation.jsonl")
+    assert len(combined) == 6
+    assert all(row["split"] == "validation" for row in combined)
+    assert all(row["experiment"] == "full-ctc-v1" for row in combined)
+    assert all(
+        row["dataset_version"]
+        == "en-es-pt-temporal2x-balanced-validation-v1"
+        for row in combined
+    )
+    assert {row["balanced_language_bucket"] for row in combined} == {
+        "en",
+        "es",
+        "pt",
+    }
+    train_ids = {
+        row["id"] for row in _read_jsonl(training_root / "full_ctc_train.jsonl")
+    }
+    assert train_ids.isdisjoint(row["id"] for row in combined)
+    assert summary["cross_train_id_overlaps"] == 0
+    assert summary["cross_train_audio_overlaps"] == 0
+    assert summary["test_set_used"] is False
+    assert summary["test_set_content_read"] is False
+    assert summary["source_validation_content_read"] is True
+    assert (output / "sha256.txt").is_file()
+
+
 def _write_pool(
     root: Path,
     language: str,
@@ -127,6 +186,21 @@ def _write_pool(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in payloads),
         encoding="utf-8",
     )
+    validation_path = pool_root / "full_ctc_validation.jsonl"
+    validation_payloads = [
+        _record(
+            f"{language}_validation_{index}",
+            language_tag,
+            f"{language}_validation_source",
+            10.0,
+            split="validation",
+        )
+        for index in range(3)
+    ]
+    validation_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in validation_payloads),
+        encoding="utf-8",
+    )
     train_hours = sum(duration for _, _, duration in rows) / 3600.0
     dummy_hash = "0" * 64
     summary = {
@@ -135,18 +209,22 @@ def _write_pool(
         "test_set_used": False,
         "manifest_paths": {
             "train": str(train_path),
-            "validation": str(pool_root / "sealed_validation.jsonl"),
+            "validation": str(validation_path),
             "test": str(pool_root / "sealed_test.jsonl"),
         },
         "manifest_sha256": {
             "train": _sha256(train_path),
-            "validation": dummy_hash,
+            "validation": _sha256(validation_path),
             "test": dummy_hash,
         },
-        "split_records": {"train": len(rows), "validation": 1, "test": 1},
+        "split_records": {
+            "train": len(rows),
+            "validation": len(validation_payloads),
+            "test": 1,
+        },
         "split_audio_hours": {
             "train": train_hours,
-            "validation": 0.01,
+            "validation": 30.0 / 3600.0,
             "test": 0.01,
         },
     }
@@ -162,6 +240,8 @@ def _record(
     language: str,
     source: str,
     duration: float,
+    *,
+    split: str = "train",
 ) -> dict[str, Any]:
     return {
         "id": sample_id,
@@ -169,7 +249,7 @@ def _record(
         "audio_relative": f"/audio/{sample_id}.wav",
         "text": sample_id,
         "language": language,
-        "split": "train",
+        "split": split,
         "dataset_version": "fixture-temporal2x-v1",
         "source_corpus": source,
         "release_source": "original_ready",

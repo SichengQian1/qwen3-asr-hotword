@@ -696,3 +696,15 @@ v2派生器在写出选中记录时统一补齐`experiment`、新
 `dataset_version`和三语bucket，同时用`source_dataset_version`保留原输入
 版本。该处理只改派生元数据，不改文本、音频、音素标签、split、选中ID
 或时长。v1保留不覆盖；v2是后续训练validation和feature cache的唯一入口。
+
+## 23. 三语平衡validation
+
+已封存的三语来源validation为英语10.165238小时、西语4.368367小时和
+葡语16.239131小时。第一版平衡validation取每语言4小时，以时长较小的西语
+为容量边界并保留约0.368小时余量。这个集合用于checkpoint选择和训练期间指标，
+不代替三个独立封存test。
+
+选样只读validation内容和平衡v2 train的ID/音频身份；test只从summary记录
+路径、SHA、条数和小时，不打开内容。选中记录必须与v2 train的ID和音频路径
+完全无重叠，并统一写入`experiment=full-ctc-v1`、`split=validation`和
+独立的validation dataset version。
