@@ -1,5 +1,60 @@
 # 工作交接记录
 
+## 0.36 2026-08-24 三语150小时v1选样通过与v2 Manifest契约修正
+
+工作区已成功生成`outputs/en_es_pt_balanced_150h_temporal2x_v1`并通过
+全部SHA256校验：英/西/葡分别为150.001423/150.001511/150.000337小时，
+合计310,257条、450.003271小时，三语时长差约4.23秒。重复ID和音频均为0，
+西语`slr61`和`common_voice_rioplatense_v26`全量train均已保留，封存
+validation/test没有打开或用于选样。因此v1的选样ID、时长和来源组成
+已冻结为正确审计基线，不得删除或覆盖。
+
+进入Encoder feature cache前发现一个Manifest契约问题：
+`cache_full_training_features.py`通过`load_experiment_records`强制要求每条
+`experiment=full-ctc-v1`。葡语合并池原记录已有此字段，但英语和西语合并池
+原记录没有。直接缓存v1会在加载英/西记录时失败。
+
+修正版只对派生输出记录做契约标准化，不改变稳定哈希优先级、强制来源、
+选中ID、条数或时长：
+
+```text
+experiment: full-ctc-v1
+dataset_version: en-es-pt-temporal2x-balanced-v2
+source_dataset_version: 保留输入记录的dataset_version
+balanced_language_bucket: en / es / pt
+```
+
+新输出目录必须使用`outputs/en_es_pt_balanced_150h_temporal2x_v2`，不得覆盖v1：
+
+```bash
+BALANCED_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+
+test ! -e "$BALANCED_ROOT"
+
+python scripts/build_balanced_multilingual_training.py \
+  --language-pool en=outputs/en_us_swift_temporal2x_v1 \
+  --language-pool es=outputs/es_combined_temporal2x_v1 \
+  --language-pool pt=outputs/pt_combined_temporal2x_v1 \
+  --include-all-source es=slr61 \
+  --include-all-source es=common_voice_rioplatense_v26 \
+  --target-hours 150 \
+  --seed 20260824 \
+  --output-dir "$BALANCED_ROOT"
+
+(cd "$BALANCED_ROOT" && sha256sum -c sha256.txt)
+cat "$BALANCED_ROOT/selection_summary.json"
+cat "$BALANCED_ROOT/selection_config.json"
+wc -l "$BALANCED_ROOT"/full_ctc_train*.jsonl
+```
+
+验收时v2的三语选中条数、时长、来源分布必须与v1一致，只允许文件
+SHA256因增加上述元数据而改变。返回SHA校验和新summary/config后，再构建三语
+训练validation与Encoder feature cache；不对v1进行缓存。
+
+本地验证：相关文件Ruff与严格Mypy通过，定向pytest通过，全量pytest为
+192 passed，全仓Ruff通过，`git diff --check`通过。全仓严格Mypy仍有
+23个既有文件中的113项错误，本轮3个代码/测试文件为0项。
+
 ## 0.35 2026-08-24 英西葡Temporal 2× 150小时1:1:1派生入口
 
 US-only英语池已在工作区完成且全部SHA256校验通过：360,093条、507.959291小时；

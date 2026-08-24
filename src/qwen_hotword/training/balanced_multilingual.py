@@ -18,7 +18,8 @@ EXPECTED_LANGUAGE_TAGS = {
     "es": frozenset({"es"}),
     "pt": frozenset({"pt", "pt-BR"}),
 }
-DATASET_VERSION = "en-es-pt-temporal2x-balanced-v1"
+DATASET_VERSION = "en-es-pt-temporal2x-balanced-v2"
+EXPERIMENT_NAME = "full-ctc-v1"
 
 
 @dataclass(frozen=True)
@@ -176,7 +177,7 @@ def build_balanced_multilingual_training(
             for language in LANGUAGE_ORDER
         ]
         summary: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "pass",
             "dataset_version": DATASET_VERSION,
             "output_dir": str(destination),
@@ -210,9 +211,15 @@ def build_balanced_multilingual_training(
             "test_set_used": False,
             "test_set_content_read": False,
             "source_manifests_modified": False,
+            "manifest_contract": {
+                "experiment": EXPERIMENT_NAME,
+                "dataset_version": DATASET_VERSION,
+                "source_dataset_version": "preserved from each input row",
+                "balanced_language_bucket": "en, es, or pt",
+            },
         }
         config = {
-            "schema_version": 1,
+            "schema_version": 2,
             "dataset_version": DATASET_VERSION,
             "inputs": input_identities,
             "language_order": list(LANGUAGE_ORDER),
@@ -223,6 +230,12 @@ def build_balanced_multilingual_training(
             },
             "selection_policy": summary["selection_policy"],
             "interleave_policy": summary["interleave_policy"],
+            "manifest_normalization": {
+                "experiment": EXPERIMENT_NAME,
+                "dataset_version": DATASET_VERSION,
+                "source_dataset_version": "preserved from each input row",
+                "balanced_language_bucket": "en, es, or pt",
+            },
             "test_set_policy": summary["validation_test_policy"],
         }
         temporary_paths[config_path].write_text(
@@ -469,6 +482,16 @@ def _write_language_manifests(
                 sample_id = _required_string(raw, "id", input_path, line_number)
                 if sample_id not in selected[language]:
                     continue
+                source_dataset_version = _required_string(
+                    raw,
+                    "dataset_version",
+                    input_path,
+                    line_number,
+                )
+                raw["source_dataset_version"] = source_dataset_version
+                raw["dataset_version"] = DATASET_VERSION
+                raw["experiment"] = EXPERIMENT_NAME
+                raw["balanced_language_bucket"] = language
                 seen.add(sample_id)
                 metric.add(_required_duration(raw, input_path, line_number))
                 output_handle.write(json.dumps(raw, ensure_ascii=False, sort_keys=True) + "\n")
@@ -503,6 +526,18 @@ def _write_interleaved_manifest(
                 line = pending[language]
                 assert line is not None
                 raw = _load_row(line, language_paths[language], records + 1)
+                if raw.get("experiment") != EXPERIMENT_NAME:
+                    raise ValueError(
+                        f"{language} output row has incompatible experiment"
+                    )
+                if raw.get("dataset_version") != DATASET_VERSION:
+                    raise ValueError(
+                        f"{language} output row has incompatible dataset_version"
+                    )
+                if raw.get("balanced_language_bucket") != language:
+                    raise ValueError(
+                        f"{language} output row has incompatible language bucket"
+                    )
                 sample_id = _required_string(raw, "id", language_paths[language], records + 1)
                 audio = _required_string(raw, "audio_path", language_paths[language], records + 1)
                 if sample_id in ids:

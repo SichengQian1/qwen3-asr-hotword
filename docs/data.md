@@ -683,3 +683,16 @@ Temporal 2×；跨语言重复ID/音频直接失败。
 validation/test继续使用三个独立单语种池的封存版本。派生器只从split summary
 记录其路径和SHA，不打开、复制、重采样或合并test内容。下一阶段的Encoder feature
 cache只读取新派生train和另行明确的validation策略。
+
+## 22. 三语平衡Manifest训练加载契约
+
+v1工作区选样结果为英/西/葡各150小时，总计310,257条、450.003271
+小时，其ID、时长和来源构成可作为冻结的选样审计基线。但它不可
+直接交给`cache_full_training_features.py`：该路径使用的
+`load_experiment_records` 要求所有记录均显式标记
+`experiment=full-ctc-v1`，而输入的英语/西语合并池不含该字段。
+
+v2派生器在写出选中记录时统一补齐`experiment`、新
+`dataset_version`和三语bucket，同时用`source_dataset_version`保留原输入
+版本。该处理只改派生元数据，不改文本、音频、音素标签、split、选中ID
+或时长。v1保留不覆盖；v2是后续训练validation和feature cache的唯一入口。

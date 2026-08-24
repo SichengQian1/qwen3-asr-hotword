@@ -63,6 +63,22 @@ def test_balanced_multilingual_reaches_target_and_keeps_spanish_core(
     assert {"es_slr", "es_rio"}.issubset(spanish_ids)
     combined = _read_jsonl(output / "full_ctc_train.jsonl")
     assert len(combined) == 12
+    assert all(row["experiment"] == "full-ctc-v1" for row in combined)
+    assert all(
+        row["dataset_version"] == "en-es-pt-temporal2x-balanced-v2"
+        for row in combined
+    )
+    assert all(
+        row["source_dataset_version"] == "fixture-temporal2x-v1"
+        for row in combined
+    )
+    assert {row["balanced_language_bucket"] for row in combined} == {
+        "en",
+        "es",
+        "pt",
+    }
+    assert summary["schema_version"] == 2
+    assert summary["manifest_contract"]["experiment"] == "full-ctc-v1"
     assert summary["combined_records"] == 12
     assert summary["duplicate_selected_ids"] == 0
     assert summary["duplicate_selected_audio_paths"] == 0
@@ -154,6 +170,7 @@ def _record(
         "text": sample_id,
         "language": language,
         "split": "train",
+        "dataset_version": "fixture-temporal2x-v1",
         "source_corpus": source,
         "release_source": "original_ready",
         "speaker_id": f"speaker_{sample_id}",
