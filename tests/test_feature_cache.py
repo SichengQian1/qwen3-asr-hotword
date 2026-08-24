@@ -7,7 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from qwen_hotword.training.ctc_overfit import CachedSample, ExperimentRecord
+from qwen_hotword.training.ctc_overfit import (
+    CachedSample,
+    ExperimentRecord,
+    validate_actual_encoder_ctc_length,
+)
 from qwen_hotword.training.feature_cache import (
     cache_feature_split,
     exclusive_feature_cache_run,
@@ -192,6 +196,35 @@ def test_feature_cache_honors_temporal_upsampling_manifest_contract(
     )
     assert disk_cache.ctc_time_upsampling_factor == 2
     assert disk_cache.shards[0].ctc_time_upsampling_factor == 2
+
+
+def test_actual_encoder_ctc_length_applies_temporal_upsampling_factor() -> None:
+    temporal_record = ExperimentRecord(
+        sample_id="slr61_es_row_22",
+        audio_path=Path("unused.wav"),
+        text="texto",
+        language="es",
+        token_ids=(2, 3),
+        ctc_minimum_input_length=66,
+        ctc_time_upsampling_factor=2,
+    )
+
+    assert validate_actual_encoder_ctc_length(temporal_record, input_length=63) == 126
+
+    one_x_record = ExperimentRecord(
+        sample_id=temporal_record.sample_id,
+        audio_path=temporal_record.audio_path,
+        text=temporal_record.text,
+        language=temporal_record.language,
+        token_ids=temporal_record.token_ids,
+        ctc_minimum_input_length=temporal_record.ctc_minimum_input_length,
+        ctc_time_upsampling_factor=1,
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"actual=63, upsampling_factor=1, effective=63, minimum=66",
+    ):
+        validate_actual_encoder_ctc_length(one_x_record, input_length=63)
 
 
 def test_feature_cache_lock_rejects_duplicate_process(tmp_path: Path) -> None:

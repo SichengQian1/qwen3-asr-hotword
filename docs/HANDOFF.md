@@ -1,5 +1,63 @@
 # 工作交接记录
 
+## 0.43 2026-08-24 三语Feature Cache Temporal 2×实际长度修复
+
+三语450小时Feature Cache在train shard `000031`首次遇到
+`slr61_es_row_22`时停止：真实Encoder base length为63，CTC minimum为66。该记录
+不是坏音频或坏标签；它携带`ctc_time_upsampling_factor=2`，Temporal Head的有效长度
+应为`63 * 2 = 126`，因此物理上满足`126 >= 66`。
+
+根因是`extract_frozen_features()`仍沿用旧1×检查，只比较`input_length < minimum`；
+`write_feature_shard()`、已有分片恢复校验和后续磁盘训练均已正确按
+`input_length * ctc_time_upsampling_factor`检查。现在提取阶段统一调用
+`validate_actual_encoder_ctc_length()`，失败信息同时记录base length、factor、effective
+length和minimum。1×不可行样本仍严格拒绝，只有Manifest明确标记的2×样本按2×放行；
+缓存内容仍保存原始base Encoder hidden states，Temporal上采样仍由训练Head完成。
+
+已完成的train shard `000000`至`000030`不删除、不覆盖。失败发生在`000031`提取过程，
+该分片尚未报告completed；原命令重跑会先逐个验证已完成分片的metadata、文件大小和
+SHA256并显示`resumed`，随后从`000031`重新生成。不要删除输出目录、
+`cache_index.json`或`.feature_cache.lock`；进程异常退出时flock已由context manager释放，
+锁文件本身保留是正常现象。
+
+工作区更新和只读检查：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+
+jq '{status, completed_shards, completed_samples, shard_count}' \
+  "$FEATURE_CACHE_ROOT/train/cache_index.json"
+
+find "$FEATURE_CACHE_ROOT/train/shards" -maxdepth 1 \
+  -name 'shard-00003*' -type f -print | sort
+```
+
+然后使用**与首次运行完全相同**的model/config、train/validation Manifest、vocab、
+`--samples-per-shard 512`和输出目录重跑。固定命令为：
+
+```bash
+GPU_ID=4
+BALANCED_TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/cache_full_training_features.py \
+  --config configs/workzone.local.yaml \
+  --train-manifest "$BALANCED_TRAIN_ROOT/full_ctc_train.jsonl" \
+  --validation-manifest "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir "$FEATURE_CACHE_ROOT" \
+  --encoder-batch-size 8 \
+  --samples-per-shard 512
+```
+
+若首次使用的物理GPU不是4，只替换`GPU_ID`，其余参数不变。正常日志应先出现31条
+`resumed train feature shard=...`，然后重新开始`cached train shard 000031`。完整任务
+结束后再检查train/validation的`cache_summary.json`、根目录
+`feature_cache_report.json`和全部分片SHA；当前仍不得读取test或开始CTC训练。
+
 ## 0.42 2026-08-24 4k Anchor v3结果与Top-5/7/10阶段台账
 
 工作区`benchmark_anchor_offline_formal100_4000_v3`全部SHA256通过，严格两阶段计时

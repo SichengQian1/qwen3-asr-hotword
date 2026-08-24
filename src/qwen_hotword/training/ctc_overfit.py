@@ -31,6 +31,26 @@ class CachedSample:
     token_ids: tuple[int, ...]
 
 
+def validate_actual_encoder_ctc_length(
+    record: ExperimentRecord,
+    *,
+    input_length: int,
+) -> int:
+    """Validate the base Encoder length under the record's temporal Head factor."""
+    if input_length <= 0:
+        raise ValueError(f"actual encoder length is invalid for {record.sample_id}")
+    effective_length = input_length * record.ctc_time_upsampling_factor
+    if effective_length < record.ctc_minimum_input_length:
+        raise ValueError(
+            f"actual encoder length is infeasible for {record.sample_id}: "
+            f"actual={input_length}, "
+            f"upsampling_factor={record.ctc_time_upsampling_factor}, "
+            f"effective={effective_length}, "
+            f"minimum={record.ctc_minimum_input_length}"
+        )
+    return effective_length
+
+
 @dataclass(frozen=True)
 class EpochMetrics:
     epoch: int
@@ -275,11 +295,7 @@ def extract_frozen_features(
         )
         for row, record in enumerate(batch_records):
             input_length = int(encoder_batch.input_lengths[row].item())
-            if input_length < record.ctc_minimum_input_length:
-                raise ValueError(
-                    f"actual encoder length is infeasible for {record.sample_id}: "
-                    f"actual={input_length}, minimum={record.ctc_minimum_input_length}"
-                )
+            validate_actual_encoder_ctc_length(record, input_length=input_length)
             cached.append(
                 CachedSample(
                     sample_id=record.sample_id,
