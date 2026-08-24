@@ -601,8 +601,8 @@ MLS inventory只从MLS文件名提取speaker ID并统计时长，方言tier固�
 计算tier，因此修正了库存v1未把`América central`识别为拉美的规则漏项，
 不需再读取音频。
 
-选样以speaker为分割边界，默认稳定哈希96/2/2，并为普通拉美speaker
-设置1小时贡献上限。核心train speaker强制留在train，核心validation/test
+选样以speaker为分割边界，按未满的时长比例确定性补足96/2/2，并为普通拉美
+speaker设置2小时贡献上限。核心train speaker强制留在train，核心validation/test
 speaker整体排除，从而在clip去重之外再防止speaker泄漏。输出`source.tsv`
 保留`source_split`/`speaker_id`/元数据tier，可直接用于后续词表提取和
 `build_full_training_manifest.py --split-column source_split`。

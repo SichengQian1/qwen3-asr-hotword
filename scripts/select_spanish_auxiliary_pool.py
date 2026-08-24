@@ -30,7 +30,7 @@ def main() -> int:
     parser.add_argument(
         "--maximum-latin-american-speaker-hours",
         type=float,
-        default=1.0,
+        default=2.0,
     )
     parser.add_argument("--seed", type=int, default=20_260_824)
     args = parser.parse_args()

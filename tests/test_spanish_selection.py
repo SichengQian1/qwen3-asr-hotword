@@ -6,10 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from qwen_hotword.training.spanish_selection import (
-    assign_spanish_speaker_split,
-    select_spanish_auxiliary_pool,
-)
+from qwen_hotword.training.spanish_selection import select_spanish_auxiliary_pool
 
 
 def _write_tsv(path: Path, fields: tuple[str, ...], rows: list[dict[str, object]]) -> None:
@@ -45,24 +42,6 @@ def _inventory_row(
         "audio_status": "ok",
         "metadata_text_match": "true",
     }
-
-
-def test_speaker_split_is_deterministic_and_speaker_based() -> None:
-    first = assign_spanish_speaker_split(
-        "speaker-a",
-        seed=20_260_824,
-        train_fraction=0.8,
-        validation_fraction=0.1,
-        test_fraction=0.1,
-    )
-    assert first == assign_spanish_speaker_split(
-        "speaker-a",
-        seed=20_260_824,
-        train_fraction=0.8,
-        validation_fraction=0.1,
-        test_fraction=0.1,
-    )
-    assert first in {"train", "validation", "test"}
 
 
 def test_selection_uses_explicit_latam_and_blocks_core_holdout_speaker(
@@ -169,3 +148,66 @@ def test_selection_rejects_core_speaker_cross_split(tmp_path: Path) -> None:
             tmp_path / "output",
             target_hours=1.0,
         )
+
+
+def test_selection_balances_hours_without_speaker_overlap(tmp_path: Path) -> None:
+    inventory_rows = [
+        _inventory_row(index, speaker=f"speaker-{index}", accent="México")
+        for index in range(1, 13)
+    ]
+    source = tmp_path / "source.tsv"
+    _write_tsv(
+        source,
+        ("audio", "text"),
+        [
+            {"audio": row["audio"], "text": f"Texto {index}"}
+            for index, row in enumerate(inventory_rows, start=1)
+        ],
+    )
+    inventory = tmp_path / "inventory.tsv"
+    _write_tsv(inventory, tuple(inventory_rows[0]), inventory_rows)
+    core = tmp_path / "core.tsv"
+    _write_tsv(core, ("audio", "speaker_id", "source_split"), [])
+
+    summary = select_spanish_auxiliary_pool(
+        source,
+        inventory,
+        core,
+        tmp_path / "selected",
+        target_hours=6.0 / 3600.0,
+        train_fraction=0.5,
+        validation_fraction=0.25,
+        test_fraction=0.25,
+        maximum_latin_american_speaker_hours=1.0,
+    )
+
+    assert (
+        summary["selected_split_hours"]["train"]
+        >= summary["target_split_hours"]["train"]
+    )
+    assert (
+        summary["selected_split_hours"]["validation"]
+        >= summary["target_split_hours"]["validation"]
+    )
+    assert (
+        summary["selected_split_hours"]["test"]
+        >= summary["target_split_hours"]["test"]
+    )
+    assert set(summary["cross_split_speaker_overlaps"].values()) == {0}
+
+    repeat_output = tmp_path / "selected-repeat"
+    repeat = select_spanish_auxiliary_pool(
+        source,
+        inventory,
+        core,
+        repeat_output,
+        target_hours=6.0 / 3600.0,
+        train_fraction=0.5,
+        validation_fraction=0.25,
+        test_fraction=0.25,
+        maximum_latin_american_speaker_hours=1.0,
+    )
+    assert repeat["selected_split_counts"] == summary["selected_split_counts"]
+    assert (repeat_output / "source.tsv").read_bytes() == (
+        tmp_path / "selected" / "source.tsv"
+    ).read_bytes()

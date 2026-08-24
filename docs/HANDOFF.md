@@ -1,5 +1,43 @@
 # 工作交接记录
 
+## 0.29 2026-08-24 西语170小时选样的speaker配额修正
+
+工作区首次运行0.28命令在写出产物前停止，报错：
+
+```text
+insufficient eligible speaker-disjoint hours for splits: train, validation
+```
+
+这不表示230+小时明确拉美原始库存不足。原因是第一版同时使用了1小时
+speaker硬上限和先哈希后分split：少数高产speaker的大量音频被上限截断，
+剩余时长又因speaker哈希偶然性不能精确满足163.2/3.4/3.4小时。
+
+选样器已修正为`deterministic_duration_balanced_by_speaker`：先以speaker为不可分割
+单位，再按当前未满的时长比例确定性地补足96/2/2配额；同一speaker仍只能
+进入一个split。核心train speaker仍强制进train，核心validation/test speaker仍整体
+排除，全部额外Rioplatense仍优先保留。普通拉美speaker上限改为2小时；如该
+上限后总容量仍不足，新报错会显式打印`available/target/cap`，不再只报split名。
+
+拉取最新提交后重跑；失败运行没有生成正式输出，不用删除原数据：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+python scripts/select_spanish_auxiliary_pool.py \
+  --source-tsv "$ES_CANDIDATE_ROOT/common_voice/source.tsv" \
+  --inventory-tsv "$ES_INVENTORY_ROOT/common_voice_inventory.tsv" \
+  --rioplatense-tsv "$ES_AR_ROOT/common_voice_rioplatense_v26/source.tsv" \
+  --output-dir "$ES_AUX_ROOT" \
+  --target-hours 170 \
+  --train-fraction 0.96 \
+  --validation-fraction 0.02 \
+  --test-fraction 0.02 \
+  --maximum-latin-american-speaker-hours 2.0 \
+  --seed 20260824
+```
+
+完成后仍先校验`sha256.txt`，并返回`summary.json`与两个TSV的`wc -l`。
+
 ## 0.28 2026-08-24 西语明确拉美CV 170小时辅助池选样
 
 全量候选库存审计通过，所有579,031条音频可读且SHA256验证通过：
@@ -29,8 +67,8 @@
 约29%的余量；最终是否`train >= 150 h`仍必须以Manifest/Temporal 2×实际结果
 为准。若不足，只从剩余明确拉美CV增补，不立即引入未知、半岛或MLS。
 
-辅助池按speaker稳定哈希为96/2/2；先全部保留额外Rioplatense记录，其他明确
-拉美记录按稳定顺序补足。普通拉美speaker最多贡献1小时，避免少数大
+辅助池按speaker时长配额确定性划分为96/2/2；先全部保留额外Rioplatense记录，其他明确
+拉美记录按稳定顺序补足。普通拉美speaker最多贡献2小时，避免少数大
 speaker主导。与核心train重合的speaker只能进train；与核心validation/test
 重合的speaker整体排除。原始CV官方holdout、非`es`、文本不一致、不可读
 音频和核心clip重复仍不得入选。
@@ -54,7 +92,7 @@ python scripts/select_spanish_auxiliary_pool.py \
   --train-fraction 0.96 \
   --validation-fraction 0.02 \
   --test-fraction 0.02 \
-  --maximum-latin-american-speaker-hours 1.0 \
+  --maximum-latin-american-speaker-hours 2.0 \
   --seed 20260824
 
 (cd "$ES_AUX_ROOT" && sha256sum -c sha256.txt)

@@ -6,7 +6,7 @@ import json
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -32,31 +32,6 @@ class CandidateRow:
     source_split: str
 
 
-def assign_spanish_speaker_split(
-    speaker_id: str,
-    *,
-    seed: int,
-    train_fraction: float,
-    validation_fraction: float,
-    test_fraction: float,
-) -> str:
-    """Assign one speaker to one deterministic split."""
-
-    fractions = _validate_fractions(
-        train_fraction,
-        validation_fraction,
-        test_fraction,
-    )
-    fraction = _stable_fraction(f"{seed}\0{speaker_id}")
-    train_boundary = fractions["train"]
-    validation_boundary = train_boundary + fractions["validation"]
-    if fraction < train_boundary:
-        return "train"
-    if fraction < validation_boundary:
-        return "validation"
-    return "test"
-
-
 def select_spanish_auxiliary_pool(
     source_tsv: str | Path,
     inventory_tsv: str | Path,
@@ -67,7 +42,7 @@ def select_spanish_auxiliary_pool(
     train_fraction: float = 0.96,
     validation_fraction: float = 0.02,
     test_fraction: float = 0.02,
-    maximum_latin_american_speaker_hours: float = 1.0,
+    maximum_latin_american_speaker_hours: float = 2.0,
     seed: int = 20_260_824,
 ) -> dict[str, Any]:
     """Select a reproducible, speaker-disjoint explicit Latin-American CV pool."""
@@ -101,24 +76,11 @@ def select_spanish_auxiliary_pool(
         inventory_path,
         source_rows,
         core_speakers,
-        seed=seed,
-        fractions=fractions,
     )
     eligible_tier_counts: Counter[str] = Counter(row.accent_tier for row in candidates)
     eligible_tier_seconds: defaultdict[str, float] = defaultdict(float)
-    eligible_split_seconds: defaultdict[str, float] = defaultdict(float)
-    eligible_speakers_by_split: defaultdict[str, set[str]] = defaultdict(set)
     for row in candidates:
         eligible_tier_seconds[row.accent_tier] += row.duration_seconds
-        eligible_split_seconds[row.source_split] += row.duration_seconds
-        eligible_speakers_by_split[row.source_split].add(row.speaker_id)
-
-    by_split_tier: dict[str, dict[str, list[CandidateRow]]] = {
-        split: {tier: [] for tier in EXPLICIT_LATIN_AMERICAN_TIERS}
-        for split in SPLITS
-    }
-    for candidate in candidates:
-        by_split_tier[candidate.source_split][candidate.accent_tier].append(candidate)
 
     target_seconds = {
         split: target_hours * 3600.0 * fractions[split] for split in SPLITS
@@ -129,47 +91,85 @@ def select_spanish_auxiliary_pool(
     decision_counts: Counter[str] = Counter(exclusion_counts)
     decision_seconds: defaultdict[str, float] = defaultdict(float, exclusion_seconds)
 
-    for split in SPLITS:
-        priority = sorted(
-            by_split_tier[split]["argentinian_rioplatense_metadata"],
-            key=lambda row: (row.speaker_id, row.row_number),
+    priority_by_speaker: defaultdict[str, list[CandidateRow]] = defaultdict(list)
+    latin_rows: list[CandidateRow] = []
+    for row in candidates:
+        if row.accent_tier == "argentinian_rioplatense_metadata":
+            priority_by_speaker[row.speaker_id].append(row)
+        else:
+            latin_rows.append(row)
+    capped_latin_groups, capped_out = _cap_speaker_rows(
+        latin_rows,
+        maximum_seconds=speaker_cap_seconds,
+        seed=seed,
+    )
+    for row in capped_out:
+        decision_counts["not_selected_speaker_cap"] += 1
+        decision_seconds["not_selected_speaker_cap"] += row.duration_seconds
+
+    selectable_groups: defaultdict[str, list[CandidateRow]] = defaultdict(list)
+    for speaker_id, rows in priority_by_speaker.items():
+        selectable_groups[speaker_id].extend(rows)
+    for speaker_id, rows in capped_latin_groups.items():
+        selectable_groups[speaker_id].extend(rows)
+    capped_eligible_seconds = sum(
+        row.duration_seconds for rows in selectable_groups.values() for row in rows
+    )
+    if capped_eligible_seconds + 1e-9 < target_hours * 3600.0:
+        raise ValueError(
+            "speaker cap leaves insufficient total eligible audio: "
+            f"available={capped_eligible_seconds / 3600.0:.6f}h "
+            f"target={target_hours:.6f}h cap={maximum_latin_american_speaker_hours:.3f}h"
         )
-        for row in priority:
-            selected.append(row)
+
+    priority_speakers = sorted(
+        priority_by_speaker,
+        key=lambda speaker: (_stable_digest(f"{seed}\0priority\0{speaker}"), speaker),
+    )
+    latin_only_speakers = sorted(
+        set(selectable_groups) - set(priority_by_speaker),
+        key=lambda speaker: (_stable_digest(f"{seed}\0select\0{speaker}"), speaker),
+    )
+    allocated_seconds: defaultdict[str, float] = defaultdict(float)
+    for speaker_id in (*priority_speakers, *latin_only_speakers):
+        rows = sorted(selectable_groups[speaker_id], key=lambda row: row.row_number)
+        is_priority = speaker_id in priority_by_speaker
+        core_split = core_speakers.get(speaker_id)
+        if core_split == "train":
+            split = "train"
+            if not is_priority and allocated_seconds[split] >= target_seconds[split]:
+                for row in rows:
+                    decision_counts["not_selected_quota"] += 1
+                    decision_seconds["not_selected_quota"] += row.duration_seconds
+                continue
+        else:
+            chosen_split = _choose_quota_split(
+                allocated_seconds,
+                target_seconds,
+                speaker_id=speaker_id,
+                seed=seed,
+                allow_filled=is_priority,
+            )
+            if chosen_split is None:
+                for row in rows:
+                    decision_counts["not_selected_quota"] += 1
+                    decision_seconds["not_selected_quota"] += row.duration_seconds
+                continue
+            split = chosen_split
+        for row in rows:
+            if row.audio in selected_audio:
+                raise ValueError(f"duplicate selected audio: {row.audio}")
+            assigned = replace(row, source_split=split)
+            selected.append(assigned)
             selected_audio.add(row.audio)
-            decision_counts["selected_argentinian_rioplatense"] += 1
-            decision_seconds["selected_argentinian_rioplatense"] += row.duration_seconds
-
-        current_seconds = sum(row.duration_seconds for row in priority)
-        latin_rows = by_split_tier[split]["latin_american_metadata"]
-        capped_groups, capped_out = _cap_speaker_rows(
-            latin_rows,
-            maximum_seconds=speaker_cap_seconds,
-            seed=seed,
-        )
-        for row in capped_out:
-            decision_counts["not_selected_speaker_cap"] += 1
-            decision_seconds["not_selected_speaker_cap"] += row.duration_seconds
-
-        groups = sorted(
-            capped_groups.items(),
-            key=lambda item: (_stable_digest(f"{seed}\0select\0{item[0]}"), item[0]),
-        )
-        for group_index, (_speaker_id, rows) in enumerate(groups):
-            if current_seconds >= target_seconds[split]:
-                for _remaining_speaker, remaining_rows in groups[group_index:]:
-                    for row in remaining_rows:
-                        decision_counts["not_selected_quota"] += 1
-                        decision_seconds["not_selected_quota"] += row.duration_seconds
-                break
-            for row in rows:
-                if row.audio in selected_audio:
-                    raise ValueError(f"duplicate selected audio: {row.audio}")
-                selected.append(row)
-                selected_audio.add(row.audio)
-                current_seconds += row.duration_seconds
-                decision_counts["selected_latin_american"] += 1
-                decision_seconds["selected_latin_american"] += row.duration_seconds
+            allocated_seconds[split] += row.duration_seconds
+            selected_reason = (
+                "selected_argentinian_rioplatense"
+                if row.accent_tier == "argentinian_rioplatense_metadata"
+                else "selected_latin_american"
+            )
+            decision_counts[selected_reason] += 1
+            decision_seconds[selected_reason] += row.duration_seconds
 
     selected.sort(key=lambda row: row.row_number)
     split_seconds: defaultdict[str, float] = defaultdict(float)
@@ -183,12 +183,11 @@ def select_spanish_auxiliary_pool(
         tier_counts[row.accent_tier] += 1
         tier_seconds[row.accent_tier] += row.duration_seconds
         speakers_by_split[row.source_split].add(row.speaker_id)
-    selected_core_speaker_counts: Counter[str] = Counter(
-        core_speakers[row.speaker_id]
-        for row in selected
-        if row.speaker_id in core_speakers
-    )
-    if any(split != "train" for split in selected_core_speaker_counts):
+    selected_core_speakers: defaultdict[str, set[str]] = defaultdict(set)
+    for row in selected:
+        if row.speaker_id in core_speakers:
+            selected_core_speakers[core_speakers[row.speaker_id]].add(row.speaker_id)
+    if any(split != "train" for split in selected_core_speakers):
         raise RuntimeError("a core validation/test speaker entered the auxiliary pool")
 
     short_splits = [
@@ -215,7 +214,9 @@ def select_spanish_auxiliary_pool(
     summary: dict[str, Any] = {
         "schema_version": 1,
         "status": "pass",
-        "selection_policy": "explicit_latin_american_metadata_speaker_disjoint",
+        "selection_policy": (
+            "explicit_latin_american_metadata_deterministic_duration_balanced_speakers"
+        ),
         "source_tsv": str(source_path),
         "inventory_tsv": str(inventory_path),
         "rioplatense_tsv": str(core_path),
@@ -229,10 +230,7 @@ def select_spanish_auxiliary_pool(
         "eligible_speakers": len({row.speaker_id for row in candidates}),
         "eligible_tier_counts": dict(sorted(eligible_tier_counts.items())),
         "eligible_tier_hours": _hours_mapping(eligible_tier_seconds),
-        "eligible_split_hours": _hours_mapping(eligible_split_seconds),
-        "eligible_speakers_by_split": {
-            split: len(eligible_speakers_by_split[split]) for split in SPLITS
-        },
+        "capped_eligible_hours": round(capped_eligible_seconds / 3600.0, 6),
         "target_hours": target_hours,
         "selected_records": len(selected),
         "selected_hours": round(selected_seconds / 3600.0, 6),
@@ -245,7 +243,9 @@ def select_spanish_auxiliary_pool(
             split: len(speakers_by_split[split]) for split in SPLITS
         },
         "cross_split_speaker_overlaps": overlaps,
-        "selected_core_speaker_counts": dict(sorted(selected_core_speaker_counts.items())),
+        "selected_core_speakers_by_split": {
+            split: len(speakers) for split, speakers in sorted(selected_core_speakers.items())
+        },
         "selected_tier_counts": dict(sorted(tier_counts.items())),
         "selected_tier_hours": _hours_mapping(tier_seconds),
         "decision_counts": dict(sorted(decision_counts.items())),
@@ -279,6 +279,7 @@ def select_spanish_auxiliary_pool(
             "schema_version": 1,
             "target_hours": target_hours,
             "split_fractions": fractions,
+            "split_strategy": "deterministic_duration_balanced_by_speaker",
             "maximum_latin_american_speaker_hours": (
                 maximum_latin_american_speaker_hours
             ),
@@ -339,9 +340,6 @@ def _read_candidates(
     path: Path,
     source_rows: Mapping[str, tuple[int, str]],
     core_speakers: Mapping[str, str],
-    *,
-    seed: int,
-    fractions: Mapping[str, float],
 ) -> tuple[list[CandidateRow], Counter[str], defaultdict[str, float]]:
     candidates: list[CandidateRow] = []
     decisions: Counter[str] = Counter()
@@ -384,18 +382,6 @@ def _read_candidates(
                 decisions[reason] += 1
                 decision_seconds[reason] += duration
                 continue
-            core_split = core_speakers.get(speaker_id)
-            source_split = (
-                "train"
-                if core_split == "train"
-                else assign_spanish_speaker_split(
-                    speaker_id,
-                    seed=seed,
-                    train_fraction=fractions["train"],
-                    validation_fraction=fractions["validation"],
-                    test_fraction=fractions["test"],
-                )
-            )
             candidates.append(
                 CandidateRow(
                     row_number=row_number,
@@ -406,7 +392,7 @@ def _read_candidates(
                     accent=accent,
                     accent_tier=accent_tier,
                     duration_seconds=duration,
-                    source_split=source_split,
+                    source_split="unassigned",
                 )
             )
     if len(seen_audio) != len(source_rows):
@@ -440,6 +426,32 @@ def _candidate_exclusion_reason(
     if accent_tier not in EXPLICIT_LATIN_AMERICAN_TIERS:
         return f"exclude_accent_tier_{accent_tier}"
     return None
+
+
+def _choose_quota_split(
+    allocated_seconds: Mapping[str, float],
+    target_seconds: Mapping[str, float],
+    *,
+    speaker_id: str,
+    seed: int,
+    allow_filled: bool,
+) -> str | None:
+    underfilled = [
+        split
+        for split in SPLITS
+        if target_seconds[split] > 0
+        and allocated_seconds.get(split, 0.0) + 1e-9 < target_seconds[split]
+    ]
+    if not underfilled:
+        return "train" if allow_filled else None
+    return max(
+        underfilled,
+        key=lambda split: (
+            (target_seconds[split] - allocated_seconds.get(split, 0.0))
+            / target_seconds[split],
+            _stable_digest(f"{seed}\0split\0{speaker_id}\0{split}"),
+        ),
+    )
 
 
 def _cap_speaker_rows(
@@ -573,11 +585,6 @@ def _hours_mapping(values: Mapping[str, float]) -> dict[str, float]:
 
 def _stable_digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _stable_fraction(value: str) -> float:
-    raw = hashlib.sha256(value.encode("utf-8")).digest()
-    return int.from_bytes(raw[:8], "big") / 2**64
 
 
 def _require_empty_directory(path: Path) -> None:
