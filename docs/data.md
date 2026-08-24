@@ -648,3 +648,16 @@ utterance ID，其余前缀作为speaker ID。审计必须与完整Manifest逐�
 报告前缀字段分布、speaker规模、每speaker时长、跨shard情况、解析失败和重复
 speaker+utterance。只有全部关联与唯一性检查通过后才按speaker整体切分；不能仅凭
 三个样例文件名宣称speaker-disjoint。
+
+## 20. US-only英语Temporal 2×池
+
+Swift speaker库存审计确认全部389,738条均可稳定解析，但首段分布为
+`US=360,043`、`us=54`、`AU=13,640`、`CN=16,001`。本轮美式英语数据边界只允许
+首段大小写归一化后等于`us`的speaker；AU/CN原记录不删除、不改标签，只从派生池
+排除。该策略必须记录在`split_config.json`和`split_summary.json`中。
+
+英语派生池以完整Manifest和通过的`speaker_inventory.tsv`为输入：原ready直接
+保留；review仅在唯一问题为`ctc_length_infeasible`、Temporal 2×后可行且有效ratio
+不超过0.90时释放。然后按完整speaker执行确定性96/2/2，验证speaker、audio和ID
+跨split overlap均为0，并封存test。英语train达到完整规模后再单独确定性选择约
+150小时参与英西葡1:1:1；不能为了平衡语言而改动validation/test或读取封存test。

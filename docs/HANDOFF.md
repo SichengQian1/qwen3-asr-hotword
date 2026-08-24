@@ -1,5 +1,69 @@
 # 工作交接记录
 
+## 0.34 2026-08-24 US-only英语Temporal 2×合并入口
+
+Swift英语speaker审计已在工作区通过：389,738条全部与完整Manifest一一关联，
+解析失败、Manifest缺失/额外、重复speaker+utterance均为0；候选speaker 1,800名，
+每个speaker最多约0.868178小时。speaker前缀固定为4段，第三段全部为F/M，末尾
+utterance段全部为数字，因此`WAV stem去掉末段`可用于speaker整体切分。391名
+speaker跨多个shard，不能以shard作为切分边界。
+
+审计同时发现输入并非纯美式：`US=360,043`、`us=54`，另有`AU=13,640`、
+`CN=16,001`。用户已确认本轮只使用`US/us`；过滤不区分大小写，AU/CN保留在原始
+TSV和完整Manifest中但不进入新的英语池，也不能继续把包含它们的全集称为纯
+`en-US`。
+
+为避免复制西语的split/Temporal规则，现将其底层扩展为通用speaker构建器，同时
+保留原西语入口兼容性。新增英语专用封装：
+
+- `src/qwen_hotword/training/english_combined.py`
+- `scripts/build_english_us_temporal2x_training.py`
+- `tests/test_english_combined.py`
+
+并扩展`src/qwen_hotword/training/spanish_combined.py`：支持数据集版本、预期语言和
+可选speaker首段过滤；西语默认参数与原结果不变。英语入口强制speaker审计pass、
+四类结构错误为0、审计/库存记录一致和语言严格为`en-US`。它保留原ready，按既有
+严格策略释放US-only范围内可恢复的Temporal 2×记录，排除其他review及AU/CN，
+然后按完整speaker确定性建立96/2/2。输出再次验证speaker/audio/ID跨split overlap
+均为0，test封存且不得用于调参。
+
+工作区运行：
+
+```bash
+EN_MANIFEST=outputs/en_us_swift_full_manifest_v1
+EN_SPEAKER_AUDIT=outputs/en_us_swift_speaker_inventory_v1
+EN_COMBINED=outputs/en_us_swift_temporal2x_v1
+
+test ! -e "$EN_COMBINED"
+
+python scripts/build_english_us_temporal2x_training.py \
+  --manifest-dir "$EN_MANIFEST" \
+  --speaker-inventory "$EN_SPEAKER_AUDIT/speaker_inventory.tsv" \
+  --speaker-audit-summary "$EN_SPEAKER_AUDIT/summary.json" \
+  --output-dir "$EN_COMBINED" \
+  --allowed-speaker-first-components US \
+  --train-fraction 0.96 \
+  --validation-fraction 0.02 \
+  --test-fraction 0.02 \
+  --time-upsampling-factor 2 \
+  --release-max-effective-ratio 0.90 \
+  --speaker-split-seed 20260824
+
+(cd "$EN_COMBINED" && sha256sum -c sha256.txt)
+cat "$EN_COMBINED/split_summary.json"
+wc -l \
+  "$EN_COMBINED/full_ctc_train.jsonl" \
+  "$EN_COMBINED/full_ctc_validation.jsonl" \
+  "$EN_COMBINED/full_ctc_test.jsonl"
+```
+
+返回`split_summary.json`和SHA校验结果。通过后再从英语train确定性派生约150小时；
+此时仍不读取英语test内容，也不把英西葡完整池直接拼接。
+
+本地验证：相关文件Ruff与严格Mypy通过，英语/西语合并定向pytest 5项通过，
+全量pytest通过，`git diff --check`通过。仓库全量Ruff仍为既有9个UP038，仓库
+全量严格Mypy仍为既有17个文件102项；本次文件未新增错误，也未顺带修改无关问题。
+
 ## 0.33 2026-08-24 英语Temporal 2×审计与speaker库存入口
 
 上一阶段的西语合并已在工作区完成且全部SHA256校验通过：最终131,064条、

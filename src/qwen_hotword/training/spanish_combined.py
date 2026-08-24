@@ -56,7 +56,7 @@ def parse_named_path(value: str, *, label: str) -> tuple[str, Path]:
     return name, Path(raw_path).expanduser()
 
 
-def combine_spanish_inputs(
+def combine_speaker_inputs(
     manifest_values: Iterable[str],
     source_values: Iterable[str],
 ) -> list[SpanishCorpusInput]:
@@ -68,6 +68,13 @@ def combine_spanish_inputs(
         SpanishCorpusInput(name, manifest_dir, sources[name])
         for name, manifest_dir in manifests.items()
     ]
+
+
+def combine_spanish_inputs(
+    manifest_values: Iterable[str],
+    source_values: Iterable[str],
+) -> list[SpanishCorpusInput]:
+    return combine_speaker_inputs(manifest_values, source_values)
 
 
 def build_spanish_temporal2x_training(
@@ -83,6 +90,35 @@ def build_spanish_temporal2x_training(
 ) -> dict[str, Any]:
     """Build a Spanish Temporal 2x pool without changing established splits."""
 
+    return build_speaker_temporal2x_training(
+        corpora,
+        output_dir,
+        dataset_version=DATASET_VERSION,
+        train_fraction=train_fraction,
+        validation_fraction=validation_fraction,
+        test_fraction=test_fraction,
+        time_upsampling_factor=time_upsampling_factor,
+        release_max_effective_ratio=release_max_effective_ratio,
+        speaker_split_seed=speaker_split_seed,
+    )
+
+
+def build_speaker_temporal2x_training(
+    corpora: list[SpanishCorpusInput],
+    output_dir: str | Path,
+    *,
+    dataset_version: str,
+    train_fraction: float = 0.96,
+    validation_fraction: float = 0.02,
+    test_fraction: float = 0.02,
+    time_upsampling_factor: int = 2,
+    release_max_effective_ratio: float = 0.90,
+    speaker_split_seed: int = 20_260_824,
+    allowed_speaker_first_components: Iterable[str] | None = None,
+    expected_language: str | None = None,
+) -> dict[str, Any]:
+    """Build a speaker-disjoint Temporal 2x pool with an optional speaker filter."""
+
     if not corpora:
         raise ValueError("at least one corpus is required")
     names = [corpus.name for corpus in corpora]
@@ -92,6 +128,11 @@ def build_spanish_temporal2x_training(
         raise ValueError("time_upsampling_factor must exceed one")
     if not 0.0 < release_max_effective_ratio <= 1.0:
         raise ValueError("release_max_effective_ratio must be within (0, 1]")
+    if not dataset_version.strip():
+        raise ValueError("dataset_version must not be empty")
+    allowed_components = _normalize_allowed_components(
+        allowed_speaker_first_components
+    )
     fractions = _validate_fractions(
         train_fraction,
         validation_fraction,
@@ -130,6 +171,7 @@ def build_spanish_temporal2x_training(
         time_upsampling_factor=time_upsampling_factor,
         release_max_effective_ratio=release_max_effective_ratio,
         seed=speaker_split_seed,
+        allowed_speaker_first_components=allowed_components,
     )
 
     destination.mkdir(parents=True)
@@ -150,6 +192,9 @@ def build_spanish_temporal2x_training(
             "original_ready": CountHours(),
             "temporal_2x_recovered": CountHours(),
             "review_not_released": CountHours(),
+            "excluded_original_ready": CountHours(),
+            "excluded_temporal_2x_recovered": CountHours(),
+            "excluded_review_not_released": CountHours(),
             **{f"split_{split}": CountHours() for split in SPLITS},
         }
         for corpus in corpora
@@ -160,6 +205,8 @@ def build_spanish_temporal2x_training(
     all_ids: set[str] = set()
     all_audio: set[str] = set()
     language_counts: Counter[str] = Counter()
+    first_component_counts: Counter[str] = Counter()
+    first_component_seconds: defaultdict[str, float] = defaultdict(float)
 
     try:
         handles = {
@@ -181,6 +228,19 @@ def build_spanish_temporal2x_training(
                     raise ValueError(
                         f"manifest audio is absent from source TSV: {path}:{line_number}"
                     )
+                language = _required_string(raw, "language", path, line_number)
+                if expected_language is not None and language != expected_language:
+                    raise ValueError(
+                        f"unexpected language at {path}:{line_number}: {language!r}"
+                    )
+                first_component = _speaker_first_component(metadata.speaker_id)
+                first_component_counts[first_component] += 1
+                first_component_seconds[first_component] += duration
+                if not _speaker_is_allowed(metadata.speaker_id, allowed_components):
+                    corpus_metrics[corpus.name][f"excluded_{release_source}"].add(
+                        duration
+                    )
+                    continue
                 if release_source == "review_not_released":
                     corpus_metrics[corpus.name][release_source].add(duration)
                     continue
@@ -199,6 +259,7 @@ def build_spanish_temporal2x_training(
                     speaker_id=metadata.speaker_id,
                     source_split=metadata.source_split,
                     time_upsampling_factor=time_upsampling_factor,
+                    dataset_version=dataset_version,
                     path=path,
                     line_number=line_number,
                 )
@@ -231,9 +292,12 @@ def build_spanish_temporal2x_training(
     for corpus in corpora:
         metrics = corpus_metrics[corpus.name]
         ready_records = metrics["original_ready"].records
+        ready_records += metrics["excluded_original_ready"].records
         review_records = (
             metrics["temporal_2x_recovered"].records
             + metrics["review_not_released"].records
+            + metrics["excluded_temporal_2x_recovered"].records
+            + metrics["excluded_review_not_released"].records
         )
         source_summary = source_summaries[corpus.name]
         _validate_source_partition(
@@ -271,7 +335,7 @@ def build_spanish_temporal2x_training(
     summary: dict[str, Any] = {
         "schema_version": 1,
         "status": "pass",
-        "dataset_version": DATASET_VERSION,
+        "dataset_version": dataset_version,
         "output_dir": str(destination),
         "corpus_order": names,
         "split_strategy": "preserve_explicit_split_and_assign_unsplit_by_speaker",
@@ -292,10 +356,27 @@ def build_spanish_temporal2x_training(
             metrics["review_not_released"].records
             for metrics in corpus_metrics.values()
         ),
-        "input_manifest_records": len(all_ids)
-        + sum(
-            metrics["review_not_released"].records
+        "excluded_by_speaker_filter_records": sum(
+            metrics[key].records
             for metrics in corpus_metrics.values()
+            for key in (
+                "excluded_original_ready",
+                "excluded_temporal_2x_recovered",
+                "excluded_review_not_released",
+            )
+        ),
+        "excluded_by_speaker_filter_hours": sum(
+            metrics[key].duration_seconds
+            for metrics in corpus_metrics.values()
+            for key in (
+                "excluded_original_ready",
+                "excluded_temporal_2x_recovered",
+                "excluded_review_not_released",
+            )
+        )
+        / 3600.0,
+        "input_manifest_records": sum(
+            int(source_summaries[name]["source_records"]) for name in names
         ),
         "total_audio_hours": total_seconds / 3600.0,
         "split_records": {
@@ -307,6 +388,15 @@ def build_spanish_temporal2x_training(
         },
         "corpus_metrics": serialized_corpus_metrics,
         "language_counts": dict(sorted(language_counts.items())),
+        "speaker_first_component_filter": {
+            "case_insensitive": True,
+            "allowed": sorted(allowed_components) if allowed_components else None,
+            "input_record_counts": dict(sorted(first_component_counts.items())),
+            "input_audio_hours": {
+                key: value / 3600.0
+                for key, value in sorted(first_component_seconds.items())
+            },
+        },
         "speakers_by_split": {
             split: len(speakers_by_split[split]) for split in SPLITS
         },
@@ -330,12 +420,16 @@ def build_spanish_temporal2x_training(
     }
     config = {
         "schema_version": 1,
-        "dataset_version": DATASET_VERSION,
+        "dataset_version": dataset_version,
         "inputs": input_identities,
         "corpus_order": names,
         "split_strategy": summary["split_strategy"],
         "split_fractions_for_unsplit_speakers": fractions,
         "speaker_split_seed": speaker_split_seed,
+        "speaker_first_component_filter": summary[
+            "speaker_first_component_filter"
+        ],
+        "expected_language": expected_language,
         "release_policy": {
             "include_original_ready": True,
             "include_exact_issue_set": [CTC_LENGTH_ISSUE],
@@ -396,6 +490,33 @@ def _read_source_metadata(path: Path) -> dict[str, SourceMetadata]:
     return result
 
 
+def _normalize_allowed_components(
+    values: Iterable[str] | None,
+) -> frozenset[str] | None:
+    if values is None:
+        return None
+    normalized = frozenset(value.strip().casefold() for value in values if value.strip())
+    if not normalized:
+        raise ValueError("allowed_speaker_first_components must not be empty")
+    return normalized
+
+
+def _speaker_first_component(speaker_id: str) -> str:
+    component = speaker_id.partition("_")[0].strip()
+    if not component:
+        raise ValueError(f"speaker ID has no first component: {speaker_id!r}")
+    return component
+
+
+def _speaker_is_allowed(
+    speaker_id: str,
+    allowed: frozenset[str] | None,
+) -> bool:
+    if allowed is None:
+        return True
+    return _speaker_first_component(speaker_id).casefold() in allowed
+
+
 def _resolve_speaker_splits(
     corpora: list[SpanishCorpusInput],
     metadata: Mapping[str, Mapping[str, SourceMetadata]],
@@ -404,6 +525,7 @@ def _resolve_speaker_splits(
     time_upsampling_factor: int,
     release_max_effective_ratio: float,
     seed: int,
+    allowed_speaker_first_components: frozenset[str] | None,
 ) -> tuple[dict[str, str], dict[str, Any]]:
     fixed: dict[str, str] = {}
     unsplit_seconds: defaultdict[str, float] = defaultdict(float)
@@ -422,6 +544,11 @@ def _resolve_speaker_splits(
             source = metadata_by_audio.get(audio)
             if source is None:
                 raise ValueError(f"manifest audio is absent from source TSV: {audio}")
+            if not _speaker_is_allowed(
+                source.speaker_id,
+                allowed_speaker_first_components,
+            ):
+                continue
             raw_split = _required_string(raw, "split", path, line_number)
             if raw_split != source.source_split:
                 raise ValueError(
@@ -584,6 +711,7 @@ def _release_record(
     speaker_id: str,
     source_split: str,
     time_upsampling_factor: int,
+    dataset_version: str,
     path: Path,
     line_number: int,
 ) -> dict[str, Any]:
@@ -602,7 +730,7 @@ def _release_record(
     duration = _required_duration(raw, path, line_number)
     return {
         "schema_version": 1,
-        "dataset_version": DATASET_VERSION,
+        "dataset_version": dataset_version,
         "split": split,
         "id": _required_string(raw, "id", path, line_number),
         "audio_path": _required_string(raw, "audio_path", path, line_number),
