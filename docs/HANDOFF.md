@@ -1,5 +1,76 @@
 # 工作交接记录
 
+## 0.27 2026-08-24 西语150小时扩容：候选库存与CV元数据关联
+
+当前阿根廷/拉普拉塔核心两语料在Temporal 2×下可释放15,872条、23.696562小时，
+不足最终`train_ready >= 150 h`目标。扩容顺序固定为：明确阿根廷/Rioplatense元数据
+> 其他明确拉美Common Voice > 地区未知/混合Common Voice > 限量MLS。MLS通常更偏
+西班牙西语，且当前候选G2P是拉美模型，因此MLS只作后备并建议不超过最终train小时的
+10%至15%；在真实库存结果返回前不硬编码配额。
+
+通用Swift转换后的MLS/Common Voice TSV只有`audio/text`，不能直接筛方言或官方
+split。新增只读库存工具：
+
+- `src/qwen_hotword/training/spanish_inventory.py`
+- `scripts/audit_spanish_candidate_inventory.py`
+- `tests/test_spanish_inventory.py`
+
+工具并行读取全部音频metadata，输出真实记录数/小时、时长分布和采样率。MLS从标准
+文件名恢复speaker ID，但统一标为`mls_source_unknown_likely_peninsular`，不能声明为
+拉美或阿根廷。Common Voice用音频basename关联原始v25
+`validated/train/dev/test.tsv`，恢复client、accent、locale和官方split；accent只分成
+保守的元数据tier，不作为声学方言预测。缺元数据、locale非`es`、文本关联不一致、
+官方validation/test和音频不可读记录一律进入显式exclude pool。
+
+Rioplatense v26核心`source.tsv`的clip basename同时作为跨版本防泄漏集合。通用CV中
+与核心train/validation/test任一clip重复的记录都标为`exclude_core_overlap`；尤其
+validation/test重叠绝不能回流辅助训练。输出目录包含：
+
+```text
+summary.json
+mls_summary.json
+common_voice_summary.json
+mls_inventory.tsv
+common_voice_inventory.tsv
+run_config.json
+sha256.txt
+```
+
+工作区运行（CPU/存储任务，不需要GPU）：
+
+```bash
+ES_CANDIDATE_ROOT=outputs/es_candidate_train_sources_v1
+ES_AR_ROOT=outputs/es_ar_train_sources_v1
+ES_INVENTORY_ROOT=outputs/es_candidate_inventory_v1
+CV_ES_ROOT=/host_home/z00841352/27A/data/Common_Voice_Scripted_Speech_25.0/cv-corpus-25.0-2026-03-09/es
+
+test ! -e "$ES_INVENTORY_ROOT"
+
+python scripts/audit_spanish_candidate_inventory.py \
+  --mls-tsv "$ES_CANDIDATE_ROOT/mls/source.tsv" \
+  --common-voice-tsv "$ES_CANDIDATE_ROOT/common_voice/source.tsv" \
+  --common-voice-root "$CV_ES_ROOT" \
+  --rioplatense-tsv "$ES_AR_ROOT/common_voice_rioplatense_v26/source.tsv" \
+  --output-dir "$ES_INVENTORY_ROOT" \
+  --workers 16 \
+  --progress-every 10000
+
+(cd "$ES_INVENTORY_ROOT" && sha256sum -c sha256.txt)
+cat "$ES_INVENTORY_ROOT/summary.json"
+cat "$ES_INVENTORY_ROOT/mls_summary.json"
+cat "$ES_INVENTORY_ROOT/common_voice_summary.json"
+```
+
+先返回三个JSON。下一轮根据`training_pool_hours`、`official_split_hours`、
+`accent_tier_hours`和`core_overlap_hours`确定约170小时release pool，再运行通用
+MLS/CV的共享增量MFA、完整Manifest与Temporal 2×审计。当前不直接合并、不读取核心
+sealed test音频内容、不把metadata tier写成`es-AR`。
+
+本地验证：全仓Ruff通过；新增库存定向pytest 3项通过；全量pytest 180项通过；新增
+模块、CLI与测试Mypy strict通过；CLI help和`git diff --check`通过。对`src scripts
+tests`强制运行全仓strict Mypy仍有113项既有类型问题，分布在Torch训练模块、旧测试
+JSON对象断言和streaming mock协议等23个未修改文件，本轮三个新增文件为0。
+
 ## 0.26 2026-08-21 阿根廷/拉普拉塔西语修复审计与Manifest入口
 
 共享增量修复已在H200完成。共享代理词3,264个，MFA模型、代理词表和代理字典

@@ -549,3 +549,42 @@ SLR61 Argentinian与Common Voice Rioplatense v26已分别完成原始词表的MF
 修复后每套字典自动运行`audit_mfa_dictionary`。存在任何缺词、多发音、空发音或
 phone OOV时保持`training_labels_ready=false`并写入未解析清单；在两套审计均通过
 前不构建完整Manifest，也不合并MLS Spanish或通用Common Voice Spanish。
+
+## 15. 西语150小时扩容库存与方言元数据分层
+
+最终目标是至少150小时`train_ready`西语，而不是150小时未经审计的原始音频。为给
+过滤、speaker-disjoint划分和测试封存留余量，先基于MLS Spanish与通用Common Voice
+Spanish建立约170小时可释放候选池。阿根廷/拉普拉塔核心集优先；通用CV依据原始
+元数据分层；MLS因来源和拉美G2P方言不完全匹配只作限量后备。
+
+Swift JSON转换后的通用TSV没有speaker、accent或官方split，因此使用
+`audit_spanish_candidate_inventory.py`按Common Voice clip basename关联原始v25
+`validated.tsv`以及`train/dev/test.tsv`。分层只表示元数据证据：
+
+```text
+argentinian_rioplatense_metadata
+latin_american_metadata
+mixed_latin_american_peninsular
+peninsular_metadata
+other_unclassified_metadata
+unknown
+```
+
+这不是声学口音分类器，不能把通用CV统一标成`es-AR`。训练池按以下优先级输出：
+
+```text
+priority_argentinian_rioplatense
+priority_latin_american
+candidate_mixed / candidate_unknown / candidate_other_unclassified
+fallback_peninsular
+```
+
+以下情况显式排除：音频不可读、原始CV元数据缺失、locale非`es`、Swift文本与元数据
+不一致、官方validation/test，以及与Rioplatense v26核心任一split的clip ID重复。
+通用CV v25与Rioplatense v26可能共享同一个`common_voice_es_*` clip ID，因此跨版本
+去重必须先于任何选样；核心validation/test重复尤其不得进入训练。
+
+MLS inventory只从MLS文件名提取speaker ID并统计时长，方言tier固定为
+`mls_source_unknown_likely_peninsular`。它不能仅凭使用拉美MFA模型就改称拉美语料。
+第一轮建议MLS在最终train中最多占10%至15%，具体配额必须等待真实小时数、CV元数据
+覆盖和核心重叠审计完成后确定。
