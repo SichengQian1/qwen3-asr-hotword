@@ -1,5 +1,32 @@
 # 工作交接记录
 
+## 0.31 2026-08-24 英西葡1:1:1最终训练集约束与西语基线字典审计
+
+用户重申最终目标是供后续训练的英语/西语/葡语`1:1:1`组合训练集。
+在没有新口径前，`1:1:1`按**train音频小时/有效训练曝光**定义，不按样本条数；
+三种语言clip平均时长不同，按条数1:1:1会破坏实际声学权重。第一版计划从三个
+已封存的单语种池各派生约150小时train，总计约450小时。
+
+英语约549.584746小时ready池和葡语Temporal 2×约815.69小时完整池仍全部保留；
+平衡集是不覆盖原产物的新派生Manifest。`1:1:1`只作用于train；各语言validation/test
+保持独立、speaker/audio防泄漏并继续封存，不为凑比例重分已封存test。当前仍先
+完成西语单语种处理，不提前构建三语合并Manifest。
+
+选中的西语171.594529小时辅助池已提取词表：118,177条文本、
+1,176,517个word token、66,304个unique word，数字fragment为0。用早先的全量
+Common Voice Spanish MFA字典做定向基线审计后：
+
+- dictionary word coverage：80.734194%；missing words：12,774；
+- corpus token coverage：88.758173%；
+- words with OOV phones：9,010；OOV phone units：9,278；weighted units：49,475；
+- `training_labels_ready=false`。
+
+`oov_phone_counts.tsv`中的OOV单元显示为空白，与之前西语MFA审计一致，对应
+`U+0303 COMBINING TILDE`。高频缺词主要是`más/está/además/años/nació`等带
+西语重音或`ñ`的正常词，不应删除文本或改成无重音拼写。下一步复用
+`prepare_spanish_mfa_repairs.py`只为该选中词表生成增量代理计划，再决定一次
+增量MFA规模；不重跑全量Common Voice G2P。
+
 ## 0.30 2026-08-24 西语明确拉美CV辅助池选样通过
 
 0.29修正后的170小时辅助池选样在工作区通过，全部SHA256校验通过：

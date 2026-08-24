@@ -615,3 +615,13 @@ speaker整体排除，从而在clip去重之外再防止speaker泄漏。输出`s
 164.102775/3.819581/3.672173小时，所有speaker跨split重叠为0。该子集与核心
 Temporal 2×候选合计约195.29小时，但最终可训小时数仍以后续MFA、Manifest和
 Temporal 2×审计为准。
+
+## 17. 三语平衡集口径
+
+最终产物是英语/西语/葡语`1:1:1`训练集。默认口径为train音频小时和
+有效训练曝光一致，不是原始样本条数一致。第一版目标是三种语言各约150小时
+train；完整单语种池另行保留，平衡集作为新的可复现派生Manifest。
+
+`1:1:1`不改变独立validation/test的封存边界，也不允许从已封存test回流训练。
+三语合并必须等西语MFA/Manifest/Temporal 2×完成后才开始，并在配额输出中显式
+记录每语言的records、hours、source corpora和采样策略。
