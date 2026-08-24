@@ -1,5 +1,77 @@
 # 工作交接记录
 
+## 0.32 2026-08-24 西语辅助Manifest与split保留式Temporal 2×合并入口
+
+明确拉美Common Voice辅助池完整Manifest已在工作区完成：118,177条、
+171.594529小时全部进入ready/review分区；ready为107,694条、157.550974小时，
+review为10,483条、14.043555小时。按既有speaker-disjoint split统计，ready为：
+
+- train：102,938条、150.534372小时；
+- validation：2,406条、3.599035小时；
+- test：2,350条、3.417567小时。
+
+主要review原因是`ctc_length_infeasible=7,588`，其次为
+`dictionary_missing=3,148`和`standalone_h=35`；issue计数可重叠。三套西语
+Temporal 2×只读审计全部SHA256通过，按有效ratio `<=0.90`可释放7,740条、
+9.465169小时；其中SLR61 117条/0.159028小时、Rioplatense 125条/0.177887小时、
+拉美辅助池7,498条/9.128254小时。15条/0.009880小时高压力记录继续推迟，其他
+issue记录不释放。三套原ready加推荐恢复合计约190.375790小时。
+
+现有葡语`build_temporal2x_combined_training.py`会按`split_hash`重新分配所有记录，
+不能用于西语，否则会破坏Common Voice既有官方/speaker-disjoint split。新增：
+
+- `src/qwen_hotword/training/spanish_combined.py`
+- `scripts/build_spanish_temporal2x_training.py`
+- `tests/test_spanish_combined.py`
+
+新构建器用绝对音频路径把Manifest与每套`source.tsv`一一关联；两套Common Voice
+严格保留`source_split`；SLR61的`unsplit`记录按完整speaker确定性分配为96/2/2，
+同一speaker不能跨split。跨语料speaker、audio或ID泄漏均直接失败。只纳入原ready
+和唯一issue为`ctc_length_infeasible`、Temporal 2×有效ratio不超过0.90的记录。
+测试输出只做机械封存，不用于选择、调参或训练。
+
+工作区拉取后运行：
+
+```bash
+ES_AR_MANIFEST_ROOT=outputs/es_ar_full_manifests_v1
+ES_AR_SOURCE_ROOT=outputs/es_ar_train_sources_v1
+ES_AUX_MANIFEST_ROOT=outputs/es_latam_cv_auxiliary_170h_full_manifest_v1
+ES_AUX_SOURCE_ROOT=outputs/es_latam_cv_auxiliary_170h_v1
+ES_COMBINED_ROOT=outputs/es_combined_temporal2x_v1
+
+test ! -e "$ES_COMBINED_ROOT"
+
+python scripts/build_spanish_temporal2x_training.py \
+  --corpus slr61="$ES_AR_MANIFEST_ROOT/slr61" \
+  --corpus common_voice_rioplatense_v26="$ES_AR_MANIFEST_ROOT/common_voice_rioplatense_v26" \
+  --corpus common_voice_latam_auxiliary="$ES_AUX_MANIFEST_ROOT" \
+  --source-tsv slr61="$ES_AR_SOURCE_ROOT/slr61/source.tsv" \
+  --source-tsv common_voice_rioplatense_v26="$ES_AR_SOURCE_ROOT/common_voice_rioplatense_v26/source.tsv" \
+  --source-tsv common_voice_latam_auxiliary="$ES_AUX_SOURCE_ROOT/source.tsv" \
+  --output-dir "$ES_COMBINED_ROOT" \
+  --train-fraction 0.96 \
+  --validation-fraction 0.02 \
+  --test-fraction 0.02 \
+  --time-upsampling-factor 2 \
+  --release-max-effective-ratio 0.90 \
+  --speaker-split-seed 20260824
+
+(cd "$ES_COMBINED_ROOT" && sha256sum -c sha256.txt)
+cat "$ES_COMBINED_ROOT/split_summary.json"
+wc -l "$ES_COMBINED_ROOT"/full_ctc_*.jsonl
+```
+
+确认train大于150小时、三类cross-split overlap均为0、显式split保持不变且
+`recovered_records=7,740`后，再从完整西语train池确定性派生150小时。三语最终
+`1:1:1`仍按train音频小时/有效曝光定义；英语和葡语完整池不被截断或覆盖，
+validation/test保持各语言独立封存。
+
+本地验证：新增3个strict Mypy文件零错误；新增文件Ruff通过；西语合并及相关
+selection/source/MFA/full-manifest定向pytest 22项通过；全量pytest 164项通过、
+22项按依赖条件跳过；`git diff --check`通过。全仓Ruff仍有9个既有UP038，位于本轮
+未修改的multi-nested/prompt/retrieved-RAG/temporal-recovery文件；全仓strict Mypy
+仍有102个既有错误，分布于17个本轮未修改文件，本轮3个新增文件为0。
+
 ## 0.31 2026-08-24 英西葡1:1:1最终训练集约束与西语基线字典审计
 
 用户重申最终目标是供后续训练的英语/西语/葡语`1:1:1`组合训练集。

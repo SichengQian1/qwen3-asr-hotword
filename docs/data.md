@@ -625,3 +625,15 @@ train；完整单语种池另行保留，平衡集作为新的可复现派生Man
 `1:1:1`不改变独立validation/test的封存边界，也不允许从已封存test回流训练。
 三语合并必须等西语MFA/Manifest/Temporal 2×完成后才开始，并在配额输出中显式
 记录每语言的records、hours、source corpora和采样策略。
+
+## 18. 西语split保留式Temporal 2×合并
+
+西语三套Manifest的原ready合计180.910621小时；Temporal 2×只读审计在唯一
+`ctc_length_infeasible`且有效ratio不超过0.90的策略下，可再释放7,740条、
+9.465169小时，总候选约190.375790小时。高压力15条和所有其他issue记录保持隔离。
+
+西语不能复用会按`split_hash`重分全部数据的葡语合并模式。构建时必须把Manifest
+音频路径与原`source.tsv`元数据关联：Rioplatense和明确拉美辅助池保留既有
+`source_split`；SLR61按完整speaker确定性分配；最终再次验证跨split speaker、
+audio和ID overlap均为0。产物绑定Temporal 2×，完整西语池保留，后续另行从train
+确定性选择150小时参与英西葡`1:1:1`派生集。
