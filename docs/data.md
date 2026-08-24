@@ -661,3 +661,25 @@ Swift speaker库存审计确认全部389,738条均可稳定解析，但首段分
 不超过0.90时释放。然后按完整speaker执行确定性96/2/2，验证speaker、audio和ID
 跨split overlap均为0，并封存test。英语train达到完整规模后再单独确定性选择约
 150小时参与英西葡1:1:1；不能为了平衡语言而改动validation/test或读取封存test。
+
+工作区结果为360,093条、507.959291小时；train/validation/test为
+345,820/7,187/7,086条和487.628442/10.165238/10.165611小时。Temporal 2×在US
+范围释放26条；AU/CN排除29,641条，其中21条属于可恢复但方言边界不符的记录；
+其余4条review继续隔离。1,622名speaker按1,560/31/31分配，三类cross-split
+overlap均为0。
+
+## 21. 英西葡150小时1:1:1派生train
+
+三个Temporal 2×完整train池分别为英语487.628442小时、西语181.868358小时、
+葡语783.223637小时。平衡派生集对每种语言选择至少150小时，总计约450小时，
+不覆盖完整池。
+
+选择先强制纳入西语`slr61`和`common_voice_rioplatense_v26`全部train，再以稳定
+SHA256优先级从拉美辅助池补足；英语和葡语按相同稳定优先级在完整train自然来源
+分布上抽样。最终合并Manifest按各语言累计已输出音频时长做deficit interleave，
+避免连续的大语言块。每个输入train必须SHA匹配、summary计数一致、全部使用
+Temporal 2×；跨语言重复ID/音频直接失败。
+
+validation/test继续使用三个独立单语种池的封存版本。派生器只从split summary
+记录其路径和SHA，不打开、复制、重采样或合并test内容。下一阶段的Encoder feature
+cache只读取新派生train和另行明确的validation策略。

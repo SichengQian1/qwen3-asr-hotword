@@ -1,5 +1,68 @@
 # 工作交接记录
 
+## 0.35 2026-08-24 英西葡Temporal 2× 150小时1:1:1派生入口
+
+US-only英语池已在工作区完成且全部SHA256校验通过：360,093条、507.959291小时；
+train/validation/test为345,820/7,187/7,086条和487.628442/10.165238/
+10.165611小时。US-only范围内原ready 360,067条，释放Temporal 2× 26条；4条其他
+问题继续隔离。AU/CN合计29,641条、41.663130小时被正确排除，其中包含21条原本
+可由Temporal 2×恢复的非US记录。最终1,622名US speaker按1,560/31/31分配，
+speaker/audio/ID跨split overlap均为0，test封存且未用于选择。
+
+三个完整train池现均满足派生条件：英语487.628442小时、西语181.868358小时、
+葡语783.223637小时，全部绑定Temporal 2×。新增只读派生器：
+
+- `src/qwen_hotword/training/balanced_multilingual.py`
+- `scripts/build_balanced_multilingual_training.py`
+- `tests/test_balanced_multilingual.py`
+
+派生器只打开三个`full_ctc_train.jsonl`和对应`split_summary.json`；validation/test
+只从summary记录路径、SHA256、条数和小时，不打开内容。它验证输入train SHA256、
+summary计数/小时、语言标签和所有记录的`ctc_time_upsampling_factor=2`。每种语言
+按稳定SHA256优先级选到至少150小时；西语强制完整保留`slr61`与
+`common_voice_rioplatense_v26`，再从明确拉美辅助池补足。英语和葡语在各自完整
+train自然来源分布上稳定抽样。每种语言最多只超出一条录音时长。
+
+输出包含三个单语种派生train和一个合并train。合并时每次从累计已输出音频时长
+最少的语言取下一条，避免Manifest/feature shard形成长语言块；普通训练shuffle后
+每epoch仍使用每种语言约150小时，总计约450小时。完整单语种池不修改，独立
+validation/test不合并、不重分、不回流。
+
+工作区运行：
+
+```bash
+BALANCED_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v1
+
+test ! -e "$BALANCED_ROOT"
+
+python scripts/build_balanced_multilingual_training.py \
+  --language-pool en=outputs/en_us_swift_temporal2x_v1 \
+  --language-pool es=outputs/es_combined_temporal2x_v1 \
+  --language-pool pt=outputs/pt_combined_temporal2x_v1 \
+  --include-all-source es=slr61 \
+  --include-all-source es=common_voice_rioplatense_v26 \
+  --target-hours 150 \
+  --seed 20260824 \
+  --output-dir "$BALANCED_ROOT"
+
+(cd "$BALANCED_ROOT" && sha256sum -c sha256.txt)
+cat "$BALANCED_ROOT/selection_summary.json"
+wc -l \
+  "$BALANCED_ROOT/full_ctc_train_en.jsonl" \
+  "$BALANCED_ROOT/full_ctc_train_es.jsonl" \
+  "$BALANCED_ROOT/full_ctc_train_pt.jsonl" \
+  "$BALANCED_ROOT/full_ctc_train.jsonl"
+```
+
+通过标准：每种语言selected hours均不小于150且overshoot不超过该语言最大选中
+录音；西语mandatory source均完整；合并约450小时；重复ID/音频均为0；
+`test_set_used=false`、`test_set_content_read=false`。先返回SHA校验、
+`selection_summary.json`和`wc -l`，通过后才为新train构建Encoder feature cache。
+
+本地验证：相关7个文件Ruff和严格Mypy通过，定向pytest 7项通过，全量pytest为
+170 passed、22 skipped，CLI help与`git diff --check`通过。仓库全量Ruff仍为既有
+9个UP038，仓库全量严格Mypy仍为既有17个文件102项，本轮文件未新增错误。
+
 ## 0.34 2026-08-24 US-only英语Temporal 2×合并入口
 
 Swift英语speaker审计已在工作区通过：389,738条全部与完整Manifest一一关联，
@@ -59,6 +122,11 @@ wc -l \
 
 返回`split_summary.json`和SHA校验结果。通过后再从英语train确定性派生约150小时；
 此时仍不读取英语test内容，也不把英西葡完整池直接拼接。
+
+工作区实际构建已通过：US-only 360,093条、507.959291小时；train为345,820条、
+487.628442小时，validation/test分别为7,187/7,086条和10.165238/10.165611小时；
+26条US Temporal 2×记录释放，AU/CN 29,641条全部排除，4条其他问题继续隔离。
+speaker/audio/ID跨split overlap均为0，test封存且未使用。
 
 本地验证：相关文件Ruff与严格Mypy通过，英语/西语合并定向pytest 5项通过，
 全量pytest通过，`git diff --check`通过。仓库全量Ruff仍为既有9个UP038，仓库
