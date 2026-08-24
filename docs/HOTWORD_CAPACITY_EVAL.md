@@ -440,3 +440,63 @@ cat "$EXACT_4K_ROOT/summary.json"
 这一步用于确认4k下AC纯检索P95距离50毫秒的余量，并封存精确通道的Recall/FPR
 上限，不用它直接替代Operating结果。通过后再实现音素Anchor Top-64/128/256
 shortlist和现有近似评分精排。
+
+## 10. 位置Anchor候选召回层
+
+Step 3使用音素2/3/4-gram的稀有度加权倒排索引。每个热词默认选最多24个
+低document-frequency Anchor，并保留Anchor在热词发音中的位置。查询时按
+`query_position - entry_position`聚合证据，允许±1 offset以容纳单次插入/删除；
+这样同一批n-gram只有在局部位置一致时才形成强证据，避免把散落在长序列不同位置的
+常见音素片段误当成一个热词。Aho-Corasick精确命中无条件并入候选，然后与Anchor
+候选形成一条确定性排序，Top-64/128/256只是同一排序的切片，因此严格嵌套。
+
+本阶段只衡量候选召回，不做最终近似精排。`anchor_retrieval_seconds`只覆盖AC与Anchor
+查询；为衡量候选是否损失现有质量，同一次运行还会执行原完整CPU近似扫描并保存
+Raw Top-5参考，但其`full_scan_reference_seconds`不计入50 ms预算。输出重点包括：
+
+- `expected_recall_at_64/128/256`；
+- `positive_case_hit_rate_at_64/128/256`；
+- `reference_top5_coverage_at_64/128/256`及正例专用覆盖率；
+- 全查询与final查询的`no_anchor_rate`；
+- shortlist实际候选数、访问posting数；
+- Anchor查询P50/P95/P99/max与50 ms deadline miss；
+- 索引构建时间、Python heap和RSS。
+
+正式4k命令：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+ANCHOR_4K_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v1"
+
+test ! -e "$ANCHOR_4K_ROOT"
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 4000 \
+  --shortlist-sizes 64,128,256 \
+  --ngram-sizes 2,3,4 \
+  --anchors-per-entry 24 \
+  --offset-tolerance 1 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --deadline-ms 50 \
+  --output-dir "$ANCHOR_4K_ROOT"
+
+(cd "$ANCHOR_4K_ROOT" && sha256sum -c sha256.txt)
+cat "$ANCHOR_4K_ROOT/quality_summary.json"
+cat "$ANCHOR_4K_ROOT/performance_summary.json"
+cat "$ANCHOR_4K_ROOT/summary.json"
+```
+
+正式计时应避开Feature Cache等CPU/存储高负载任务。收到4k结果后先决定Top-256是否
+达到候选召回要求；Top-128只作速度消融。下一步才在候选集上复用既有近似评分器并
+比较full-current与2/4/6秒lookback，不能在本阶段调整0.86、Top-5或Prompt。

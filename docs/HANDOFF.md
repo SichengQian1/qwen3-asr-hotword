@@ -1,5 +1,77 @@
 # 工作交接记录
 
+## 0.39 2026-08-24 三语Feature Cache运行中与4k Anchor候选器
+
+工作区已按0.38固定命令启动三语Encoder Feature Cache：train输入为
+`outputs/en_es_pt_balanced_150h_temporal2x_v2/full_ctc_train.jsonl`
+（310,257条、450.003271小时），validation输入为
+`outputs/en_es_pt_balanced_validation_4h_v1/full_ctc_validation.jsonl`
+（8,101条、12.002467小时），输出为
+`outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1`。该任务当前仅记录为
+**运行中**，不能宣称完成；尚未开始CTC训练，也没有读取test。若中断，保留输出目录并
+原样重跑0.38最后一条`cache_full_training_features.py`命令，由分片SHA256校验后续跑。
+
+同时恢复0.25冻结的4,000词/50 ms任务，前两步不重跑。Step 3新增：
+
+- `src/qwen_hotword/hotwords/anchor_index.py`：稀有度加权的音素2/3/4-gram位置
+  Anchor倒排索引；每词默认最多24个Anchor，用±1位置偏移窗口聚合证据；
+- `src/qwen_hotword/hotwords/anchor_capacity.py`：复用sealed CTC replay，对AC精确
+  命中与Anchor候选取并集，生成确定且互相嵌套的Top-64/128/256 shortlist；
+- `scripts/benchmark_anchor_hotword_capacity.py`：同时计算正确热词候选召回、完整
+  CPU近似扫描Raw Top-5覆盖率、无Anchor率、候选数、索引构建内存及查询
+  P50/P95/P99；
+- `tests/test_anchor_capacity.py`：覆盖位置对齐、active-only、AC并集、嵌套确定性、
+  慢参考不计入50 ms等约束。
+
+本地验证：Anchor与容量定向pytest共13项通过，全量pytest共196项通过，全仓Ruff、
+本轮严格Mypy、CLI help和`git diff --check`通过。全仓严格Mypy仍为6个既有文件的
+11项错误，本轮两个新source模块为0项。合成4,000词/100-token实现级探针的查询
+P95约2.2 ms；该数字只证明实现没有明显复杂度回退，不能替代下述工作区正式资产
+结果。
+
+该阶段不改变Operating Top-5、threshold 0.86、maximum edit ratio 0.35、Prompt、
+TTL或候选保留策略。50 ms只计`anchor_index.query()`，全量近似评分仅作为质量参考，
+单独写入`full_scan_reference_seconds`，不得混入口径。工作区首次只跑4k正式档：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+ANCHOR_4K_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v1"
+
+test ! -e "$ANCHOR_4K_ROOT"
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 4000 \
+  --shortlist-sizes 64,128,256 \
+  --ngram-sizes 2,3,4 \
+  --anchors-per-entry 24 \
+  --offset-tolerance 1 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --deadline-ms 50 \
+  --output-dir "$ANCHOR_4K_ROOT"
+
+(cd "$ANCHOR_4K_ROOT" && sha256sum -c sha256.txt)
+cat "$ANCHOR_4K_ROOT/quality_summary.json"
+cat "$ANCHOR_4K_ROOT/performance_summary.json"
+cat "$ANCHOR_4K_ROOT/summary.json"
+```
+
+全量CPU参考扫描可能耗时数分钟，但不需要GPU。为了得到可信的50 ms CPU时延，避免
+在同一主机CPU/存储正被Feature Cache高负载占用时做正式计时；可先让Feature Cache
+完成，或在隔离CPU资源上运行。收到结果后先看Top-64/128/256的expected recall与
+reference Raw Top-5覆盖率，再进入Step 4的小候选集近似精排；不能因为首次结果不佳
+就调整0.86或扩大Prompt注入Top-K。
+
 ## 0.38 2026-08-24 三语4小时validation通过，待单H200 Feature Cache
 
 工作区的`outputs/en_es_pt_balanced_validation_4h_v1`已通过全部SHA256
