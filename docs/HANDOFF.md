@@ -1,5 +1,75 @@
 # 工作交接记录
 
+## 0.28 2026-08-24 西语明确拉美CV 170小时辅助池选样
+
+全量候选库存审计通过，所有579,031条音频可读且SHA256验证通过：
+
+- 通用Common Voice Spanish：358,330条、516.125434小时、5,015个speaker；
+- MLS Spanish：220,701条、917.684176小时、86个speaker；
+- CV中与Rioplatense v26核心train clip重复：9,862条、15.268736小时，
+  必须排除；没有核心validation/test clip重复；
+- 排除clip重复后，额外明确Rioplatense为1,352条、2.110041小时，其他明确
+  拉美为162,405条、228.542930小时；
+- 地区未知CV 140.596660小时、半岛CV 119.774463小时和MLS暂时不用。
+
+库存v1将`América central`的6,120条记录保守地放入other tier；这是
+元数据标签规则漏项，不是音频问题。`classify_spanish_accent`已增加
+`america central`标记，新选样器从inventory的原始`accent`重新分类，因此无需
+重跑全量音频metadata审计。
+
+新增：
+
+- `src/qwen_hotword/training/spanish_selection.py`
+- `scripts/select_spanish_auxiliary_pool.py`
+- `tests/test_spanish_selection.py`
+
+第一版不再把“约170小时release pool”解释为包含核心语料，而是单独选
+170小时明确拉美CV辅助池，再加约23.696562小时Temporal 2×核心候选，
+原始可释放规模约193.7小时。这为MFA缺词、CTC长度失效和96/2/2划分留出
+约29%的余量；最终是否`train >= 150 h`仍必须以Manifest/Temporal 2×实际结果
+为准。若不足，只从剩余明确拉美CV增补，不立即引入未知、半岛或MLS。
+
+辅助池按speaker稳定哈希为96/2/2；先全部保留额外Rioplatense记录，其他明确
+拉美记录按稳定顺序补足。普通拉美speaker最多贡献1小时，避免少数大
+speaker主导。与核心train重合的speaker只能进train；与核心validation/test
+重合的speaker整体排除。原始CV官方holdout、非`es`、文本不一致、不可读
+音频和核心clip重复仍不得入选。
+
+工作区运行（仅读现有库存，不重跑音频审计）：
+
+```bash
+ES_CANDIDATE_ROOT=outputs/es_candidate_train_sources_v1
+ES_AR_ROOT=outputs/es_ar_train_sources_v1
+ES_INVENTORY_ROOT=outputs/es_candidate_inventory_v1
+ES_AUX_ROOT=outputs/es_latam_cv_auxiliary_170h_v1
+
+test ! -e "$ES_AUX_ROOT"
+
+python scripts/select_spanish_auxiliary_pool.py \
+  --source-tsv "$ES_CANDIDATE_ROOT/common_voice/source.tsv" \
+  --inventory-tsv "$ES_INVENTORY_ROOT/common_voice_inventory.tsv" \
+  --rioplatense-tsv "$ES_AR_ROOT/common_voice_rioplatense_v26/source.tsv" \
+  --output-dir "$ES_AUX_ROOT" \
+  --target-hours 170 \
+  --train-fraction 0.96 \
+  --validation-fraction 0.02 \
+  --test-fraction 0.02 \
+  --maximum-latin-american-speaker-hours 1.0 \
+  --seed 20260824
+
+(cd "$ES_AUX_ROOT" && sha256sum -c sha256.txt)
+cat "$ES_AUX_ROOT/summary.json"
+wc -l "$ES_AUX_ROOT/source.tsv" "$ES_AUX_ROOT/selected_inventory.tsv"
+```
+
+先返回`summary.json`和`wc -l`。确认总时长、三个split均达标、speaker跨split
+重叠为0、核心holdout speaker未进入后，下一轮才对该`source.tsv`提取词表，
+复用现有Common Voice Spanish MFA字典做选中词表的共享增量修复和严格复审。
+
+本地验证：全仓Ruff通过；全量pytest 183项通过；库存/选样新增模块、CLI与
+测试的Mypy strict通过；CLI help和`git diff --check`通过。全仓strict Mypy仍有
+113项既有类型问题，分布在23个本轮未修改文件，本轮相关6个文件为0。
+
 ## 0.27 2026-08-24 西语150小时扩容：候选库存与CV元数据关联
 
 当前阿根廷/拉普拉塔核心两语料在Temporal 2×下可释放15,872条、23.696562小时，

@@ -61,6 +61,7 @@ def test_classify_spanish_accent_is_conservative() -> None:
         == "argentinian_rioplatense_metadata"
     )
     assert classify_spanish_accent("México|Caribe") == "latin_american_metadata"
+    assert classify_spanish_accent("América central") == "latin_american_metadata"
     assert classify_spanish_accent("España: Centro-Sur peninsular") == "peninsular_metadata"
     assert (
         classify_spanish_accent("España|Rioplatense")

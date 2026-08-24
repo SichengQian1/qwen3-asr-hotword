@@ -26,6 +26,7 @@ _TARGET_MARKERS = (
     "rioplatense",
 )
 _LATIN_AMERICAN_MARKERS = (
+    "america central",
     "andino",
     "bolivia",
     "caribe",

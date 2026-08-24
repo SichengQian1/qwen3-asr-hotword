@@ -588,3 +588,25 @@ MLS inventory只从MLS文件名提取speaker ID并统计时长，方言tier固�
 `mls_source_unknown_likely_peninsular`。它不能仅凭使用拉美MFA模型就改称拉美语料。
 第一轮建议MLS在最终train中最多占10%至15%，具体配额必须等待真实小时数、CV元数据
 覆盖和核心重叠审计完成后确定。
+
+## 16. 明确拉美Common Voice辅助池
+
+真实库存证明，只用有明确拉美元数据的Common Voice就足以支撑本轮目标。
+通用CV共516.125434小时；排除与Rioplatense核心train重复的15.268736
+小时后，已审计的显式元数据中仍有额外Rioplatense 2.110041小时和其他
+拉美228.542930小时。因此首版不使用未知口音、半岛CV或MLS。
+
+`select_spanish_auxiliary_pool.py`从已生成的CV inventory读取时长和元数据，
+并与原始Swift `source.tsv`按绝对音频路径做一对一校验。它从原始`accent`重新
+计算tier，因此修正了库存v1未把`América central`识别为拉美的规则漏项，
+不需再读取音频。
+
+选样以speaker为分割边界，默认稳定哈希96/2/2，并为普通拉美speaker
+设置1小时贡献上限。核心train speaker强制留在train，核心validation/test
+speaker整体排除，从而在clip去重之外再防止speaker泄漏。输出`source.tsv`
+保留`source_split`/`speaker_id`/元数据tier，可直接用于后续词表提取和
+`build_full_training_manifest.py --split-column source_split`。
+
+本轮选170小时辅助池，加核心Temporal 2×候选合计约193.7小时。这是
+过滤前的余量设计，不得预先声称最终train已达150小时；必须完成MFA修复、
+完整Manifest和Temporal 2×审计后才做最终判定。
