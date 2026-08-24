@@ -9,7 +9,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from qwen_hotword.hotwords.anchor_capacity import benchmark_anchor_hotword_capacity
+from qwen_hotword.hotwords.anchor_capacity import (
+    GC_POLICIES,
+    benchmark_anchor_hotword_capacity,
+)
 
 DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json"
 
@@ -57,6 +60,7 @@ def main() -> int:
     parser.add_argument("--minimum-top1-margin", type=float, default=0.0)
     parser.add_argument("--warmup-queries", type=int, default=3)
     parser.add_argument("--deadline-ms", type=float, default=50.0)
+    parser.add_argument("--gc-policy", choices=GC_POLICIES, default="normal")
     parser.add_argument("--quiet-progress", action="store_true")
     args = parser.parse_args()
     try:
@@ -80,6 +84,7 @@ def main() -> int:
             minimum_top1_margin=args.minimum_top1_margin,
             warmup_queries=args.warmup_queries,
             deadline_seconds=args.deadline_ms / 1000.0,
+            gc_policy=args.gc_policy,
             print_progress=not args.quiet_progress,
         )
     except (FileExistsError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:

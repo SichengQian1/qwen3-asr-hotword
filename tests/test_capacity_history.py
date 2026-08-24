@@ -8,10 +8,19 @@ import pytest
 from qwen_hotword.hotwords.capacity_history import build_hotword_capacity_history
 
 
-def _write_stage(path: Path, *, mode: str, rows: list[dict[str, object]]) -> None:
+def _write_stage(
+    path: Path,
+    *,
+    mode: str,
+    rows: list[dict[str, object]],
+    gc_policy: str | None = None,
+) -> None:
     path.mkdir()
     (path / "summary.json").write_text(
-        json.dumps({"mode": mode, "test_set_used": False}), encoding="utf-8"
+        json.dumps(
+            {"mode": mode, "gc_policy": gc_policy, "test_set_used": False}
+        ),
+        encoding="utf-8",
     )
     (path / "query_results.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
@@ -65,7 +74,12 @@ def test_capacity_history_normalizes_existing_full_scan_and_legacy_anchor(
         "anchor_retrieval_seconds": 0.03,
         "full_scan_reference_seconds": 3.0,
     }
-    _write_stage(anchor, mode="anchor", rows=[anchor_positive, anchor_negative])
+    _write_stage(
+        anchor,
+        mode="anchor",
+        rows=[anchor_positive, anchor_negative],
+        gc_policy="defer_during_anchor_pass",
+    )
 
     output = tmp_path / "history"
     report = build_hotword_capacity_history(
@@ -86,6 +100,7 @@ def test_capacity_history_normalizes_existing_full_scan_and_legacy_anchor(
     assert anchor_row["raw_recall_at_5"] == 1.0
     assert anchor_row["raw_precision_at_5"] == pytest.approx(0.1)
     assert anchor_row["raw_recall_at_7"] == 1.0
+    assert anchor_row["gc_policy"] == "defer_during_anchor_pass"
     reference = next(row for row in rows if row["ranking"] == "full_scan_reference")
     assert reference["raw_recall_at_5"] == 1.0
     assert reference["raw_recall_at_7"] is None

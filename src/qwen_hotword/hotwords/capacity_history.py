@@ -143,6 +143,7 @@ def _normalize_stage_rows(
         "positive_cases": sum(bool(row["expected_hotword_ids"]) for row in final),
         "negative_cases": sum(not bool(row["expected_hotword_ids"]) for row in final),
         "timing_protocol": summary.get("timing_protocol"),
+        "gc_policy": summary.get("gc_policy"),
         "test_set_used": False,
     }
     normalized: list[dict[str, object]] = []

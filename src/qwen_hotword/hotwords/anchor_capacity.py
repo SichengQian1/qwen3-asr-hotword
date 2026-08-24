@@ -29,6 +29,36 @@ from qwen_hotword.phonemes.coverage import load_phoneme_vocab
 
 DEFAULT_SHORTLIST_SIZES = (64, 128, 256)
 OBSERVATION_KS = (5, 7, 10)
+GC_POLICIES = ("normal", "defer_during_anchor_pass")
+
+
+class _AnchorGcProbe:
+    def __init__(self) -> None:
+        self.current_query_number: int | None = None
+        self.events: list[dict[str, object]] = []
+        self._starts: dict[int, tuple[float, int | None]] = {}
+
+    def callback(self, phase: str, info: dict[str, int]) -> None:
+        generation = int(info.get("generation", -1))
+        if phase == "start":
+            self._starts[generation] = (time.perf_counter(), self.current_query_number)
+            return
+        if phase != "stop":
+            return
+        started = self._starts.pop(generation, None)
+        if started is None:
+            return
+        started_at, query_number = started
+        self.events.append(
+            {
+                "schema_version": 1,
+                "query_number": query_number,
+                "generation": generation,
+                "duration_seconds": time.perf_counter() - started_at,
+                "collected": int(info.get("collected", 0)),
+                "uncollectable": int(info.get("uncollectable", 0)),
+            }
+        )
 
 
 def benchmark_anchor_hotword_capacity(
@@ -52,6 +82,7 @@ def benchmark_anchor_hotword_capacity(
     minimum_top1_margin: float = 0.0,
     warmup_queries: int = 3,
     deadline_seconds: float = 0.05,
+    gc_policy: str = "normal",
     print_progress: bool = True,
 ) -> dict[str, object]:
     resolved_profiles = tuple(dict.fromkeys(profiles))
@@ -68,6 +99,8 @@ def benchmark_anchor_hotword_capacity(
         raise ValueError("warmup_queries must not be negative")
     if deadline_seconds <= 0:
         raise ValueError("deadline_seconds must be positive")
+    if gc_policy not in GC_POLICIES:
+        raise ValueError(f"gc_policy must be one of {GC_POLICIES}")
     anchor_config = AnchorIndexConfig(
         ngram_sizes=resolved_ngrams,
         anchors_per_entry=anchors_per_entry,
@@ -103,6 +136,7 @@ def benchmark_anchor_hotword_capacity(
     vocab = load_phoneme_vocab(paths["vocab"])
     replay_rows = load_capacity_replay(paths["replay"])
     all_query_rows: list[dict[str, object]] = []
+    all_gc_events: list[dict[str, object]] = []
     level_summaries: dict[str, dict[str, Any]] = {}
     started = time.monotonic()
     for profile in resolved_profiles:
@@ -129,75 +163,132 @@ def benchmark_anchor_hotword_capacity(
                     active_hotword_ids=case.active_hotword_ids,
                     maximum_candidates=maximum_candidates,
                 )
-            gc.collect()
+            pre_gc_started = time.perf_counter()
+            pre_gc_collected = gc.collect()
+            pre_gc_seconds = time.perf_counter() - pre_gc_started
 
             level_rows: list[dict[str, object]] = []
-            for query_number, replay in enumerate(replay_rows, start=1):
-                case = case_by_id[str(replay["case_id"])]
-                decoded = replay_decoded_phonemes(replay)
-                anchor_started = time.perf_counter()
-                result = index.query(
-                    tuple(item.token_id for item in decoded),
-                    confidences=tuple(item.confidence for item in decoded),
-                    active_hotword_ids=case.active_hotword_ids,
-                    maximum_candidates=maximum_candidates,
-                )
-                anchor_seconds = time.perf_counter() - anchor_started
-                candidate_ids = tuple(candidate.hotword_id for candidate in result.candidates)
-                expected = set(case.expected_hotword_ids)
-                candidate_ranks = {
-                    hotword_id: rank
-                    for rank, hotword_id in enumerate(candidate_ids, start=1)
-                }
-                row: dict[str, object] = {
-                    "schema_version": 1,
-                    "profile": profile,
-                    "size": size,
-                    "case_id": case.case_id,
-                    "sample_id": case.sample_id,
-                    "primary_group": case.primary_group,
-                    "chunk_id": int(replay["chunk_id"]),
-                    "cumulative_audio_sec": float(replay["cumulative_audio_sec"]),
-                    "is_final": bool(replay["is_final"]),
-                    "is_tail_flush": bool(replay["is_tail_flush"]),
-                    "active_hotwords": len(case.active_hotword_ids),
-                    "expected_hotword_ids": sorted(expected),
-                    "expected_candidate_ranks": {
-                        hotword_id: candidate_ranks[hotword_id]
-                        for hotword_id in sorted(expected)
-                        if hotword_id in candidate_ranks
-                    },
-                    "exact_hotword_ids": list(result.exact_hotword_ids),
-                    "exact_expected_hits": len(expected & set(result.exact_hotword_ids)),
-                    "anchored_hotwords": len(result.anchored_hotword_ids),
-                    "no_anchor": result.no_anchor,
-                    "postings_visited": result.postings_visited,
-                    "candidate_count": result.total_candidate_count,
-                    "anchor_retrieval_seconds": anchor_seconds,
-                    "top_anchor_candidates": [
-                        candidate.to_dict() for candidate in result.candidates[:20]
-                    ],
-                }
-                for shortlist_size in resolved_shortlists:
-                    shortlist = candidate_ids[:shortlist_size]
-                    row[f"candidate_ids_at_{shortlist_size}"] = list(shortlist)
-                    row[f"candidate_count_at_{shortlist_size}"] = len(shortlist)
-                    row[f"expected_hits_at_{shortlist_size}"] = len(expected & set(shortlist))
-                for observation_k in OBSERVATION_KS:
-                    observed = candidate_ids[:observation_k]
-                    row[f"anchor_top{observation_k}_ids"] = list(observed)
-                    row[f"anchor_expected_hits_at_{observation_k}"] = len(
-                        expected & set(observed)
+            probe = _AnchorGcProbe()
+            callback = probe.callback
+            gc_enabled_before = gc.isenabled()
+            gc.callbacks.append(callback)
+            if gc_policy == "defer_during_anchor_pass" and gc_enabled_before:
+                gc.disable()
+            gc_enabled_during = gc.isenabled()
+            try:
+                for query_number, replay in enumerate(replay_rows, start=1):
+                    case = case_by_id[str(replay["case_id"])]
+                    decoded = replay_decoded_phonemes(replay)
+                    event_offset = len(probe.events)
+                    probe.current_query_number = query_number
+                    anchor_started = time.perf_counter()
+                    result = index.query(
+                        tuple(item.token_id for item in decoded),
+                        confidences=tuple(item.confidence for item in decoded),
+                        active_hotword_ids=case.active_hotword_ids,
+                        maximum_candidates=maximum_candidates,
                     )
-                level_rows.append(row)
-                if print_progress and (
-                    query_number == len(replay_rows) or query_number % 20 == 0
-                ):
-                    print(
-                        f"anchor capacity profile={profile} size={size} "
-                        f"queries={query_number}/{len(replay_rows)}",
-                        flush=True,
+                    anchor_seconds = time.perf_counter() - anchor_started
+                    probe.current_query_number = None
+                    query_gc_events = probe.events[event_offset:]
+                    candidate_ids = tuple(
+                        candidate.hotword_id for candidate in result.candidates
                     )
+                    expected = set(case.expected_hotword_ids)
+                    candidate_ranks = {
+                        hotword_id: rank
+                        for rank, hotword_id in enumerate(candidate_ids, start=1)
+                    }
+                    row: dict[str, object] = {
+                        "schema_version": 1,
+                        "profile": profile,
+                        "size": size,
+                        "case_id": case.case_id,
+                        "sample_id": case.sample_id,
+                        "primary_group": case.primary_group,
+                        "chunk_id": int(replay["chunk_id"]),
+                        "cumulative_audio_sec": float(replay["cumulative_audio_sec"]),
+                        "is_final": bool(replay["is_final"]),
+                        "is_tail_flush": bool(replay["is_tail_flush"]),
+                        "active_hotwords": len(case.active_hotword_ids),
+                        "expected_hotword_ids": sorted(expected),
+                        "expected_candidate_ranks": {
+                            hotword_id: candidate_ranks[hotword_id]
+                            for hotword_id in sorted(expected)
+                            if hotword_id in candidate_ranks
+                        },
+                        "exact_hotword_ids": list(result.exact_hotword_ids),
+                        "exact_expected_hits": len(
+                            expected & set(result.exact_hotword_ids)
+                        ),
+                        "anchored_hotwords": len(result.anchored_hotword_ids),
+                        "no_anchor": result.no_anchor,
+                        "postings_visited": result.postings_visited,
+                        "candidate_count": result.total_candidate_count,
+                        "anchor_retrieval_seconds": anchor_seconds,
+                        "gc_collections_during_query": len(query_gc_events),
+                        "gc_seconds_during_query": sum(
+                            cast(float, event["duration_seconds"])
+                            for event in query_gc_events
+                        ),
+                        "gc_generations_during_query": sorted(
+                            {cast(int, event["generation"]) for event in query_gc_events}
+                        ),
+                        "top_anchor_candidates": [
+                            candidate.to_dict() for candidate in result.candidates[:20]
+                        ],
+                    }
+                    for shortlist_size in resolved_shortlists:
+                        shortlist = candidate_ids[:shortlist_size]
+                        row[f"candidate_ids_at_{shortlist_size}"] = list(shortlist)
+                        row[f"candidate_count_at_{shortlist_size}"] = len(shortlist)
+                        row[f"expected_hits_at_{shortlist_size}"] = len(
+                            expected & set(shortlist)
+                        )
+                    for observation_k in OBSERVATION_KS:
+                        observed = candidate_ids[:observation_k]
+                        row[f"anchor_top{observation_k}_ids"] = list(observed)
+                        row[f"anchor_expected_hits_at_{observation_k}"] = len(
+                            expected & set(observed)
+                        )
+                    level_rows.append(row)
+                    if print_progress and (
+                        query_number == len(replay_rows) or query_number % 20 == 0
+                    ):
+                        print(
+                            f"anchor capacity profile={profile} size={size} "
+                            f"queries={query_number}/{len(replay_rows)}",
+                            flush=True,
+                        )
+            finally:
+                probe.current_query_number = None
+                gc.callbacks.remove(callback)
+                if gc_policy == "defer_during_anchor_pass" and gc_enabled_before:
+                    gc.enable()
+            gc_enabled_restored = gc.isenabled() == gc_enabled_before
+            post_gc_seconds = 0.0
+            post_gc_collected = 0
+            if gc_policy == "defer_during_anchor_pass" and gc_enabled_before:
+                post_gc_started = time.perf_counter()
+                post_gc_collected = gc.collect()
+                post_gc_seconds = time.perf_counter() - post_gc_started
+            level_gc_events = [
+                {**event, "profile": profile, "size": size} for event in probe.events
+            ]
+            all_gc_events.extend(level_gc_events)
+            gc_metrics = _summarize_gc(
+                rows=level_rows,
+                events=level_gc_events,
+                gc_policy=gc_policy,
+                gc_enabled_before=gc_enabled_before,
+                gc_enabled_during=gc_enabled_during,
+                gc_enabled_restored=gc_enabled_restored,
+                pre_gc_seconds=pre_gc_seconds,
+                pre_gc_collected=pre_gc_collected,
+                post_gc_seconds=post_gc_seconds,
+                post_gc_collected=post_gc_collected,
+                deadline_seconds=deadline_seconds,
+            )
             for reference_number, (replay, row) in enumerate(
                 zip(replay_rows, level_rows, strict=True), start=1
             ):
@@ -266,6 +357,7 @@ def benchmark_anchor_hotword_capacity(
                 rows=level_rows,
                 shortlist_sizes=resolved_shortlists,
                 index_metrics=index_metrics,
+                gc_metrics=gc_metrics,
                 deadline_seconds=deadline_seconds,
             )
         level_summaries[profile] = profile_summaries
@@ -276,7 +368,11 @@ def benchmark_anchor_hotword_capacity(
     }
     performance_summary = {
         profile: {
-            size: {"performance": value["performance"], "index": value["index"]}
+            size: {
+                "performance": value["performance"],
+                "index": value["index"],
+                "gc": value["gc"],
+            }
             for size, value in levels.items()
         }
         for profile, levels in level_summaries.items()
@@ -292,6 +388,17 @@ def benchmark_anchor_hotword_capacity(
         "deadline_seconds": deadline_seconds,
         "latency_scope": "anchor_index_query_only_excludes_full_scan_reference",
         "timing_protocol": "all_anchor_queries_before_full_scan_reference",
+        "gc_policy": gc_policy,
+        "test_set_used": False,
+    }
+    gc_summary = {
+        "schema_version": 1,
+        "status": "pass",
+        "gc_policy": gc_policy,
+        "levels": {
+            profile: {size: value["gc"] for size, value in levels.items()}
+            for profile, levels in level_summaries.items()
+        },
         "test_set_used": False,
     }
     diagnostic_rows, diagnostic_summary = _build_diagnostics(
@@ -300,10 +407,12 @@ def benchmark_anchor_hotword_capacity(
         deadline_seconds=deadline_seconds,
     )
     _write_jsonl(destination / "query_results.jsonl", all_query_rows)
+    _write_jsonl(destination / "gc_events.jsonl", all_gc_events)
     _write_jsonl(destination / "diagnostic_cases.jsonl", diagnostic_rows)
     _write_json(destination / "diagnostic_summary.json", diagnostic_summary)
     _write_json(destination / "quality_summary.json", quality_summary)
     _write_json(destination / "performance_summary.json", performance_summary)
+    _write_json(destination / "gc_summary.json", gc_summary)
     _write_json(
         destination / "run_config.json",
         {
@@ -332,6 +441,7 @@ def benchmark_anchor_hotword_capacity(
             "deadline_seconds": deadline_seconds,
             "latency_scope": "anchor_index_query_only_excludes_full_scan_reference",
             "timing_protocol": "all_anchor_queries_before_full_scan_reference",
+            "gc_policy": gc_policy,
             "inputs": {
                 "asset_summary": _file_identity(paths["assets"] / "asset_summary.json"),
                 "replay": _file_identity(paths["replay"]),
@@ -409,6 +519,9 @@ def _diagnostic_row(
         "is_final": row["is_final"],
         "hotword_id": hotword_id,
         "anchor_retrieval_seconds": row["anchor_retrieval_seconds"],
+        "gc_collections_during_query": row["gc_collections_during_query"],
+        "gc_seconds_during_query": row["gc_seconds_during_query"],
+        "gc_generations_during_query": row["gc_generations_during_query"],
         "postings_visited": row["postings_visited"],
         "candidate_count": row["candidate_count"],
         "exact_hotword_ids": row["exact_hotword_ids"],
@@ -452,6 +565,7 @@ def _summarize_level(
     rows: Sequence[Mapping[str, Any]],
     shortlist_sizes: Sequence[int],
     index_metrics: Mapping[str, object],
+    gc_metrics: Mapping[str, object],
     deadline_seconds: float,
 ) -> dict[str, object]:
     final = [row for row in rows if bool(row["is_final"])]
@@ -591,10 +705,66 @@ def _summarize_level(
         "quality": quality,
         "performance": performance,
         "index": dict(index_metrics),
+        "gc": dict(gc_metrics),
         "queries": len(rows),
         "final_queries": len(final),
         "status": "pass",
         "test_set_used": False,
+    }
+
+
+def _summarize_gc(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    events: Sequence[Mapping[str, object]],
+    gc_policy: str,
+    gc_enabled_before: bool,
+    gc_enabled_during: bool,
+    gc_enabled_restored: bool,
+    pre_gc_seconds: float,
+    pre_gc_collected: int,
+    post_gc_seconds: float,
+    post_gc_collected: int,
+    deadline_seconds: float,
+) -> dict[str, object]:
+    generation_counts: dict[str, int] = {}
+    for event in events:
+        generation = str(event["generation"])
+        generation_counts[generation] = generation_counts.get(generation, 0) + 1
+    slow_rows = [
+        row for row in rows if float(row["anchor_retrieval_seconds"]) > deadline_seconds
+    ]
+    rows_with_gc = [row for row in rows if int(row["gc_collections_during_query"]) > 0]
+    return {
+        "gc_policy": gc_policy,
+        "gc_enabled_before_anchor_pass": gc_enabled_before,
+        "gc_enabled_during_anchor_pass": gc_enabled_during,
+        "gc_enabled_restored": gc_enabled_restored,
+        "pre_anchor_gc_collected": pre_gc_collected,
+        "pre_anchor_gc_seconds": pre_gc_seconds,
+        "post_anchor_gc_collected": post_gc_collected,
+        "post_anchor_gc_seconds": post_gc_seconds,
+        "collections_during_anchor_pass": len(events),
+        "collection_generation_counts": dict(sorted(generation_counts.items())),
+        "collected_objects_during_anchor_pass": sum(
+            cast(int, event["collected"]) for event in events
+        ),
+        "uncollectable_objects_during_anchor_pass": sum(
+            cast(int, event["uncollectable"]) for event in events
+        ),
+        "gc_seconds_during_anchor_pass": sum(
+            cast(float, event["duration_seconds"]) for event in events
+        ),
+        "queries_with_gc": len(rows_with_gc),
+        "query_gc_overlap_rate": _ratio(len(rows_with_gc), len(rows)),
+        "over_deadline_queries": len(slow_rows),
+        "over_deadline_queries_with_gc": sum(
+            int(row["gc_collections_during_query"]) > 0 for row in slow_rows
+        ),
+        "over_deadline_queries_without_gc": sum(
+            int(row["gc_collections_during_query"]) == 0 for row in slow_rows
+        ),
+        "deadline_seconds": deadline_seconds,
     }
 
 

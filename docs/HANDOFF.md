@@ -1,5 +1,93 @@
 # 工作交接记录
 
+## 0.44 2026-08-24 4k Anchor GC尾延迟A/B（代码完成，待工作区实测）
+
+4k Anchor v3/v4在严格两阶段计时后，P50/P90已稳定在20至30毫秒范围，
+但P95仍约62毫秒，还有6%至7%查询超过50毫秒。本轮不修改任何质量逻辑，
+只增加显式`normal`与`defer_during_anchor_pass` GC策略，用来判断Python cyclic
+GC是否造成尾延迟。
+
+新增记录包括：
+
+- `gc_events.jsonl`：每次GC的generation、耗时、回收对象数和对应query；
+- `gc_summary.json`：GC启用/恢复状态、query重叠率、超时query中是否发生GC、
+  计时口径外的前/后显式GC耗时；
+- `query_results.jsonl`和超时诊断行：每query的GC次数、耗时和generation；
+- `summary.json`/`run_config.json`与优化历史：显式`gc_policy`。
+
+defer策略只在连续Anchor查询计时阶段禁用自动GC；结束后先恢复调用者原
+GC状态，再在50毫秒口径外执行显式`gc.collect()`。完整CPU参考扫描仍在
+Anchor计时后运行。默认仍为normal，不改旧命令行为。Top-5/7/10、Top-64/
+128/256候选、0.86门控、Prompt和所有参考评分均不变。
+
+工作区拉取后，等Feature Cache结束且CPU/存储负载稳定，连续运行两组新目录：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+GC_NORMAL_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v5_gc_normal"
+GC_DEFER_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v5_gc_deferred"
+
+test ! -e "$GC_NORMAL_ROOT"
+test ! -e "$GC_DEFER_ROOT"
+
+COMMON_ARGS=(
+  --assets-root "$ASSET_4K_ROOT"
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl"
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+  --profiles representative
+  --sizes 4000
+  --shortlist-sizes 64,128,256
+  --ngram-sizes 2,3,4
+  --anchors-per-entry 24
+  --offset-tolerance 1
+  --threshold 0.86
+  --top-k 5
+  --maximum-edit-ratio 0.35
+  --posterior-weight 0.25
+  --minimum-posterior-confidence 0
+  --minimum-top1-margin 0
+  --deadline-ms 50
+)
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  "${COMMON_ARGS[@]}" \
+  --gc-policy normal \
+  --output-dir "$GC_NORMAL_ROOT"
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  "${COMMON_ARGS[@]}" \
+  --gc-policy defer_during_anchor_pass \
+  --output-dir "$GC_DEFER_ROOT"
+```
+
+完成后检查SHA和质量不变约束：
+
+```bash
+(cd "$GC_NORMAL_ROOT" && sha256sum -c sha256.txt)
+(cd "$GC_DEFER_ROOT" && sha256sum -c sha256.txt)
+
+cmp "$GC_NORMAL_ROOT/quality_summary.json" \
+    "$GC_DEFER_ROOT/quality_summary.json"
+
+cat "$GC_NORMAL_ROOT/performance_summary.json"
+cat "$GC_NORMAL_ROOT/gc_summary.json"
+cat "$GC_DEFER_ROOT/performance_summary.json"
+cat "$GC_DEFER_ROOT/gc_summary.json"
+```
+
+`cmp`必须无输出并返回0。若normal的慢query与GC高度重叠，且defer将P95
+稳定压到50毫秒内，才能将GC调度作为主因。若defer仍约62毫秒，下一步
+应做CPU affinity/pyperf与分配峰值诊断，暂不做会降低候选召回的posting cap。
+
+本地验证：全仓Ruff通过；GC/Anchor与历史定向pytest 7项通过；全量
+pytest 201项通过；本轮3个source/script文件严格Mypy为0错误；CLI help和
+`git diff --check`通过。全仓`src scripts` Mypy仍有8个旧文件的14项Torch/
+第三方类型错误，本轮文件不在其中。真实4k A/B尚未在本地运行，test集未读取。
+
 ## 0.43 2026-08-24 三语Feature Cache Temporal 2×实际长度修复
 
 三语450小时Feature Cache在train shard `000031`首次遇到

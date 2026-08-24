@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 from pathlib import Path
 from typing import Any
@@ -75,9 +76,41 @@ def test_anchor_index_is_active_only_nested_and_deterministic() -> None:
     assert first.exact_hotword_ids == ("exact",)
 
 
+def test_anchor_gc_probe_records_query_overlap_and_collection_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    times = iter((10.0, 10.025))
+    monkeypatch.setattr(anchor_capacity_module.time, "perf_counter", lambda: next(times))
+    probe = anchor_capacity_module._AnchorGcProbe()
+    probe.current_query_number = 7
+
+    probe.callback("start", {"generation": 1})
+    probe.callback(
+        "stop",
+        {"generation": 1, "collected": 12, "uncollectable": 2},
+    )
+
+    assert probe.events == [
+        {
+            "schema_version": 1,
+            "query_number": 7,
+            "generation": 1,
+            "duration_seconds": pytest.approx(0.025),
+            "collected": 12,
+            "uncollectable": 2,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("gc_policy", "expected_anchor_gc_enabled"),
+    (("normal", True), ("defer_during_anchor_pass", False)),
+)
 def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    gc_policy: str,
+    expected_anchor_gc_enabled: bool,
 ) -> None:
     tokens = ["<blank>"] + [f"p{index}" for index in range(1, 41)]
     vocab = tmp_path / "vocab.json"
@@ -150,35 +183,47 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
         )
     _write_jsonl(replay, replay_rows)
 
-    events: list[str] = []
+    events: list[tuple[str, bool]] = []
     original_query = PhonemeAnchorIndex.query
     original_reference = profile_decoded_hotwords
 
     def tracked_query(self: PhonemeAnchorIndex, *args: Any, **kwargs: Any) -> Any:
-        events.append("anchor")
+        events.append(("anchor", gc.isenabled()))
         return original_query(self, *args, **kwargs)
 
     def tracked_reference(*args: Any, **kwargs: Any) -> Any:
-        events.append("reference")
+        events.append(("reference", gc.isenabled()))
         return original_reference(*args, **kwargs)
 
     monkeypatch.setattr(PhonemeAnchorIndex, "query", tracked_query)
     monkeypatch.setattr(anchor_capacity_module, "profile_decoded_hotwords", tracked_reference)
 
     output = tmp_path / "benchmark"
-    report = benchmark_anchor_hotword_capacity(
-        assets_root=assets,
-        replay_path=replay,
-        vocab_path=vocab,
-        output_dir=output,
-        sizes=(100,),
-        shortlist_sizes=(8, 16, 32),
-        warmup_queries=0,
-        print_progress=False,
-    )
+    was_enabled = gc.isenabled()
+    gc.enable()
+    try:
+        report = benchmark_anchor_hotword_capacity(
+            assets_root=assets,
+            replay_path=replay,
+            vocab_path=vocab,
+            output_dir=output,
+            sizes=(100,),
+            shortlist_sizes=(8, 16, 32),
+            warmup_queries=0,
+            gc_policy=gc_policy,
+            print_progress=False,
+        )
+    finally:
+        if not was_enabled:
+            gc.disable()
 
     assert report["status"] == "pass"
-    assert events == ["anchor", "anchor", "reference", "reference"]
+    assert events == [
+        ("anchor", expected_anchor_gc_enabled),
+        ("anchor", expected_anchor_gc_enabled),
+        ("reference", True),
+        ("reference", True),
+    ]
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     level_summary = summary["levels"]["representative"]["100"]
     assert level_summary["quality"]["expected_recall_at_8"] == 1.0
@@ -195,6 +240,7 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
         "anchor_index_query_only_excludes_full_scan_reference"
     )
     assert summary["timing_protocol"] == "all_anchor_queries_before_full_scan_reference"
+    assert summary["gc_policy"] == gc_policy
     rows = [
         json.loads(line)
         for line in (output / "query_results.jsonl").read_text(encoding="utf-8").splitlines()
@@ -205,6 +251,17 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     assert len(rows[0]["reference_raw_top7_ids"]) == 7
     assert len(rows[0]["reference_raw_top10_ids"]) == 10
     assert rows[0]["reference_operating_ids"] == []
+    gc_summary = json.loads((output / "gc_summary.json").read_text(encoding="utf-8"))
+    gc_level = gc_summary["levels"]["representative"]["100"]
+    assert gc_level["gc_policy"] == gc_policy
+    assert gc_level["gc_enabled_before_anchor_pass"] is True
+    assert gc_level["gc_enabled_during_anchor_pass"] is expected_anchor_gc_enabled
+    assert gc_level["gc_enabled_restored"] is True
+    if gc_policy == "defer_during_anchor_pass":
+        assert rows[0]["gc_collections_during_query"] == 0
+        assert rows[0]["gc_seconds_during_query"] == 0.0
+        assert gc_level["collections_during_anchor_pass"] == 0
+        assert (output / "gc_events.jsonl").read_text(encoding="utf-8") == ""
     assert (output / "diagnostic_cases.jsonl").is_file()
     diagnostic = json.loads((output / "diagnostic_summary.json").read_text(encoding="utf-8"))
     assert diagnostic["maximum_shortlist"] == 32

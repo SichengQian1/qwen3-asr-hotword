@@ -572,3 +572,40 @@ Raw Top-7/10只用于判断目标是否轻度掉出Top-5，不能扩大Prompt注
 Exact AC及Anchor输出；旧Anchor只有参考Top-5，因此对应参考Top-7/10和Operating列
 保持`null`。新Anchor运行额外保存完整字段后即可填满这些列。工作区命令和固定目录
 见`docs/HANDOFF.md` 0.42。
+
+## 14. GC尾延迟A/B
+
+v3/v4在严格两阶段计时下仍出现稳定的约62毫秒P95，但P90只约27至30毫秒。
+下一步先检验Python cyclic GC是否与慢查询重叠，不修改Anchor、候选数、Top-5/7/10、
+0.86门控或Prompt。`benchmark_anchor_hotword_capacity.py`新增：
+
+```text
+--gc-policy normal
+--gc-policy defer_during_anchor_pass
+```
+
+`normal`保持Python默认GC行为；`defer_during_anchor_pass`只在连续Anchor计时阶段禁用
+自动cyclic GC，Anchor阶段结束后立即恢复原状态并在时延口径外显式`gc.collect()`。
+这不是永久禁用GC，也不包括完整CPU参考扫描。两组均在warmup后、Anchor计时前
+执行一次显式GC，保持起点可比。
+
+新输出：
+
+```text
+gc_events.jsonl
+  -> 每次GC的generation、耗时、collected/uncollectable及所在query
+
+gc_summary.json
+  -> GC策略、计时阶段启用状态、GC/query重叠、超时query中的GC占比，
+     以及时延口径外的前/后显式GC耗时
+```
+
+`query_results.jsonl`每行同时记录`gc_collections_during_query`、
+`gc_seconds_during_query`和`gc_generations_during_query`；超过50毫秒的诊断行也携带这些
+证据。默认值仍为`normal`，老命令行为不变。
+
+验收时先要求两组`quality_summary.json`完全相同，再比较P50/P90/P95/P99和
+deadline miss。若normal慢query多数与GC重叠，且defer稳定把P95压到50毫秒内，
+才能将GC调度视为主要原因；若defer仍约62毫秒，说明尾延迟更可能来自OS调度、
+CPU竞争或实现分配峰值，下一步应做process pinning/pyperf或分配调查，不应直接用
+posting cap牺牲候选召回。
