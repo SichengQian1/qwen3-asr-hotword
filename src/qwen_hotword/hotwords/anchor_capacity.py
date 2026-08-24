@@ -28,6 +28,7 @@ from qwen_hotword.hotwords.scoring import HotwordScoringConfig, profile_decoded_
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
 
 DEFAULT_SHORTLIST_SIZES = (64, 128, 256)
+OBSERVATION_KS = (5, 7, 10)
 
 
 def benchmark_anchor_hotword_capacity(
@@ -182,6 +183,12 @@ def benchmark_anchor_hotword_capacity(
                     row[f"candidate_ids_at_{shortlist_size}"] = list(shortlist)
                     row[f"candidate_count_at_{shortlist_size}"] = len(shortlist)
                     row[f"expected_hits_at_{shortlist_size}"] = len(expected & set(shortlist))
+                for observation_k in OBSERVATION_KS:
+                    observed = candidate_ids[:observation_k]
+                    row[f"anchor_top{observation_k}_ids"] = list(observed)
+                    row[f"anchor_expected_hits_at_{observation_k}"] = len(
+                        expected & set(observed)
+                    )
                 level_rows.append(row)
                 if print_progress and (
                     query_number == len(replay_rows) or query_number % 20 == 0
@@ -203,8 +210,12 @@ def benchmark_anchor_hotword_capacity(
                     hotwords=active_entries,
                     config=scoring_config,
                 )
-                reference_top5 = tuple(
-                    match.hotword_id for match in reference.result.ranked_matches[:top_k]
+                reference_ranking = tuple(
+                    match.hotword_id for match in reference.result.ranked_matches
+                )
+                reference_top5 = reference_ranking[:top_k]
+                reference_operating = tuple(
+                    match.hotword_id for match in reference.result.selected_matches
                 )
                 for shortlist_size in resolved_shortlists:
                     reference_shortlist = set(
@@ -221,14 +232,24 @@ def benchmark_anchor_hotword_capacity(
                     for rank, hotword_id in enumerate(maximum_candidate_ids, start=1)
                 }
                 row["reference_raw_top5_ids"] = list(reference_top5)
+                for observation_k in OBSERVATION_KS:
+                    observed = reference_ranking[:observation_k]
+                    row[f"reference_raw_top{observation_k}_ids"] = list(observed)
+                    row[f"reference_expected_hits_at_{observation_k}"] = len(
+                        set(case.expected_hotword_ids) & set(observed)
+                    )
+                row["reference_operating_ids"] = list(reference_operating)
+                row["reference_operating_expected_hits_at_5"] = len(
+                    set(case.expected_hotword_ids) & set(reference_operating)
+                )
+                row["reference_negative_false_positive"] = (
+                    not case.expected_hotword_ids and bool(reference_operating)
+                )
                 row["reference_top5_candidate_ranks"] = {
                     hotword_id: maximum_ranks[hotword_id]
                     for hotword_id in reference_top5
                     if hotword_id in maximum_ranks
                 }
-                row["reference_expected_hits_at_5"] = len(
-                    set(case.expected_hotword_ids) & set(reference_top5)
-                )
                 row["full_scan_reference_seconds"] = reference.retrieval_seconds
                 if print_progress and (
                     reference_number == len(replay_rows) or reference_number % 20 == 0
@@ -437,6 +458,7 @@ def _summarize_level(
     if not final:
         raise ValueError("anchor capacity replay contains no final rows")
     positive = [row for row in final if row["expected_hotword_ids"]]
+    negative = [row for row in final if not row["expected_hotword_ids"]]
     expected_total = sum(len(row["expected_hotword_ids"]) for row in final)
     reference_top5_total = sum(len(row["reference_raw_top5_ids"]) for row in final)
     positive_reference_top5_total = sum(
@@ -445,12 +467,6 @@ def _summarize_level(
     quality: dict[str, object] = {
         "expected_hotwords": expected_total,
         "positive_cases": len(positive),
-        "reference_raw_correct_at_5": sum(
-            int(row["reference_expected_hits_at_5"]) for row in final
-        ),
-        "reference_raw_recall_at_5": _ratio(
-            sum(int(row["reference_expected_hits_at_5"]) for row in final), expected_total
-        ),
         "exact_correct": sum(int(row["exact_expected_hits"]) for row in final),
         "exact_recall": _ratio(
             sum(int(row["exact_expected_hits"]) for row in final), expected_total
@@ -462,6 +478,72 @@ def _summarize_level(
             sum(bool(row["no_anchor"]) for row in final), len(final)
         ),
     }
+    for observation_k in OBSERVATION_KS:
+        anchor_hits = sum(
+            int(row[f"anchor_expected_hits_at_{observation_k}"]) for row in final
+        )
+        anchor_selected = sum(
+            len(row[f"anchor_top{observation_k}_ids"]) for row in final
+        )
+        reference_hits = sum(
+            int(row[f"reference_expected_hits_at_{observation_k}"]) for row in final
+        )
+        reference_selected = sum(
+            len(row[f"reference_raw_top{observation_k}_ids"]) for row in final
+        )
+        quality[f"anchor_raw_correct_at_{observation_k}"] = anchor_hits
+        quality[f"anchor_raw_recall_at_{observation_k}"] = _ratio(
+            anchor_hits, expected_total
+        )
+        quality[f"anchor_raw_precision_at_{observation_k}"] = _ratio(
+            anchor_hits, anchor_selected
+        )
+        quality[f"anchor_positive_case_hit_rate_at_{observation_k}"] = _ratio(
+            sum(
+                int(row[f"anchor_expected_hits_at_{observation_k}"]) > 0
+                for row in positive
+            ),
+            len(positive),
+        )
+        quality[f"reference_raw_correct_at_{observation_k}"] = reference_hits
+        quality[f"reference_raw_recall_at_{observation_k}"] = _ratio(
+            reference_hits, expected_total
+        )
+        quality[f"reference_raw_precision_at_{observation_k}"] = _ratio(
+            reference_hits, reference_selected
+        )
+        quality[f"reference_raw_positive_case_hit_rate_at_{observation_k}"] = _ratio(
+            sum(
+                int(row[f"reference_expected_hits_at_{observation_k}"]) > 0
+                for row in positive
+            ),
+            len(positive),
+        )
+    operating_hits = sum(
+        int(row["reference_operating_expected_hits_at_5"]) for row in final
+    )
+    operating_selected = sum(len(row["reference_operating_ids"]) for row in final)
+    quality.update(
+        {
+            "reference_operating_correct_at_5": operating_hits,
+            "reference_operating_recall_at_5": _ratio(operating_hits, expected_total),
+            "reference_operating_precision_at_5": _ratio(
+                operating_hits, operating_selected
+            ),
+            "reference_operating_positive_case_hit_rate_at_5": _ratio(
+                sum(
+                    int(row["reference_operating_expected_hits_at_5"]) > 0
+                    for row in positive
+                ),
+                len(positive),
+            ),
+            "negative_cases": len(negative),
+            "reference_negative_case_false_positive_rate": _ratio(
+                sum(bool(row["reference_negative_false_positive"]) for row in negative),
+                len(negative),
+            ),
+        }
+    )
     for shortlist_size in shortlist_sizes:
         expected_hits = sum(int(row[f"expected_hits_at_{shortlist_size}"]) for row in final)
         reference_hits = sum(

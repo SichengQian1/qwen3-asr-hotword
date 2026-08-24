@@ -530,6 +530,10 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     assert quality["representative"]["100"]["raw_recall_at_5"] == 1.0
     assert quality["representative"]["100"]["raw_recall_at_7"] == 1.0
     assert quality["representative"]["100"]["raw_recall_at_10"] == 1.0
+    assert quality["representative"]["100"]["raw_precision_at_5"] is not None
+    assert quality["representative"]["100"]["raw_precision_at_7"] is not None
+    assert quality["representative"]["100"]["raw_precision_at_10"] is not None
+    assert quality["representative"]["100"]["operating_precision_at_5"] == 1.0
     assert quality["representative"]["101"]["raw_recall_at_5"] == 1.0
     query_rows = [
         json.loads(line)
@@ -570,6 +574,9 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     exact_quality = json.loads((exact_benchmark / "quality_summary.json").read_text())
     assert exact_quality["representative"]["100"]["exact_recall"] == 1.0
     assert exact_quality["representative"]["101"]["exact_recall_at_5"] == 1.0
+    assert exact_quality["representative"]["101"]["exact_precision_at_5"] == 1.0
+    assert exact_quality["representative"]["101"]["exact_precision_at_7"] == 1.0
+    assert exact_quality["representative"]["101"]["exact_precision_at_10"] == 1.0
     exact_performance = json.loads(
         (exact_benchmark / "performance_summary.json").read_text()
     )

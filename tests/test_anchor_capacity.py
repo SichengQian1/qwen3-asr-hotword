@@ -10,6 +10,7 @@ import qwen_hotword.hotwords.anchor_capacity as anchor_capacity_module
 from qwen_hotword.hotwords.anchor_capacity import benchmark_anchor_hotword_capacity
 from qwen_hotword.hotwords.anchor_index import AnchorIndexConfig, PhonemeAnchorIndex
 from qwen_hotword.hotwords.registry import HotwordEntry, write_hotword_table
+from qwen_hotword.hotwords.scoring import profile_decoded_hotwords
 
 
 def _entry(hotword_id: str, token_ids: tuple[int, ...]) -> HotwordEntry:
@@ -97,7 +98,7 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
         json.dumps({"status": "pass", "test_set_used": False}), encoding="utf-8"
     )
     write_hotword_table(level / "hotwords.jsonl", entries)
-    cases = [
+    cases: list[dict[str, object]] = [
         {
             "case_id": "positive",
             "sample_id": "sample-positive",
@@ -151,7 +152,7 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
 
     events: list[str] = []
     original_query = PhonemeAnchorIndex.query
-    original_reference = anchor_capacity_module.profile_decoded_hotwords
+    original_reference = profile_decoded_hotwords
 
     def tracked_query(self: PhonemeAnchorIndex, *args: Any, **kwargs: Any) -> Any:
         events.append("anchor")
@@ -181,6 +182,13 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     level_summary = summary["levels"]["representative"]["100"]
     assert level_summary["quality"]["expected_recall_at_8"] == 1.0
+    assert level_summary["quality"]["anchor_raw_recall_at_5"] == 1.0
+    assert level_summary["quality"]["anchor_raw_precision_at_5"] == 1.0
+    assert level_summary["quality"]["reference_raw_recall_at_7"] == 1.0
+    assert level_summary["quality"]["reference_raw_precision_at_10"] == pytest.approx(0.05)
+    assert level_summary["quality"]["reference_operating_recall_at_5"] == 0.0
+    assert level_summary["quality"]["reference_operating_precision_at_5"] is None
+    assert level_summary["quality"]["reference_negative_case_false_positive_rate"] == 0.0
     assert level_summary["quality"]["reference_top5_coverage_at_32"] == 0.1
     assert level_summary["quality"]["reference_top5_positive_coverage_at_32"] == 0.2
     assert level_summary["performance"]["latency_scope"] == (
@@ -193,6 +201,10 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     ]
     assert rows[0]["candidate_ids_at_8"] == rows[0]["candidate_ids_at_16"][:8]
     assert rows[0]["candidate_ids_at_16"] == rows[0]["candidate_ids_at_32"][:16]
+    assert rows[0]["anchor_top5_ids"] == rows[0]["candidate_ids_at_8"][:5]
+    assert len(rows[0]["reference_raw_top7_ids"]) == 7
+    assert len(rows[0]["reference_raw_top10_ids"]) == 10
+    assert rows[0]["reference_operating_ids"] == []
     assert (output / "diagnostic_cases.jsonl").is_file()
     diagnostic = json.loads((output / "diagnostic_summary.json").read_text(encoding="utf-8"))
     assert diagnostic["maximum_shortlist"] == 32

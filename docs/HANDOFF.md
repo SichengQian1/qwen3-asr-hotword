@@ -1,5 +1,94 @@
 # 工作交接记录
 
+## 0.42 2026-08-24 4k Anchor v3结果与Top-5/7/10阶段台账
+
+工作区`benchmark_anchor_offline_formal100_4000_v3`全部SHA256通过，严格两阶段计时
+已生效，`timing_protocol=all_anchor_queries_before_full_scan_reference`。质量第三次与
+v1/v2完全一致：Exact为132/172（76.74%），Anchor Top-64为164/172（95.35%），
+Top-128/256均为168/172（97.67%），Top-256覆盖完整CPU Raw Top-5的99.2%，无
+Anchor率为0，test未使用。
+
+v3 Anchor查询P50/mean/P90/P95/P99/max约为18.86/21.17/30.07/62.73/73.32/
+77.37 ms，6%查询超过50 ms。相对v1，P50下降约27.5%，P95下降约28.2%，deadline
+miss从11%降到6%；但P95仍高于50 ms目标12.73 ms，因此尚未验收通过。P90仅30.07
+ms且剩余6个慢查询不应在缺少证据时直接归因于posting数量；下一性能步骤先做显式
+GC/调度尾延迟诊断，再决定是否做会改变质量的高DF posting cap。
+
+为了逐步比较优化收益，容量评测现在统一记录：
+
+- Raw Top-5/7/10 correct、recall、precision及正例case hit；
+- Operating Top-5 correct、recall、precision及负例FPR；
+- Top-7/10始终仅观察，不改变Operating Top-5或Prompt注入数量；
+- `raw_precision_at_k`分母是所有final query实际返回的Raw候选数，包含负例；
+- `operating_precision_at_5`分母是实际通过0.86等门控的候选数。
+
+Anchor benchmark同时保存`anchor_top5/7/10_ids`和完整扫描参考的
+`reference_raw_top5/7/10_ids`、`reference_operating_ids`。新增
+`scripts/summarize_hotword_capacity_history.py`把全扫描、Exact AC和Anchor不同版本
+归一化为`optimization_history.json/tsv`。旧结果缺少的指标写`null`，不得从Top-5
+伪造Top-7/10。
+
+下一轮先用相同算法生成仅增加指标的v4新目录；它不改变Anchor、阈值、Top-5或计时
+协议：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+EXACT_4K_ROOT="$CAP_ROOT/benchmark_exact_ac_offline_formal100_4000_v1"
+ANCHOR_4K_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v4_metrics"
+HISTORY_ROOT="$CAP_ROOT/optimization_history_4000_v1"
+
+test ! -e "$ANCHOR_4K_ROOT"
+test ! -e "$HISTORY_ROOT"
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 4000 \
+  --shortlist-sizes 64,128,256 \
+  --ngram-sizes 2,3,4 \
+  --anchors-per-entry 24 \
+  --offset-tolerance 1 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --deadline-ms 50 \
+  --output-dir "$ANCHOR_4K_ROOT"
+
+(cd "$ANCHOR_4K_ROOT" && sha256sum -c sha256.txt)
+
+python scripts/summarize_hotword_capacity_history.py \
+  --stage exact_ac_v1="$EXACT_4K_ROOT" \
+  --stage anchor_v1="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v1" \
+  --stage anchor_v2="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v2" \
+  --stage anchor_v3="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v3" \
+  --stage anchor_v4_metrics="$ANCHOR_4K_ROOT" \
+  --profiles representative \
+  --sizes 4000 \
+  --output-dir "$HISTORY_ROOT"
+
+(cd "$HISTORY_ROOT" && sha256sum -c sha256.txt)
+cat "$ANCHOR_4K_ROOT/quality_summary.json"
+cat "$ANCHOR_4K_ROOT/performance_summary.json"
+cat "$HISTORY_ROOT/optimization_history.json"
+```
+
+正式v4仍应避开Feature Cache或其他CPU高负载。v4的候选质量必须与v3一致；它的时延
+只是同算法复测，不得被描述为新优化。拿到完整Top-5/7/10台账后，再进入显式
+`normal`与`defer_during_anchor_pass` GC策略的尾延迟消融。
+
+本地验证：全仓Ruff通过；容量定向pytest 15项通过；全量pytest 198项通过；本轮6个
+source/script文件严格Mypy为0错误；CLI help与`git diff --check`通过。全仓
+`src scripts`严格Mypy仍有9个既有文件的15项Torch/可选RapidFuzz类型错误，本轮文件
+不在其中；包含tests的全仓严格Mypy还会暴露大量既有测试fixture类型问题，不纳入本轮
+无关修复。
+
 ## 0.41 2026-08-24 4k Anchor v2诊断与两阶段计时v3
 
 工作区`benchmark_anchor_offline_formal100_4000_v2`全部SHA256通过，质量与v1完全

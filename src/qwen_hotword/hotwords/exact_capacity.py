@@ -270,11 +270,28 @@ def _summarize_level(
             )
             for k in OBSERVATION_KS
         },
+        **{
+            f"exact_precision_at_{k}": _ratio(
+                sum(int(row[f"exact_expected_hits_at_{k}"]) for row in final),
+                sum(len(row[f"exact_top{k}_ids"]) for row in final),
+            )
+            for k in OBSERVATION_KS
+        },
         "positive_cases": len(positive),
         "positive_case_hit_rate": _ratio(
             sum(int(row["exact_expected_hits"]) > 0 for row in positive),
             len(positive),
         ),
+        **{
+            f"positive_case_hit_rate_at_{k}": _ratio(
+                sum(
+                    int(row[f"exact_expected_hits_at_{k}"]) > 0
+                    for row in positive
+                ),
+                len(positive),
+            )
+            for k in OBSERVATION_KS
+        },
         "negative_cases": len(negative),
         "negative_case_false_positive_rate": _ratio(
             sum(bool(row["negative_false_positive"]) for row in negative),

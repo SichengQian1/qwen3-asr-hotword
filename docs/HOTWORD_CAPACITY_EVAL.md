@@ -545,3 +545,30 @@ v3改为：
 该变更不改变任何候选结果，只修复benchmark测量协议。输出显式记录
 `timing_protocol=all_anchor_queries_before_full_scan_reference`。v3仍需在CPU空闲时
 运行；若P95仍超过50 ms，才允许进入会改变召回的高DF posting cap消融。
+
+## 13. v3结果与统一Top-5/7/10优化历史
+
+v3严格隔离慢参考后，Anchor P50/P90/P95/P99为18.86/30.07/62.73/73.32 ms，
+6%查询超过50 ms。候选质量继续与v1/v2一致：Top-64/128/256 expected recall为
+95.35%/97.67%/97.67%，Top-256覆盖完整CPU Raw Top-5的99.2%。因此当前核心查询
+大多数已进入预算，但P95仍未通过；下一性能消融先定位Python GC/调度尾延迟，不能
+直接用posting cap牺牲质量。
+
+后续所有容量阶段统一输出四组指标：
+
+```text
+候选器 Raw Top-5/7/10：correct / recall / precision / positive case hit
+完整扫描参考 Raw Top-5/7/10：correct / recall / precision / positive case hit
+完整扫描 Operating Top-5：correct / recall / precision / negative FPR
+性能：P50 / P90 / P95 / P99 / max及deadline miss
+```
+
+Raw precision分母是所有final query实际返回的Top-K候选数，包含负例；Operating
+precision分母是实际通过threshold、edit ratio、posterior和margin门控的候选数。
+Raw Top-7/10只用于判断目标是否轻度掉出Top-5，不能扩大Prompt注入。
+
+`scripts/summarize_hotword_capacity_history.py`接受多个`LABEL=OUTPUT_DIR`，读取各阶段
+`query_results.jsonl`并生成统一的`optimization_history.json/tsv`。它兼容旧全扫描、
+Exact AC及Anchor输出；旧Anchor只有参考Top-5，因此对应参考Top-7/10和Operating列
+保持`null`。新Anchor运行额外保存完整字段后即可填满这些列。工作区命令和固定目录
+见`docs/HANDOFF.md` 0.42。

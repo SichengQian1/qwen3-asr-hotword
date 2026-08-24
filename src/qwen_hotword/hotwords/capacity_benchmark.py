@@ -32,6 +32,7 @@ from qwen_hotword.phonemes.coverage import load_phoneme_vocab
 from qwen_hotword.training.edit_distance import sequence_edit_distance_backend
 
 RAW_RANK_OBSERVATION_KS = (1, 3, 5, 7, 10, 20)
+RAW_PRECISION_OBSERVATION_KS = (5, 7, 10)
 
 
 def benchmark_hotword_capacity(
@@ -444,6 +445,11 @@ def _summarize_level(
         k: sum(sum(float(rank) <= k for rank in row["expected_ranks"].values()) for row in final)
         for k in RAW_RANK_OBSERVATION_KS
     }
+    raw_selected = {
+        k: sum(len(row[f"raw_top{k}_ids"]) for row in final)
+        for k in RAW_PRECISION_OBSERVATION_KS
+    }
+    operating_selected = sum(len(row["operating_ids"]) for row in final)
     quality = {
         "expected_hotwords": expected_total,
         **{f"raw_correct_at_{k}": rank_hits[k] for k in RAW_RANK_OBSERVATION_KS},
@@ -451,8 +457,13 @@ def _summarize_level(
             f"raw_recall_at_{k}": _ratio(rank_hits[k], expected_total)
             for k in RAW_RANK_OBSERVATION_KS
         },
+        **{
+            f"raw_precision_at_{k}": _ratio(rank_hits[k], raw_selected[k])
+            for k in RAW_PRECISION_OBSERVATION_KS
+        },
         "operating_correct_at_5": operating_hits,
         "operating_recall_at_5": _ratio(operating_hits, expected_total),
+        "operating_precision_at_5": _ratio(operating_hits, operating_selected),
         "positive_cases": len(positive),
         "raw_positive_case_hit_rate": _ratio(
             sum(int(row["raw_expected_hits_at_5"]) > 0 for row in positive),
