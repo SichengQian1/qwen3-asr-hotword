@@ -153,6 +153,10 @@ def benchmark_anchor_hotword_capacity(
                 anchor_seconds = time.perf_counter() - anchor_started
                 candidate_ids = tuple(candidate.hotword_id for candidate in result.candidates)
                 expected = set(case.expected_hotword_ids)
+                candidate_ranks = {
+                    hotword_id: rank
+                    for rank, hotword_id in enumerate(candidate_ids, start=1)
+                }
                 row: dict[str, object] = {
                     "schema_version": 1,
                     "profile": profile,
@@ -166,7 +170,17 @@ def benchmark_anchor_hotword_capacity(
                     "is_tail_flush": bool(replay["is_tail_flush"]),
                     "active_hotwords": len(active_entries),
                     "expected_hotword_ids": sorted(expected),
+                    "expected_candidate_ranks": {
+                        hotword_id: candidate_ranks[hotword_id]
+                        for hotword_id in sorted(expected)
+                        if hotword_id in candidate_ranks
+                    },
                     "reference_raw_top5_ids": list(reference_top5),
+                    "reference_top5_candidate_ranks": {
+                        hotword_id: candidate_ranks[hotword_id]
+                        for hotword_id in reference_top5
+                        if hotword_id in candidate_ranks
+                    },
                     "reference_expected_hits_at_5": len(expected & set(reference_top5)),
                     "exact_hotword_ids": list(result.exact_hotword_ids),
                     "exact_expected_hits": len(expected & set(result.exact_hotword_ids)),
@@ -231,7 +245,14 @@ def benchmark_anchor_hotword_capacity(
         "latency_scope": "anchor_index_query_only_excludes_full_scan_reference",
         "test_set_used": False,
     }
+    diagnostic_rows, diagnostic_summary = _build_diagnostics(
+        all_query_rows,
+        maximum_shortlist=max(resolved_shortlists),
+        deadline_seconds=deadline_seconds,
+    )
     _write_jsonl(destination / "query_results.jsonl", all_query_rows)
+    _write_jsonl(destination / "diagnostic_cases.jsonl", diagnostic_rows)
+    _write_json(destination / "diagnostic_summary.json", diagnostic_summary)
     _write_json(destination / "quality_summary.json", quality_summary)
     _write_json(destination / "performance_summary.json", performance_summary)
     _write_json(
@@ -272,6 +293,80 @@ def benchmark_anchor_hotword_capacity(
     _write_json(destination / "summary.json", report)
     _write_sha256_manifest(destination)
     return report
+
+
+def _build_diagnostics(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    maximum_shortlist: int,
+    deadline_seconds: float,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    diagnostics: list[dict[str, object]] = []
+    final = [row for row in rows if bool(row["is_final"])]
+    for row in final:
+        candidate_ids = set(row[f"candidate_ids_at_{maximum_shortlist}"])
+        for hotword_id in row["expected_hotword_ids"]:
+            if hotword_id not in candidate_ids:
+                diagnostics.append(
+                    _diagnostic_row(
+                        row,
+                        reason=f"expected_not_in_anchor_top_{maximum_shortlist}",
+                        hotword_id=str(hotword_id),
+                    )
+                )
+        for hotword_id in row["reference_raw_top5_ids"]:
+            if hotword_id not in candidate_ids:
+                diagnostics.append(
+                    _diagnostic_row(
+                        row,
+                        reason=f"reference_top5_not_in_anchor_top_{maximum_shortlist}",
+                        hotword_id=str(hotword_id),
+                    )
+                )
+    for row in rows:
+        if float(row["anchor_retrieval_seconds"]) > deadline_seconds:
+            diagnostics.append(
+                _diagnostic_row(row, reason="anchor_retrieval_over_deadline", hotword_id=None)
+            )
+    reason_counts: dict[str, int] = {}
+    for row in diagnostics:
+        reason = str(row["reason"])
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return diagnostics, {
+        "schema_version": 1,
+        "status": "pass",
+        "maximum_shortlist": maximum_shortlist,
+        "deadline_seconds": deadline_seconds,
+        "diagnostic_rows": len(diagnostics),
+        "reason_counts": dict(sorted(reason_counts.items())),
+        "test_set_used": False,
+    }
+
+
+def _diagnostic_row(
+    row: Mapping[str, Any], *, reason: str, hotword_id: str | None
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "reason": reason,
+        "profile": row["profile"],
+        "size": row["size"],
+        "case_id": row["case_id"],
+        "sample_id": row["sample_id"],
+        "primary_group": row["primary_group"],
+        "chunk_id": row["chunk_id"],
+        "cumulative_audio_sec": row["cumulative_audio_sec"],
+        "is_final": row["is_final"],
+        "hotword_id": hotword_id,
+        "anchor_retrieval_seconds": row["anchor_retrieval_seconds"],
+        "postings_visited": row["postings_visited"],
+        "candidate_count": row["candidate_count"],
+        "exact_hotword_ids": row["exact_hotword_ids"],
+        "expected_hotword_ids": row["expected_hotword_ids"],
+        "expected_candidate_ranks": row["expected_candidate_ranks"],
+        "reference_raw_top5_ids": row["reference_raw_top5_ids"],
+        "reference_top5_candidate_ranks": row["reference_top5_candidate_ranks"],
+    }
 
 
 def _profile_index(

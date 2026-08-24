@@ -1,5 +1,69 @@
 # 工作交接记录
 
+## 0.40 2026-08-24 4k Anchor v1结果与等价加速v2
+
+工作区`benchmark_anchor_offline_formal100_4000_v1`全部SHA256通过，test未使用。
+每个case仍严格是4,000个active热词；索引文件包含4,402个跨case唯一entry，查询时
+按case active ID过滤。v1质量结果：
+
+- AC exact为132/172，Recall 76.74%；
+- Anchor Top-64为164/172，Recall 95.35%，正例case hit 97.50%；
+- Top-128与Top-256均为168/172，Recall 97.67%，正例case hit 98.75%；
+- 完整CPU Raw Top-5覆盖率在Top-64/128/256分别为91.6%/96.6%/99.2%；
+- 100个查询均有Anchor候选，Top-64/128/256均打满。
+
+质量方向成立，但v1未通过50 ms：Anchor查询P50/P90/P95/P99/max分别约为
+26.02/79.23/87.36/94.83/95.76 ms，11%查询超过50 ms。全量CPU参考扫描P95约
+6.49秒，但它只用于质量标签且没有混入Anchor时延。索引构建1.87秒，RSS增量约
+126.4 MB；慢查询P95访问约9,317个posting。Top-256没有比Top-128额外找回4个
+expected miss，因此不能靠继续扩大shortlist解决。
+
+v1结果保留不覆盖。代码现做了保持候选排序语义的等价加速：offset聚合从“每个center
+扫描全部offset”改为只查±1固定窗口，Top-256从全候选排序改为有界`heapq.nsmallest`，
+并缓存active ID集合。新增`diagnostic_summary.json`与`diagnostic_cases.jsonl`，直接
+列出Top-256的4个expected miss、Raw Top-5未覆盖项和超过50 ms的查询，不需要上传
+完整大文件。本地4k合成探针P95由约2.20降至1.94 ms；仍只作实现检查。
+
+正式v2必须使用新目录，且应等Feature Cache结束、CPU/存储负载稳定后计时：
+
+```bash
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+ANCHOR_4K_ROOT="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v2"
+
+test ! -e "$ANCHOR_4K_ROOT"
+
+python scripts/benchmark_anchor_hotword_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --profiles representative \
+  --sizes 4000 \
+  --shortlist-sizes 64,128,256 \
+  --ngram-sizes 2,3,4 \
+  --anchors-per-entry 24 \
+  --offset-tolerance 1 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --deadline-ms 50 \
+  --output-dir "$ANCHOR_4K_ROOT"
+
+(cd "$ANCHOR_4K_ROOT" && sha256sum -c sha256.txt)
+cat "$ANCHOR_4K_ROOT/quality_summary.json"
+cat "$ANCHOR_4K_ROOT/performance_summary.json"
+cat "$ANCHOR_4K_ROOT/diagnostic_summary.json"
+cat "$ANCHOR_4K_ROOT/diagnostic_cases.jsonl"
+```
+
+v2首先要求候选质量与v1一致；若隔离负载后P95仍超过50 ms，再进入显式
+high-document-frequency posting cap/Anchor稀有度消融，不能静默丢弃posting或改
+0.86、Top-5及Prompt。
+
 ## 0.39 2026-08-24 三语Feature Cache运行中与4k Anchor候选器
 
 工作区已按0.38固定命令启动三语Encoder Feature Cache：train输入为

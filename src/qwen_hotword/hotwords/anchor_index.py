@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
@@ -100,6 +101,7 @@ class PhonemeAnchorIndex:
                 raise ValueError(f"duplicate exact token sequence: {entry.hotword_id}")
             self._entry_index_by_id[entry.hotword_id] = entry_index
             seen_sequences.add(entry.token_ids)
+        self._all_hotword_ids = frozenset(self._entry_index_by_id)
 
         document_frequency: Counter[tuple[int, ...]] = Counter()
         entry_occurrences: list[tuple[tuple[tuple[int, ...], int], ...]] = []
@@ -187,8 +189,7 @@ class PhonemeAnchorIndex:
             raise ValueError("maximum_candidates must be positive")
         if confidences is not None and len(confidences) != len(token_ids):
             raise ValueError("confidence and token sequences must have equal length")
-        active_indexes = self._active_indexes(active_hotword_ids)
-        active_ids = {self._entries[index].hotword_id for index in active_indexes}
+        active_indexes, active_ids = self._active_indexes(active_hotword_ids)
 
         exact_matches = rank_unique_exact_matches(
             self._exact_matcher.find(
@@ -218,9 +219,12 @@ class PhonemeAnchorIndex:
             best: tuple[float, int, int, int] | None = None
             for center in sorted(offset_values):
                 window = [
-                    value
-                    for offset, value in offset_values.items()
-                    if abs(offset - center) <= self.config.offset_tolerance
+                    offset_values[offset]
+                    for offset in range(
+                        center - self.config.offset_tolerance,
+                        center + self.config.offset_tolerance + 1,
+                    )
+                    if offset in offset_values
                 ]
                 alignment = (
                     sum(float(value[0]) for value in window),
@@ -253,7 +257,7 @@ class PhonemeAnchorIndex:
                 )
             )
 
-        anchored.sort(key=self._candidate_key)
+        anchored_ids = tuple(candidate.hotword_id for candidate in anchored)
         anchored_by_id = {candidate.hotword_id: candidate for candidate in anchored}
         ordered: list[AnchorCandidate] = []
         for hotword_id in exact_ids:
@@ -275,27 +279,35 @@ class PhonemeAnchorIndex:
                     phone_count=len(entry.token_ids),
                 )
             ordered.append(exact_candidate)
+        remaining_slots = max(0, maximum_candidates - len(ordered))
         ordered.extend(
-            sorted(anchored_by_id.values(), key=self._candidate_key)
+            heapq.nsmallest(
+                remaining_slots,
+                anchored_by_id.values(),
+                key=self._candidate_key,
+            )
         )
         return AnchorQueryResult(
             candidates=tuple(ordered[:maximum_candidates]),
             exact_hotword_ids=exact_ids,
-            anchored_hotword_ids=tuple(candidate.hotword_id for candidate in anchored),
-            total_candidate_count=len(ordered),
+            anchored_hotword_ids=anchored_ids,
+            total_candidate_count=len(anchored_by_id) + len(exact_ids),
             postings_visited=postings_visited,
         )
 
-    def _active_indexes(self, active_hotword_ids: Iterable[str] | None) -> set[int]:
+    def _active_indexes(
+        self, active_hotword_ids: Iterable[str] | None
+    ) -> tuple[set[int], frozenset[str]]:
         if active_hotword_ids is None:
-            return set(range(len(self._entries)))
+            return set(range(len(self._entries))), self._all_hotword_ids
         active = tuple(active_hotword_ids)
-        if len(set(active)) != len(active):
+        active_ids = frozenset(active)
+        if len(active_ids) != len(active):
             raise ValueError("active hotword IDs contain duplicates")
-        unknown = sorted(set(active) - set(self._entry_index_by_id))
+        unknown = sorted(active_ids - self._all_hotword_ids)
         if unknown:
             raise ValueError(f"active hotword IDs are absent from the index: {unknown[:5]}")
-        return {self._entry_index_by_id[hotword_id] for hotword_id in active}
+        return {self._entry_index_by_id[hotword_id] for hotword_id in active}, active_ids
 
     def _entry_ngrams(
         self, token_ids: Sequence[int]

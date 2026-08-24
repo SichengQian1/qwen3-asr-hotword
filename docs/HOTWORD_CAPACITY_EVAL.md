@@ -500,3 +500,25 @@ cat "$ANCHOR_4K_ROOT/summary.json"
 正式计时应避开Feature Cache等CPU/存储高负载任务。收到4k结果后先决定Top-256是否
 达到候选召回要求；Top-128只作速度消融。下一步才在候选集上复用既有近似评分器并
 比较full-current与2/4/6秒lookback，不能在本阶段调整0.86、Top-5或Prompt。
+
+## 11. Anchor v1基线与等价加速复测
+
+4k v1正式结果显示候选质量已接近可用：Top-64/128/256 expected recall分别为
+95.35%/97.67%/97.67%，Top-256对完整CPU Raw Top-5覆盖率为99.2%，且无Anchor率
+为0。但P50/P95/P99为26.02/87.36/94.83 ms，11%查询超出50 ms，因此v1不能通过
+性能验收。Top-128到256没有新增expected hit，4个miss需要逐例诊断。
+
+v2保持完全相同的Anchor、AC并集和排序键，只做等价执行优化：固定±1 offset直接
+查询相邻bucket，不再对每个center扫描全部offset；仅用有界heap选择最终Top-256，
+不再全排所有Anchor候选；active ID集合只构建一次。输出新增：
+
+```text
+diagnostic_summary.json
+diagnostic_cases.jsonl
+```
+
+其中原因包括`expected_not_in_anchor_top_256`、
+`reference_top5_not_in_anchor_top_256`和`anchor_retrieval_over_deadline`，并保存
+case、chunk、累计时长、posting访问量和候选rank。v1目录保持只读，v2输出使用
+`benchmark_anchor_offline_formal100_4000_v2`。正式计时应等待Feature Cache结束并
+保持CPU/存储空闲；否则只能比较质量，不能据此验收50 ms。

@@ -171,4 +171,8 @@ def test_anchor_capacity_benchmark_reports_reference_coverage_and_latency_scope(
     ]
     assert rows[0]["candidate_ids_at_8"] == rows[0]["candidate_ids_at_16"][:8]
     assert rows[0]["candidate_ids_at_16"] == rows[0]["candidate_ids_at_32"][:16]
+    assert (output / "diagnostic_cases.jsonl").is_file()
+    diagnostic = json.loads((output / "diagnostic_summary.json").read_text(encoding="utf-8"))
+    assert diagnostic["maximum_shortlist"] == 32
+    assert diagnostic["test_set_used"] is False
     assert (output / "sha256.txt").is_file()
