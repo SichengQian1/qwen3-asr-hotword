@@ -1,5 +1,70 @@
 # 工作交接记录
 
+## 0.38 2026-08-24 三语4小时validation通过，待单H200 Feature Cache
+
+工作区的`outputs/en_es_pt_balanced_validation_4h_v1`已通过全部SHA256
+校验。合计8,101条、12.002467小时：
+
+- 英语：2,808条、4.000688小时；
+- 西语：2,631条、4.000866小时；
+- 葡语：2,662条、4.000913小时。
+
+三语时长差约0.81秒；与310,257条平衡train的ID/音频重叠均为0，
+validation内部重复为0。每条记录具有`experiment=full-ctc-v1`、
+`split=validation`和独立的validation dataset version。test未打开、未使用。
+
+四个validation Manifest SHA256为：
+
+```text
+combined: d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499
+en:       1b1bbd87851010cd2dc821d186310a3c10b956ebfd3e6470b54f43942a58d27f
+es:       c00b492472bcb1c0cce541fa2893b40be476c580e75f577c68c4fc2e34fa1273
+pt:       06a467b418050ab100f9d8db1620c64bce8eef071397ca34f05fd7880d9a4dbf
+```
+
+下一阶段固定使用合并train和合并validation构建新的冻结Encoder Feature
+Cache，不读取任何test。预计train/validation分别为606/16个512-sample
+shard，按既有bfloat16 ln_post格式约需31 GiB最终存储；启动前建议确保
+输出文件系统至少有45至50 GiB可用空间。运行使用单张H200，选中的
+物理GPU通过`CUDA_VISIBLE_DEVICES`暴露为逻辑`cuda:0`。
+
+工作区命令：
+
+```bash
+GPU_ID=4
+BALANCED_TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+
+test -f configs/workzone.local.yaml
+test ! -e "$FEATURE_CACHE_ROOT"
+nvidia-smi -i "$GPU_ID"
+df -h outputs
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/doctor.py \
+  --config configs/workzone.local.yaml \
+  --output outputs/en_es_pt_balanced_feature_cache_environment_v1.json
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/cache_full_training_features.py \
+  --config configs/workzone.local.yaml \
+  --train-manifest "$BALANCED_TRAIN_ROOT/full_ctc_train.jsonl" \
+  --validation-manifest "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir "$FEATURE_CACHE_ROOT" \
+  --encoder-batch-size 8 \
+  --samples-per-shard 512
+```
+
+若中断，保留目录并原样重跑最后一条命令；不再执行
+`test ! -e "$FEATURE_CACHE_ROOT"`。构建器会逐分片校验已完成文件并续跑，损坏分片
+会拒绝复用，不得跳过SHA256校验。完成后返回：
+
+```bash
+cat "$FEATURE_CACHE_ROOT/feature_cache_report.json"
+cat "$FEATURE_CACHE_ROOT/train/cache_summary.json"
+cat "$FEATURE_CACHE_ROOT/validation/cache_summary.json"
+```
+
 ## 0.37 2026-08-24 三语150小时v2通过与4小时平衡validation入口
 
 工作区的`outputs/en_es_pt_balanced_150h_temporal2x_v2`已通过全部SHA256

@@ -708,3 +708,8 @@ v2派生器在写出选中记录时统一补齐`experiment`、新
 路径、SHA、条数和小时，不打开内容。选中记录必须与v2 train的ID和音频路径
 完全无重叠，并统一写入`experiment=full-ctc-v1`、`split=validation`和
 独立的validation dataset version。
+
+工作区实际产物为8,101条、12.002467小时，三语分别为2,808/
+2,631/2,662条和4.000688/4.000866/4.000913小时。train重叠、内部重复
+均为0，test未读取。该合并validation与310,257条合并train共同作为新的
+冻结Encoder Feature Cache输入；三语独立test继续封存。
