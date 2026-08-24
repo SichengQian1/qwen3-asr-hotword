@@ -637,3 +637,14 @@ train；完整单语种池另行保留，平衡集作为新的可复现派生Man
 `source_split`；SLR61按完整speaker确定性分配；最终再次验证跨split speaker、
 audio和ID overlap均为0。产物绑定Temporal 2×，完整西语池保留，后续另行从train
 确定性选择150小时参与英西葡`1:1:1`派生集。
+
+## 19. 美式英语speaker候选键审计
+
+英语Temporal 2×可从51条review中安全恢复47条、0.037675小时；4条其他标签问题
+保持隔离。原ready加推荐恢复约549.622421小时。
+
+在切分前，全量验证Swift WAV basename的speaker候选键：stem最后一个下划线段作为
+utterance ID，其余前缀作为speaker ID。审计必须与完整Manifest逐音频一一关联，
+报告前缀字段分布、speaker规模、每speaker时长、跨shard情况、解析失败和重复
+speaker+utterance。只有全部关联与唯一性检查通过后才按speaker整体切分；不能仅凭
+三个样例文件名宣称speaker-disjoint。

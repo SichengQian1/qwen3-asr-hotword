@@ -1,5 +1,60 @@
 # 工作交接记录
 
+## 0.33 2026-08-24 英语Temporal 2×审计与speaker库存入口
+
+上一阶段的西语合并已在工作区完成且全部SHA256校验通过：最终131,064条、
+190.375791小时；train/validation/test分别为125,379/2,871/2,814条和
+181.868358/4.368367/4.139065小时。Temporal 2×释放7,740条；跨split的speaker、
+audio和ID overlap均为0，Common Voice显式split保留125,329条，SLR61按speaker
+分配为train/validation/test 42/1/1名。test已封存且未用于选择。
+
+美式英语完整Manifest的Temporal 2×只读审计和SHA256校验已在工作区通过。原ready
+为389,687条、549.584746小时；唯一问题为`ctc_length_infeasible`的47条、
+0.037675小时均可在2×且有效ratio不超过0.90时释放。另4条、0.007907小时由其他
+标签问题阻塞；没有高压力或2×后仍不可行记录。英语完整候选约549.622421小时，
+容量足以支持最终150小时train份额。
+
+英语不能在确认speaker边界前直接按文件哈希切分。现有样例WAV basename如
+`US_101_F_8297_1051478.wav`明显含重复说话人前缀，但字段语义尚未被全量证明。
+新增只读库存工具：
+
+- `src/qwen_hotword/training/english_speaker_inventory.py`
+- `scripts/audit_swift_english_speakers.py`
+- `tests/test_english_speaker_inventory.py`
+
+工具将WAV stem最后一个下划线段视为utterance ID，前缀作为候选speaker ID；全量
+关联`source.tsv`与ready/review Manifest，统计前缀字段数、speaker数量、每speaker
+clip/小时分布、跨shard speaker、数字utterance后缀、解析失败和重复speaker+utterance。
+它不读取音频、不修改源TSV或Manifest。输出`speaker_inventory.tsv`包含
+`audio/speaker_id/source_split=unsplit/duration_seconds`，只有summary status pass、
+解析/关联/重复均为0且字段分布合理后，才可作为英语speaker-disjoint切分输入。
+
+本地验证：新增文件Ruff和严格Mypy通过，定向pytest通过；全量pytest为
+166 passed、22 skipped，`git diff --check`通过。仓库全量Ruff/Mypy仍只包含此前
+无关文件中的既有问题，本次未扩大范围处理。
+
+工作区拉取后运行：
+
+```bash
+EN_SOURCE=outputs/en_external_train_sources_v1/swift_us_english/source.tsv
+EN_MANIFEST=outputs/en_us_swift_full_manifest_v1
+EN_SPEAKER_AUDIT=outputs/en_us_swift_speaker_inventory_v1
+
+test ! -e "$EN_SPEAKER_AUDIT"
+
+python scripts/audit_swift_english_speakers.py \
+  --source-tsv "$EN_SOURCE" \
+  --manifest-dir "$EN_MANIFEST" \
+  --output-dir "$EN_SPEAKER_AUDIT"
+
+(cd "$EN_SPEAKER_AUDIT" && sha256sum -c sha256.txt)
+cat "$EN_SPEAKER_AUDIT/summary.json"
+sed -n '1,41p' "$EN_SPEAKER_AUDIT/parse_failures.tsv"
+```
+
+先返回summary和parse failures。通过后再建立英语speaker保留式Temporal 2×池；
+当前不裁剪英语、西语或葡语完整池，也不提前生成三语训练Manifest。
+
 ## 0.32 2026-08-24 西语辅助Manifest与split保留式Temporal 2×合并入口
 
 明确拉美Common Voice辅助池完整Manifest已在工作区完成：118,177条、
