@@ -122,3 +122,52 @@ def test_capacity_history_rejects_test_set_stage(tmp_path: Path) -> None:
         build_hotword_capacity_history(
             stages=(("bad", stage),), output_dir=tmp_path / "output"
         )
+
+
+def test_capacity_history_keeps_rerank_windows_and_shortlists_separate(
+    tmp_path: Path,
+) -> None:
+    stage = tmp_path / "rerank"
+    rows: list[dict[str, object]] = []
+    for window, shortlist, latency in (
+        ("full_current", 64, 0.01),
+        ("recent_2s", 64, 0.02),
+        ("full_current", 128, 0.03),
+    ):
+        rows.append(
+            {
+                **_base_row(f"{window}-{shortlist}", ["right"]),
+                "window": window,
+                "shortlist_size": shortlist,
+                "candidate_ids": ["right", "wrong"],
+                "raw_top5_ids": ["right", "wrong"],
+                "raw_top7_ids": ["right", "wrong"],
+                "raw_top10_ids": ["right", "wrong"],
+                "operating_ids": ["right"],
+                "retrieval_seconds": latency,
+            }
+        )
+    _write_stage(
+        stage,
+        mode="anchor_shortlist_then_existing_approximate_phoneme_scorer",
+        rows=rows,
+        gc_policy="defer_during_retrieval_pass",
+    )
+
+    report = build_hotword_capacity_history(
+        stages=(("rerank", stage),),
+        output_dir=tmp_path / "history",
+        sizes=(4000,),
+    )
+
+    history = report["history"]
+    assert isinstance(history, list)
+    assert len(history) == 3
+    variants = {(row["window"], row["shortlist_size"]) for row in history}
+    assert variants == {
+        ("full_current", 64),
+        ("recent_2s", 64),
+        ("full_current", 128),
+    }
+    assert {row["ranking"] for row in history} == {"anchor_rerank"}
+    assert all(row["operating_recall_at_5"] == 1.0 for row in history)

@@ -10,8 +10,12 @@ import pytest
 import qwen_hotword.hotwords.anchor_capacity as anchor_capacity_module
 from qwen_hotword.hotwords.anchor_capacity import benchmark_anchor_hotword_capacity
 from qwen_hotword.hotwords.anchor_index import AnchorIndexConfig, PhonemeAnchorIndex
+from qwen_hotword.hotwords.anchor_rerank import (
+    benchmark_anchor_rerank_capacity,
+    crop_decoded_to_lookback,
+)
 from qwen_hotword.hotwords.registry import HotwordEntry, write_hotword_table
-from qwen_hotword.hotwords.scoring import profile_decoded_hotwords
+from qwen_hotword.hotwords.scoring import DecodedPhoneme, profile_decoded_hotwords
 
 
 def _entry(hotword_id: str, token_ids: tuple[int, ...]) -> HotwordEntry:
@@ -74,6 +78,132 @@ def test_anchor_index_is_active_only_nested_and_deterministic() -> None:
     assert "inactive" not in first_ids
     assert second_ids == first_ids[:2]
     assert first.exact_hotword_ids == ("exact",)
+
+
+def test_crop_decoded_to_lookback_uses_ctc_steps_and_keeps_boundary_overlap() -> None:
+    decoded = (
+        DecodedPhoneme(token_id=1, confidence=0.9, start_step=1, end_step=3),
+        DecodedPhoneme(token_id=2, confidence=0.8, start_step=5, end_step=7),
+        DecodedPhoneme(token_id=3, confidence=0.7, start_step=8, end_step=10),
+    )
+
+    cropped, effective, cutoff = crop_decoded_to_lookback(
+        decoded,
+        effective_time_steps=10,
+        cumulative_audio_sec=10.0,
+        lookback_sec=4.0,
+    )
+
+    assert cutoff == 6
+    assert effective == 4
+    assert [(item.token_id, item.start_step, item.end_step) for item in cropped] == [
+        (2, 0, 1),
+        (3, 2, 4),
+    ]
+
+
+def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
+    tmp_path: Path,
+) -> None:
+    tokens = ["<blank>"] + [f"p{index}" for index in range(1, 41)]
+    vocab = tmp_path / "vocab.json"
+    vocab.write_text(json.dumps({"tokens": tokens}), encoding="utf-8")
+    entries = [_entry("target", (1, 2, 3, 4))]
+    entries.extend(
+        _entry(
+            f"filler-{index:03d}",
+            (5, 6, 7, 8 + index // 10, 20 + index % 10),
+        )
+        for index in range(99)
+    )
+    active_ids = [entry.hotword_id for entry in entries]
+    assets = tmp_path / "assets"
+    level = assets / "representative" / "size_100"
+    level.mkdir(parents=True)
+    (assets / "asset_summary.json").write_text(
+        json.dumps({"status": "pass", "test_set_used": False}), encoding="utf-8"
+    )
+    write_hotword_table(level / "hotwords.jsonl", entries)
+    cases = [
+        {
+            "case_id": "positive",
+            "sample_id": "sample-positive",
+            "reference_text": "target",
+            "normalized_reference_text": "target",
+            "language": "pt-BR",
+            "primary_group": "single_hotword",
+            "expected_hotword_ids": ["target"],
+            "active_hotword_ids": active_ids,
+        },
+        {
+            "case_id": "negative",
+            "sample_id": "sample-negative",
+            "reference_text": "negative",
+            "normalized_reference_text": "negative",
+            "language": "pt-BR",
+            "primary_group": "negative",
+            "expected_hotword_ids": [],
+            "active_hotword_ids": active_ids,
+        },
+    ]
+    _write_jsonl(level / "cases.jsonl", cases)
+    replay = tmp_path / "replay.jsonl"
+    replay_rows = []
+    for case_id, token_ids in (
+        ("positive", (1, 2, 3, 4, 31, 32, 33, 34)),
+        ("negative", (30, 31, 32, 33, 34, 35, 36, 37)),
+    ):
+        replay_rows.append(
+            {
+                "case_id": case_id,
+                "sample_id": f"sample-{case_id}",
+                "expected_hotword_ids": ["target"] if case_id == "positive" else [],
+                "chunk_id": 1,
+                "cumulative_audio_sec": 4.0,
+                "is_final": True,
+                "is_tail_flush": False,
+                "effective_time_steps": len(token_ids),
+                "decoded": [
+                    {
+                        "token_id": token_id,
+                        "confidence": 0.99,
+                        "start_step": position,
+                        "end_step": position + 1,
+                    }
+                    for position, token_id in enumerate(token_ids)
+                ],
+            }
+        )
+    _write_jsonl(replay, replay_rows)
+
+    output = tmp_path / "rerank"
+    report = benchmark_anchor_rerank_capacity(
+        assets_root=assets,
+        replay_path=replay,
+        vocab_path=vocab,
+        output_dir=output,
+        sizes=(100,),
+        shortlist_sizes=(8,),
+        lookback_seconds=(None, 2.0),
+        warmup_queries=0,
+        print_progress=False,
+    )
+
+    assert report["status"] == "pass"
+    quality = json.loads((output / "quality_summary.json").read_text(encoding="utf-8"))
+    full = quality["representative"]["100"]["full_current"]["8"]
+    recent = quality["representative"]["100"]["recent_2s"]["8"]
+    assert full["raw_recall_at_5"] == 1.0
+    assert recent["raw_recall_at_5"] == 0.0
+    assert "raw_precision_at_7" in full
+    assert "raw_precision_at_10" in full
+    performance = json.loads(
+        (output / "performance_summary.json").read_text(encoding="utf-8")
+    )["representative"]["100"]["full_current"]["8"]
+    assert performance["retrieval_seconds"]["count"] == 2
+    assert performance["anchor_seconds"]["count"] == 2
+    assert performance["rerank_seconds"]["count"] == 2
+    assert (output / "sha256.txt").is_file()
 
 
 def test_anchor_gc_probe_records_query_overlap_and_collection_duration(

@@ -60,7 +60,7 @@ def build_hotword_capacity_history(
                 "query_results_sha256": _sha256(query_path),
             }
         )
-        grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        grouped: dict[tuple[str, int, str | None, int | None], list[dict[str, Any]]] = {}
         for row in rows:
             profile = str(row["profile"])
             size = int(row["size"])
@@ -68,10 +68,14 @@ def build_hotword_capacity_history(
                 continue
             if resolved_sizes is not None and size not in resolved_sizes:
                 continue
-            grouped.setdefault((profile, size), []).append(row)
+            window = str(row["window"]) if "window" in row else None
+            shortlist_size = int(row["shortlist_size"]) if "shortlist_size" in row else None
+            grouped.setdefault((profile, size, window, shortlist_size), []).append(row)
         if not grouped:
             raise ValueError(f"capacity stage {label} has no rows after profile/size filters")
-        for (profile, size), level_rows in sorted(grouped.items()):
+        for (profile, size, window, shortlist_size), level_rows in sorted(
+            grouped.items(), key=lambda item: tuple(str(value) for value in item[0])
+        ):
             history_rows.extend(
                 _normalize_stage_rows(
                     stage=label,
@@ -80,6 +84,8 @@ def build_hotword_capacity_history(
                     summary=summary,
                     profile=profile,
                     size=size,
+                    window=window,
+                    shortlist_size=shortlist_size,
                     rows=level_rows,
                 )
             )
@@ -126,6 +132,8 @@ def _normalize_stage_rows(
     summary: Mapping[str, Any],
     profile: str,
     size: int,
+    window: str | None,
+    shortlist_size: int | None,
     rows: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, object]]:
     final = [row for row in rows if bool(row["is_final"])]
@@ -139,6 +147,8 @@ def _normalize_stage_rows(
         "mode": str(summary.get("mode", "full_scan_edit_distance")),
         "profile": profile,
         "size": size,
+        "window": window,
+        "shortlist_size": shortlist_size,
         "expected_hotwords": sum(len(row["expected_hotword_ids"]) for row in final),
         "positive_cases": sum(bool(row["expected_hotword_ids"]) for row in final),
         "negative_cases": sum(not bool(row["expected_hotword_ids"]) for row in final),
@@ -148,7 +158,19 @@ def _normalize_stage_rows(
     }
     normalized: list[dict[str, object]] = []
     first = final[0]
-    if "raw_top5_ids" in first:
+    if "candidate_ids" in first and "raw_top5_ids" in first:
+        normalized.append(
+            _ranking_row(
+                common,
+                ranking="anchor_rerank",
+                rows=rows,
+                id_key=lambda k: f"raw_top{k}_ids",
+                latency_key="retrieval_seconds",
+                latency_scope="anchor_query_plus_shortlist_rerank",
+                operating_key="operating_ids",
+            )
+        )
+    elif "raw_top5_ids" in first:
         normalized.append(
             _ranking_row(
                 common,

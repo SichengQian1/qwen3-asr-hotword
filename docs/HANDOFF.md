@@ -1,5 +1,114 @@
 # 工作交接记录
 
+## 0.47 2026-08-25 4k Anchor GC结论、Step 4精排实现与三语训练状态
+
+4k/50 ms六步路线的Step 3现已完成。工作区GC A/B质量文件逐字节一致；默认GC组
+Anchor P50/P95/P99/max为19.96/63.56/70.79/83.46 ms，7%查询超过50 ms。
+7条慢查询全部发生generation 0/1/2集合，单次查询中GC耗时为43.07至53.30 ms，
+而总查询耗时为59.54至83.46 ms。`defer_during_anchor_pass`组不改变任何候选质量，
+P50/P95/P99/max降为14.68/19.52/21.31/22.33 ms，0%超过50 ms。由此可判定
+Step 3算法本体已满足50 ms，先前P95失败由Python cyclic GC落入请求关键路径造成，
+不是posting数或Anchor召回需要牺牲。生产方案不能在每个2秒请求后同步
+`gc.collect()`；后续还需以持续流、RSS和显式安全点验证GC调度。
+
+三语Macro CTC 5 epoch pilot同时已经完成，best=epoch 5：mixed validation
+PER 7.417%，Macro PER 6.894%，en/es/pt分别5.652%/4.275%/10.755%，三语均较
+epoch 1继续下降，葡语仍为最差组但没有停滞。用户已用完全相同参数启动同目录
+`--epochs 30 --resume`继续训练；结果未返回前不改batch、lr、seed、Head、早停或
+选择口径，test仍不读取。
+
+Step 4已新增：
+
+- `src/qwen_hotword/hotwords/anchor_rerank.py`：按当前累计CTC frame轴因果裁剪
+  full/2/4/6秒窗口，只对Anchor Top-64/128/256运行现有近似音素评分器；
+- `scripts/benchmark_anchor_rerank_capacity.py`：固定0.86、Operating Top-5、
+  edit ratio 0.35、posterior weight 0.25，同时输出Raw Top-5/7/10；
+- 输出分开记录Anchor、rerank和总检索P50/P90/P95/P99/max、候选召回、精排召回、
+  precision、正例case hit、负例FPR与50 ms deadline miss；
+- AC exact只作为候选证据记录，不绕过既有Operating门控；窗口只读取当前replay
+  row，不保留TTL、不读取未来chunk，也不使用Oracle或离线结果。
+
+拉取后先跑离线formal100的full-current，再跑已有累计流式Posterior smoke20的
+full/2/4/6秒消融。两个输出目录都必须是新目录：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+STREAM_REPLAY_ROOT="$CAP_ROOT/replay_streaming_posterior_smoke20_v2"
+OFFLINE_RERANK_ROOT="$CAP_ROOT/benchmark_anchor_rerank_offline_formal100_4000_v1"
+STREAM_RERANK_ROOT="$CAP_ROOT/benchmark_anchor_rerank_streaming_smoke20_4000_v1"
+RERANK_HISTORY_ROOT="$CAP_ROOT/optimization_history_4000_rerank_v1"
+
+COMMON_RERANK_ARGS=(
+  --assets-root "$ASSET_4K_ROOT"
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+  --profiles representative
+  --sizes 4000
+  --shortlist-sizes 64,128,256
+  --ngram-sizes 2,3,4
+  --anchors-per-entry 24
+  --offset-tolerance 1
+  --threshold 0.86
+  --top-k 5
+  --maximum-edit-ratio 0.35
+  --posterior-weight 0.25
+  --minimum-posterior-confidence 0
+  --minimum-top1-margin 0
+  --deadline-ms 50
+  --gc-policy defer_during_retrieval_pass
+)
+
+test ! -e "$OFFLINE_RERANK_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  "${COMMON_RERANK_ARGS[@]}" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --lookbacks full \
+  --output-dir "$OFFLINE_RERANK_ROOT"
+
+test ! -e "$STREAM_RERANK_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  "${COMMON_RERANK_ARGS[@]}" \
+  --replay "$STREAM_REPLAY_ROOT/ctc_replay.jsonl" \
+  --lookbacks full,2,4,6 \
+  --output-dir "$STREAM_RERANK_ROOT"
+```
+
+完成后返回以下短输出；不要上传Posterior tensor：
+
+```bash
+(cd "$OFFLINE_RERANK_ROOT" && sha256sum -c sha256.txt)
+(cd "$STREAM_RERANK_ROOT" && sha256sum -c sha256.txt)
+
+cat "$OFFLINE_RERANK_ROOT/quality_summary.json"
+cat "$OFFLINE_RERANK_ROOT/performance_summary.json"
+cat "$STREAM_RERANK_ROOT/quality_summary.json"
+cat "$STREAM_RERANK_ROOT/performance_summary.json"
+cat "$STREAM_RERANK_ROOT/summary.json"
+
+test ! -e "$RERANK_HISTORY_ROOT"
+python scripts/summarize_hotword_capacity_history.py \
+  --stage exact_ac_v1="$CAP_ROOT/benchmark_exact_ac_offline_formal100_4000_v1" \
+  --stage anchor_v4_metrics="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v4_metrics" \
+  --stage anchor_gc_deferred="$CAP_ROOT/benchmark_anchor_offline_formal100_4000_v5_gc_deferred" \
+  --stage rerank_offline_v1="$OFFLINE_RERANK_ROOT" \
+  --profiles representative \
+  --sizes 4000 \
+  --output-dir "$RERANK_HISTORY_ROOT"
+
+(cd "$RERANK_HISTORY_ROOT" && sha256sum -c sha256.txt)
+cat "$RERANK_HISTORY_ROOT/optimization_history.tsv"
+```
+
+历史汇总器会把rerank的每个`window × shortlist`独立成行，不能把12种变体混算。
+本地容量定向pytest 10项、本轮Ruff和全量pytest均通过；严格Mypy对三个相关
+source/script为0错误（全依赖递归仍会报告仓库已有的两个unused-ignore，与本轮
+无关）。全仓Ruff仍有9个已有`UP038`，均位于本任务未修改文件。下一步根据上述
+结果选择64/128/256中满足总检索P95<50 ms且质量最好的候选规模，然后进入Step 5
+排序稳定性和误报控制；目前不提前调整阈值或Prompt。
+
 ## 0.46 2026-08-25 三语分组smoke结果与Macro PER正式Trainer
 
 0.45的单遍分组诊断已在工作区完成，8,101条validation全部消费，

@@ -609,3 +609,22 @@ deadline miss。若normal慢query多数与GC重叠，且defer稳定把P95压到5
 才能将GC调度视为主要原因；若defer仍约62毫秒，说明尾延迟更可能来自OS调度、
 CPU竞争或实现分配峰值，下一步应做process pinning/pyperf或分配调查，不应直接用
 posting cap牺牲候选召回。
+
+## 15. GC结论与Anchor小候选精排
+
+工作区A/B确认7条normal慢查询全部与generation 0/1/2 GC重叠，GC耗时43.07至
+53.30 ms；defer组质量逐字节一致，Anchor P95从63.56 ms降至19.52 ms，max从
+83.46 ms降至22.33 ms，deadline miss从7%降为0。因此Step 3完成，暂不做posting
+cap。该结论只证明连续Anchor查询本体达标；生产服务仍需在Step 5验证持续流中的
+安全GC调度和RSS，不能把每请求后的同步full GC算到请求外后直接上线。
+
+Step 4使用`scripts/benchmark_anchor_rerank_capacity.py`，顺序固定为：当前因果CTC
+序列（或其recent 2/4/6秒frame窗口）→ AC+Anchor shortlist → 仅在shortlist上运行
+既有近似音素评分器 → Raw Top-5/7/10与Operating Top-5。窗口由当前replay row的
+`effective_time_steps`和`cumulative_audio_sec`计算，不按字符/单词截断，不读取下一
+chunk，也不把offline full结果注入streaming。
+
+性能口径为`anchor_seconds + rerank_seconds`；报告同时保留两阶段各自分布。正式
+参数继续固定0.86/Top-5/0.35/0.25/min posterior 0/margin 0，Raw Top-7/10只观察，
+不能扩大Prompt。历史汇总按每个`window × shortlist`分别生成`anchor_rerank`行，
+不得混算不同变体。工作区完整命令与输出检查见`docs/HANDOFF.md` 0.47。
