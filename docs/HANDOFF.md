@@ -1,5 +1,74 @@
 # 工作交接记录
 
+## 0.45 2026-08-25 三语Feature Cache完成、Temporal 2× smoke通过与分语种PER诊断
+
+工作区的三语450小时Feature Cache已完成，根目录报告为
+`status=pass`，且没有读取test集：
+
+- train：310,257条、606个shard、21,106,335帧、43,344,916,678 bytes；
+- validation：8,101条、16个shard、562,779帧、1,155,707,472 bytes；
+- tap/dtype：`thinker.audio_tower.ln_post` / bfloat16；
+- 来源train Manifest：
+  `outputs/en_es_pt_balanced_150h_temporal2x_v2/full_ctc_train.jsonl`；
+- 来源validation Manifest：
+  `outputs/en_es_pt_balanced_validation_4h_v1/full_ctc_validation.jsonl`。
+
+三语Temporal 2× CTC Head单epoch smoke亦已通过，输出为
+`outputs/en_es_pt_balanced_150h_temporal2x_ctc_smoke1_v1`。结构为
+hidden 512 / kernel 5 / dropout 0.1 / time factor 2 / 90 classes，可训参数
+838,746。cache SHA256全部验证通过，1 epoch耗143.82秒：
+
+```text
+random initial validation loss/PER: 13.418263 / 1.437186
+epoch 1 train loss/PER:             0.849622 / 0.207504
+epoch 1 validation loss/PER:        0.395094 / 0.099946
+```
+
+train PER高于val PER不是当前泄漏证据：train统计累积了整个epoch内不断
+更新的中间模型预测，validation只使用epoch末权重且dropout关闭。该smoke
+只证明结构、cache、训练和checkpoint链路可用；还不应直接启动30 epoch正式训练，
+先确认混合validation PER没有掩盖某个语种退化。
+
+`scripts/diagnose_frozen_ctc.py`现可在同一次validation cache遍历中，按
+Manifest的sample ID和`balanced_language_bucket`统计en/es/pt PER以及三语
+Macro PER。它严格要求Manifest与cache ID完全一致，且分组恰好为
+`en,es,pt`；缺失、多余或重复ID会直接失败。不重建ccache，不读取test。
+
+工作区先运行：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+GPU_ID=3
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+SMOKE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_smoke1_v1
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/diagnose_frozen_ctc.py \
+  --validation-cache "$FEATURE_CACHE_ROOT/validation" \
+  --validation-manifest "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --checkpoint "$SMOKE_ROOT/ctc_head_best.pt" \
+  --output "$SMOKE_ROOT/validation_multilingual_diagnostics.json" \
+  --device cuda:0 \
+  --batch-size 256 \
+  --group-column balanced_language_bucket \
+  --expected-groups en,es,pt
+
+jq '{validation_samples, group_column, checkpoints: [.checkpoints[] | {
+  checkpoint_path,
+  validation_loss,
+  validation_per: .validation.phoneme_error_rate,
+  validation_macro_phoneme_error_rate,
+  validation_by_group
+}]}' "$SMOKE_ROOT/validation_multilingual_diagnostics.json"
+```
+
+该训练只训练小型CTC Head，不加载Qwen backbone，因此不会自然占满H200
+80%显存。不应为了占显存人为分配无用tensor；拿到分语种结果后，再用新输出
+目录做`batch_size=256/512/1024`的短基准，按samples/s、epoch耗时和实际peak GPU
+memory选最高有效batch，不用80%显存占用率代替吞吐验收。
+
 ## 0.44 2026-08-24 4k Anchor GC尾延迟A/B（代码完成，待工作区实测）
 
 4k Anchor v3/v4在严格两阶段计时后，P50/P90已稳定在20至30毫秒范围，

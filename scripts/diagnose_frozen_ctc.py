@@ -10,7 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
-from qwen_hotword.training.ctc_diagnostics import diagnose_ctc_checkpoint
+from qwen_hotword.training.ctc_diagnostics import (
+    diagnose_ctc_checkpoint,
+    load_validation_sample_groups,
+)
 from qwen_hotword.training.sharded_ctc import load_disk_feature_cache
 
 DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json"
@@ -30,6 +33,15 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument(
+        "--group-column",
+        help="Optional validation manifest field used for one-pass grouped PER metrics.",
+    )
+    parser.add_argument(
+        "--expected-groups",
+        default="",
+        help="Optional comma-separated exact group set, for example en,es,pt.",
+    )
     parser.add_argument("--skip-cache-sha256-verification", action="store_true")
     args = parser.parse_args()
 
@@ -46,6 +58,21 @@ def main() -> int:
             vocab_path=args.vocab,
             verify_sha256=not args.skip_cache_sha256_verification,
         )
+        expected_groups = tuple(
+            value.strip() for value in args.expected_groups.split(",") if value.strip()
+        )
+        if expected_groups and not args.group_column:
+            raise ValueError("--expected-groups requires --group-column")
+        sample_groups = (
+            load_validation_sample_groups(
+                args.validation_manifest,
+                cache,
+                group_column=args.group_column,
+                expected_groups=expected_groups,
+            )
+            if args.group_column
+            else None
+        )
         reports = [
             diagnose_ctc_checkpoint(
                 checkpoint,
@@ -53,12 +80,15 @@ def main() -> int:
                 vocab,
                 device=args.device,
                 batch_size=args.batch_size,
+                sample_groups=sample_groups,
             )
             for checkpoint in args.checkpoint
         ]
         result = {
             "purpose": "frozen_encoder_ctc_validation_diagnostics",
             "validation_samples": cache.sample_count,
+            "group_column": args.group_column,
+            "expected_groups": list(expected_groups),
             "test_set_used": False,
             "checkpoints": reports,
             "status": "pass",

@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
-from qwen_hotword.training.ctc_diagnostics import diagnose_ctc_checkpoint
+from qwen_hotword.training.ctc_diagnostics import (
+    diagnose_ctc_checkpoint,
+    load_validation_sample_groups,
+)
 from qwen_hotword.training.ctc_overfit import CachedSample, EpochMetrics, ExperimentRecord
 from qwen_hotword.training.feature_cache import cache_feature_split
 from qwen_hotword.training.sharded_ctc import (
@@ -211,10 +214,36 @@ def test_sharded_ctc_training_saves_and_resumes(
         vocab,
         device=torch.device("cpu"),
         batch_size=2,
+        sample_groups={"validation-0": "en", "validation-1": "es"},
     )
     assert diagnostics["head_config"]["head_type"] == head_type
     expected_factor = 2 if head_type == "temporal_upsample" else 1
     assert diagnostics["validation"]["input_frames"] == 12 * expected_factor
+    assert set(diagnostics["validation_by_group"]) == {"en", "es"}
+    macro_per = diagnostics["validation_macro_phoneme_error_rate"]
+    assert isinstance(macro_per, float)
+
+    group_manifest = tmp_path / "validation-groups.jsonl"
+    group_manifest.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "id": f"validation-{index}",
+                    "split": "validation",
+                    "balanced_language_bucket": group,
+                }
+            )
+            + "\n"
+            for index, group in enumerate(("en", "es"))
+        ),
+        encoding="utf-8",
+    )
+    assert load_validation_sample_groups(
+        group_manifest,
+        validation_cache,
+        group_column="balanced_language_bucket",
+        expected_groups=("en", "es"),
+    ) == {"validation-0": "en", "validation-1": "es"}
 
 
 def test_training_lock_rejects_duplicate_process(tmp_path: Path) -> None:

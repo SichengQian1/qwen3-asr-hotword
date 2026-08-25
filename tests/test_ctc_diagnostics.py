@@ -25,6 +25,7 @@ def test_ctc_pressure_bucket_uses_effective_alignment_length() -> None:
 def test_error_accumulator_separates_error_types() -> None:
     detailed = DetailedErrorAccumulator()
     bucket = ErrorAccumulator()
+    group = ErrorAccumulator()
     _accumulate_errors(
         detailed,
         bucket,
@@ -32,6 +33,7 @@ def test_error_accumulator_separates_error_types() -> None:
         hypothesis=(2, 6),
         raw_prediction=[0, 2, 0, 6],
         blank_id=0,
+        group_accumulator=group,
     )
     _accumulate_errors(
         detailed,
@@ -58,6 +60,8 @@ def test_error_accumulator_separates_error_types() -> None:
     assert detailed.inserted_tokens[7] == 1
     assert detailed.substituted_tokens[(3, 6)] == 1
     assert bucket.errors == 3
+    assert group.sample_count == 1
+    assert group.errors == 1
 
 
 def test_edit_distance_matches_operation_count() -> None:

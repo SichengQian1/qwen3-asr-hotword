@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,6 +60,7 @@ def diagnose_ctc_checkpoint(
     *,
     device: Any,
     batch_size: int = 256,
+    sample_groups: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     import torch
 
@@ -80,6 +83,10 @@ def diagnose_ctc_checkpoint(
     head.load_state_dict(payload["state_dict"], strict=True)
     head.eval()
 
+    normalized_groups = _validate_sample_groups(cache, sample_groups)
+    group_accumulators = {
+        group: ErrorAccumulator() for group in sorted(set(normalized_groups.values()))
+    }
     detailed = DetailedErrorAccumulator()
     buckets = {
         "minimum_ratio_le_0_50": ErrorAccumulator(),
@@ -121,13 +128,18 @@ def diagnose_ctc_checkpoint(
                         hypothesis=hypothesis,
                         raw_prediction=raw_prediction,
                         blank_id=0,
+                        group_accumulator=(
+                            group_accumulators[normalized_groups[sample.sample_id]]
+                            if normalized_groups
+                            else None
+                        ),
                     )
             del samples
 
     total = detailed.totals
     if total.sample_count != cache.sample_count:
         raise RuntimeError("diagnostic did not consume the complete validation cache")
-    return {
+    result: dict[str, object] = {
         "checkpoint_path": str(checkpoint),
         "head_config": ctc_head_config(head),
         "checkpoint_epoch_metrics": payload.get("epoch_metrics"),
@@ -142,6 +154,67 @@ def diagnose_ctc_checkpoint(
         "top_insertions": _top_token_counts(detailed.inserted_tokens, vocab),
         "top_substitutions": _top_substitution_counts(detailed.substituted_tokens, vocab),
     }
+    if group_accumulators:
+        validation_by_group = {
+            group: accumulator.to_dict()
+            for group, accumulator in group_accumulators.items()
+        }
+        result["validation_by_group"] = validation_by_group
+        result["validation_macro_phoneme_error_rate"] = sum(
+            accumulator.errors / accumulator.reference_tokens
+            for accumulator in group_accumulators.values()
+        ) / len(validation_by_group)
+    return result
+
+
+def load_validation_sample_groups(
+    manifest_path: str | Path,
+    cache: DiskFeatureCache,
+    *,
+    group_column: str,
+    expected_groups: Sequence[str] = (),
+) -> dict[str, str]:
+    path = Path(manifest_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"validation manifest does not exist: {path}")
+    if not group_column:
+        raise ValueError("validation group column cannot be empty")
+
+    groups: dict[str, str] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"invalid validation JSON at {path}:{line_number}"
+                ) from error
+            if not isinstance(row, dict):
+                raise ValueError(f"validation row must be an object at {path}:{line_number}")
+            sample_id = row.get("id")
+            group = row.get(group_column)
+            if not isinstance(sample_id, str) or not sample_id:
+                raise ValueError(f"validation row has no sample ID at {path}:{line_number}")
+            if not isinstance(group, str) or not group:
+                raise ValueError(
+                    f"validation row has no {group_column!r} at {path}:{line_number}"
+                )
+            if row.get("split") != "validation":
+                raise ValueError(
+                    f"non-validation row found in validation manifest at {path}:{line_number}"
+                )
+            if sample_id in groups:
+                raise ValueError(f"duplicate validation sample ID: {sample_id}")
+            groups[sample_id] = group
+
+    _validate_sample_groups(cache, groups)
+    actual_groups = set(groups.values())
+    if expected_groups and actual_groups != set(expected_groups):
+        raise ValueError(
+            "validation groups differ from the expected set: "
+            f"actual={sorted(actual_groups)}, expected={sorted(set(expected_groups))}"
+        )
+    return groups
 
 
 def ctc_pressure_bucket(token_ids: tuple[int, ...], *, input_length: int) -> str:
@@ -168,6 +241,7 @@ def _accumulate_errors(
     hypothesis: tuple[int, ...],
     raw_prediction: list[int],
     blank_id: int,
+    group_accumulator: ErrorAccumulator | None = None,
 ) -> None:
     substitutions = 0
     deletions = 0
@@ -187,7 +261,10 @@ def _accumulate_errors(
         else:
             raise ValueError(f"unsupported Levenshtein operation: {tag}")
 
-    for accumulator in (detailed.totals, bucket):
+    accumulators = [detailed.totals, bucket]
+    if group_accumulator is not None:
+        accumulators.append(group_accumulator)
+    for accumulator in accumulators:
         accumulator.sample_count += 1
         accumulator.reference_tokens += len(reference)
         accumulator.hypothesis_tokens += len(hypothesis)
@@ -196,6 +273,29 @@ def _accumulate_errors(
         accumulator.insertions += insertions
         accumulator.input_frames += len(raw_prediction)
         accumulator.blank_frames += raw_prediction.count(blank_id)
+
+
+def _validate_sample_groups(
+    cache: DiskFeatureCache,
+    sample_groups: Mapping[str, str] | None,
+) -> dict[str, str]:
+    if sample_groups is None:
+        return {}
+    normalized = dict(sample_groups)
+    if any(not isinstance(group, str) or not group for group in normalized.values()):
+        raise ValueError("validation sample groups must be non-empty strings")
+    cache_ids = {
+        sample_id for descriptor in cache.shards for sample_id in descriptor.sample_ids
+    }
+    group_ids = set(normalized)
+    if cache_ids != group_ids:
+        missing = len(cache_ids - group_ids)
+        extra = len(group_ids - cache_ids)
+        raise ValueError(
+            "validation sample groups do not exactly cover the cache: "
+            f"missing={missing}, extra={extra}"
+        )
+    return normalized
 
 
 def _load_checkpoint(path: Path, vocab: PhonemeVocab) -> dict[str, Any]:
