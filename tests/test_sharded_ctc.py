@@ -14,6 +14,9 @@ from qwen_hotword.training.ctc_diagnostics import (
 from qwen_hotword.training.ctc_overfit import CachedSample, EpochMetrics, ExperimentRecord
 from qwen_hotword.training.feature_cache import cache_feature_split
 from qwen_hotword.training.sharded_ctc import (
+    GroupedValidationMetrics,
+    ValidationGroupMetrics,
+    _checkpoint_selection_key,
     _early_stopping_value,
     exclusive_training_run,
     load_disk_feature_cache,
@@ -267,3 +270,89 @@ def test_early_stopping_metric_is_explicit() -> None:
 
     assert _early_stopping_value(metrics, "validation_loss") == 0.75
     assert _early_stopping_value(metrics, "validation_per") == 0.25
+    grouped = GroupedValidationMetrics(
+        overall=metrics,
+        by_group={
+            "en": ValidationGroupMetrics(2, 1, 10),
+            "pt": ValidationGroupMetrics(2, 3, 10),
+        },
+    )
+    assert _early_stopping_value(grouped, "validation_macro_per") == 0.2
+    assert _checkpoint_selection_key(grouped, "validation_macro_per") == (
+        0.2,
+        0.3,
+        0.75,
+    )
+
+
+def test_grouped_validation_training_records_macro_metrics_and_resumes(
+    tmp_path: Path,
+) -> None:
+    torch = pytest.importorskip("torch")
+    train_dir, validation_dir, train_manifest, validation_manifest, vocab_path = (
+        _build_cache_pair(tmp_path)
+    )
+    train_cache = load_disk_feature_cache(
+        train_dir,
+        expected_split="train",
+        source_manifest_path=train_manifest,
+        vocab_path=vocab_path,
+    )
+    validation_cache = load_disk_feature_cache(
+        validation_dir,
+        expected_split="validation",
+        source_manifest_path=validation_manifest,
+        vocab_path=vocab_path,
+    )
+    groups = {"validation-0": "en", "validation-1": "pt"}
+    vocab = load_phoneme_vocab(vocab_path)
+    output = tmp_path / "grouped-run"
+    common = {
+        "vocab_path": vocab_path,
+        "device": torch.device("cpu"),
+        "minimum_epochs": 1,
+        "early_stopping_patience": 5,
+        "early_stopping_metric": "validation_macro_per",
+        "checkpoint_selection_metric": "validation_macro_per",
+        "validation_sample_groups": groups,
+        "train_batch_size": 2,
+        "learning_rate": 0.01,
+        "log_every_shards": 1,
+        "head_type": "temporal_upsample",
+        "head_hidden_dimension": 8,
+        "head_kernel_size": 3,
+        "head_dropout": 0.0,
+        "head_time_upsampling_factor": 2,
+    }
+
+    first = train_sharded_ctc_head(
+        train_cache,
+        validation_cache,
+        vocab,
+        output,
+        epochs=1,
+        **common,
+    )
+    resumed = train_sharded_ctc_head(
+        train_cache,
+        validation_cache,
+        vocab,
+        output,
+        epochs=2,
+        resume=True,
+        **common,
+    )
+
+    assert first.validation_groups == ["en", "pt"]
+    assert resumed.resumed_from_epoch == 1
+    assert resumed.checkpoint_selection_metric == "validation_macro_per"
+    assert resumed.best_validation_macro_phoneme_error_rate is not None
+    assert resumed.final_validation_worst_group in {"en", "pt"}
+    assert set(resumed.final_validation_by_group) == {"en", "pt"}
+    metrics = [
+        json.loads(line)
+        for line in (output / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(metrics) == 2
+    assert set(metrics[-1]["validation_by_group"]) == {"en", "pt"}
+    assert metrics[-1]["validation_macro_phoneme_error_rate"] is not None

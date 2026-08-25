@@ -1,5 +1,109 @@
 # 工作交接记录
 
+## 0.46 2026-08-25 三语分组smoke结果与Macro PER正式Trainer
+
+0.45的单遍分组诊断已在工作区完成，8,101条validation全部消费，
+Manifest/cache ID和`en,es,pt`分组严格验证通过，test未使用。epoch 1
+smoke checkpoint结果：
+
+```text
+mixed validation PER: 0.099946
+Macro PER:            0.095021
+English PER:          0.088879
+Spanish PER:          0.056087
+Portuguese PER:       0.140096
+```
+
+葡语占全部reference phonemes约44.03%，但贡献约61.72%错误。葡语的
+22,881个错误中删除为11,722，预测/参考长度比为0.9412，当前是明显的
+漏音素/输出偏短，而不是插入偏置。但这仅为1 epoch，不足以判定葡语数据或
+G2P有结构性问题。CTC压力分桶PER为：最低压力8.75%、中压力15.82%、
+高压力26.84%，因此正式pilot必须持续观察删除和葡语PER是否随epoch下降。
+
+正式分片Trainer现支持：
+
+- validation cache单遍同时统计mixed、en/es/pt、Macro和最差语种PER；
+- 每组sample/error/reference合计必须与mixed指标严格一致；
+- best checkpoint可按`Macro PER -> worst-group PER -> mixed validation loss`
+  确定性选择；
+- early stopping可使用`validation_macro_per`；
+- `metrics.jsonl`每epoch写入分语种、Macro和最差语种；
+- `report.json`写入initial/best/final分组指标、选择口径、分组SHA256及完整
+  optimizer/scheduler/seed超参数；
+- resume指纹绑定validation group mapping和checkpoint selection策略，换分组
+  或换选择口径后不会误续训；
+- 旧的无分组训练状态仍可按原参数resume。
+
+下一步不直接跑30 epoch，而是在新目录从随机Head初始化跑5 epoch pilot。
+batch/lr/Head与已通过的smoke保持为256 / 3e-4 / h512-k5-dropout0.1-
+Temporal 2×；只将正式早停与checkpoint选择切到Macro口径。物理GPU 3在进程内
+仍是逻辑`cuda:0`：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+GPU_ID=3
+BALANCED_TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+FORMAL_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1
+
+test ! -e "$FORMAL_ROOT"
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/train_full_ctc.py \
+  --train-cache "$FEATURE_CACHE_ROOT/train" \
+  --validation-cache "$FEATURE_CACHE_ROOT/validation" \
+  --train-manifest "$BALANCED_TRAIN_ROOT/full_ctc_train.jsonl" \
+  --validation-manifest "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir "$FORMAL_ROOT" \
+  --device cuda:0 \
+  --epochs 5 \
+  --minimum-epochs 5 \
+  --early-stopping-patience 6 \
+  --early-stopping-min-delta 0.001 \
+  --early-stopping-metric validation_macro_per \
+  --checkpoint-selection-metric validation_macro_per \
+  --validation-group-column balanced_language_bucket \
+  --expected-validation-groups en,es,pt \
+  --train-batch-size 256 \
+  --learning-rate 0.0003 \
+  --weight-decay 0.0001 \
+  --max-gradient-norm 5 \
+  --scheduler-patience 2 \
+  --scheduler-factor 0.5 \
+  --minimum-learning-rate 0.00001 \
+  --seed 20260825 \
+  --log-every-shards 25 \
+  --head-type temporal_upsample \
+  --head-hidden-dimension 512 \
+  --head-kernel-size 5 \
+  --head-dropout 0.1 \
+  --head-time-upsampling-factor 2
+```
+
+跑完后先不加`--resume`，返回：
+
+```bash
+cat "$FORMAL_ROOT/report.json"
+
+jq -c '{
+  epoch,
+  learning_rate,
+  train_per: .train.phoneme_error_rate,
+  validation_per: .validation.phoneme_error_rate,
+  macro_per: .validation_macro_phoneme_error_rate,
+  worst_group: .validation_worst_group,
+  worst_group_per: .validation_worst_group_phoneme_error_rate,
+  by_group: (.validation_by_group | with_entries(.value = .value.phoneme_error_rate)),
+  epoch_seconds
+}' "$FORMAL_ROOT/metrics.jsonl"
+```
+
+验收后若三语PER都继续下降，再在完全相同参数下只把`--epochs 5`改为
+`--epochs 30`并增加`--resume`。不能改batch、lr、seed、early-stop、Head或分组参数，
+否则resume指纹会正确拒绝。test仍不读取。
+
 ## 0.45 2026-08-25 三语Feature Cache完成、Temporal 2× smoke通过与分语种PER诊断
 
 工作区的三语450小时Feature Cache已完成，根目录报告为

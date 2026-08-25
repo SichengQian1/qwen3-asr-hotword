@@ -5,9 +5,9 @@ import json
 import os
 import random
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -21,7 +21,12 @@ from qwen_hotword.training.ctc_overfit import (
 )
 
 SHARDED_CTC_SCHEMA_VERSION = 1
-EarlyStoppingMetric = Literal["validation_loss", "validation_per"]
+EarlyStoppingMetric = Literal[
+    "validation_loss",
+    "validation_per",
+    "validation_macro_per",
+]
+CheckpointSelectionMetric = Literal["validation_per", "validation_macro_per"]
 
 
 @dataclass(frozen=True)
@@ -53,20 +58,87 @@ class DiskFeatureCache:
 
 
 @dataclass(frozen=True)
+class ValidationGroupMetrics:
+    sample_count: int
+    phoneme_errors: int
+    reference_phonemes: int
+
+    @property
+    def phoneme_error_rate(self) -> float:
+        return self.phoneme_errors / self.reference_phonemes
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "sample_count": self.sample_count,
+            "phoneme_errors": self.phoneme_errors,
+            "reference_phonemes": self.reference_phonemes,
+            "phoneme_error_rate": self.phoneme_error_rate,
+        }
+
+
+@dataclass(frozen=True)
+class GroupedValidationMetrics:
+    overall: EpochMetrics
+    by_group: dict[str, ValidationGroupMetrics]
+
+    @property
+    def macro_phoneme_error_rate(self) -> float | None:
+        if not self.by_group:
+            return None
+        return sum(
+            metrics.phoneme_error_rate for metrics in self.by_group.values()
+        ) / len(self.by_group)
+
+    @property
+    def worst_group(self) -> str | None:
+        if not self.by_group:
+            return None
+        return max(
+            self.by_group,
+            key=lambda group: (self.by_group[group].phoneme_error_rate, group),
+        )
+
+    @property
+    def worst_group_phoneme_error_rate(self) -> float | None:
+        group = self.worst_group
+        if group is None:
+            return None
+        return self.by_group[group].phoneme_error_rate
+
+    def grouping_to_dict(self) -> dict[str, object]:
+        return {
+            "validation_by_group": {
+                group: metrics.to_dict() for group, metrics in self.by_group.items()
+            },
+            "validation_macro_phoneme_error_rate": self.macro_phoneme_error_rate,
+            "validation_worst_group": self.worst_group,
+            "validation_worst_group_phoneme_error_rate": (
+                self.worst_group_phoneme_error_rate
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class ShardedEpochMetrics:
     epoch: int
     learning_rate: float
     train: EpochMetrics
     validation: EpochMetrics
     epoch_seconds: float
+    validation_by_group: dict[str, ValidationGroupMetrics] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
+        grouped = GroupedValidationMetrics(
+            overall=self.validation,
+            by_group=self.validation_by_group,
+        )
         return {
             "epoch": self.epoch,
             "learning_rate": self.learning_rate,
             "train": self.train.to_dict(),
             "validation": self.validation.to_dict(),
             "epoch_seconds": self.epoch_seconds,
+            **grouped.grouping_to_dict(),
         }
 
 
@@ -89,6 +161,12 @@ class ShardedCtcReport:
     train_batch_size: int
     initial_learning_rate: float
     final_learning_rate: float
+    weight_decay: float
+    max_gradient_norm: float
+    scheduler_patience: int
+    scheduler_factor: float
+    minimum_learning_rate: float
+    seed: int
     epochs_requested: int
     epochs_completed: int
     resumed_from_epoch: int
@@ -96,17 +174,32 @@ class ShardedCtcReport:
     early_stopping_patience: int
     early_stopping_min_delta: float
     early_stopping_metric: str
+    checkpoint_selection_metric: str
+    validation_groups: list[str]
+    validation_sample_groups_sha256: str | None
     initial_validation_loss: float
     initial_validation_phoneme_error_rate: float
+    initial_validation_by_group: dict[str, dict[str, object]]
+    initial_validation_macro_phoneme_error_rate: float | None
+    initial_validation_worst_group: str | None
+    initial_validation_worst_group_phoneme_error_rate: float | None
     best_epoch: int
     best_train_loss: float | None
     best_train_phoneme_error_rate: float | None
     best_validation_loss: float
     best_validation_phoneme_error_rate: float
+    best_validation_by_group: dict[str, dict[str, object]]
+    best_validation_macro_phoneme_error_rate: float | None
+    best_validation_worst_group: str | None
+    best_validation_worst_group_phoneme_error_rate: float | None
     final_train_loss: float
     final_train_phoneme_error_rate: float
     final_validation_loss: float
     final_validation_phoneme_error_rate: float
+    final_validation_by_group: dict[str, dict[str, object]]
+    final_validation_macro_phoneme_error_rate: float | None
+    final_validation_worst_group: str | None
+    final_validation_worst_group_phoneme_error_rate: float | None
     training_seconds: float
     best_checkpoint_path: str
     latest_checkpoint_path: str
@@ -384,6 +477,8 @@ def train_sharded_ctc_head(
     early_stopping_patience: int = 6,
     early_stopping_min_delta: float = 0.001,
     early_stopping_metric: EarlyStoppingMetric = "validation_loss",
+    checkpoint_selection_metric: CheckpointSelectionMetric = "validation_per",
+    validation_sample_groups: Mapping[str, str] | None = None,
     train_batch_size: int = 256,
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
@@ -413,6 +508,8 @@ def train_sharded_ctc_head(
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
         early_stopping_metric=early_stopping_metric,
+        checkpoint_selection_metric=checkpoint_selection_metric,
+        validation_sample_groups=validation_sample_groups,
         train_batch_size=train_batch_size,
         learning_rate=learning_rate,
         max_gradient_norm=max_gradient_norm,
@@ -424,6 +521,10 @@ def train_sharded_ctc_head(
     destination = Path(output_dir).expanduser()
     destination.mkdir(parents=True, exist_ok=True)
     blank_id = 0
+    normalized_validation_groups = _validate_validation_sample_groups(
+        validation_cache,
+        validation_sample_groups,
+    )
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -481,6 +582,16 @@ def train_sharded_ctc_head(
     # state remains resumable after this feature was added.
     if head_configuration["head_type"] != "linear":
         fingerprint_hyperparameters["head_config"] = head_configuration
+    if normalized_validation_groups:
+        fingerprint_hyperparameters.update(
+            {
+                "checkpoint_selection_metric": checkpoint_selection_metric,
+                "validation_sample_groups_sha256": _sample_groups_sha256(
+                    validation_cache,
+                    normalized_validation_groups,
+                ),
+            }
+        )
     run_fingerprint = _training_fingerprint(
         train_cache,
         validation_cache,
@@ -514,8 +625,26 @@ def train_sharded_ctc_head(
         if len(history) != completed_epoch:
             raise ValueError("training state history is incomplete")
         initial_validation = _epoch_metric_from_dict(state["initial_validation"])
+        initial_validation_result = GroupedValidationMetrics(
+            overall=initial_validation,
+            by_group=_validation_groups_from_dict(
+                state.get("initial_validation_by_group"),
+            ),
+        )
         best_epoch = _required_int(state, "best_epoch")
         best_validation = _epoch_metric_from_dict(state["best_validation"])
+        best_validation_result = GroupedValidationMetrics(
+            overall=best_validation,
+            by_group=_validation_groups_from_dict(
+                state.get("best_validation_by_group"),
+            ),
+        )
+        _validate_resumed_validation_groups(
+            normalized_validation_groups,
+            initial_validation_result,
+            best_validation_result,
+            history,
+        )
         raw_best_train = state.get("best_train")
         best_train = (
             _epoch_metric_from_dict(raw_best_train)
@@ -538,19 +667,22 @@ def train_sharded_ctc_head(
         ):
             raise ValueError("training output already exists; use --resume or a new output dir")
         print("evaluating fresh random CTC head on validation cache", flush=True)
-        initial_validation = _evaluate_cache(
+        initial_validation_result = _evaluate_cache(
             head,
             validation_cache,
             device=device,
             batch_size=train_batch_size,
             blank_id=blank_id,
             epoch=0,
+            sample_groups=normalized_validation_groups,
         )
+        initial_validation = initial_validation_result.overall
         best_epoch = 0
         best_train = None
         best_validation = initial_validation
+        best_validation_result = initial_validation_result
         patience_reference_value = _early_stopping_value(
-            initial_validation,
+            initial_validation_result,
             early_stopping_metric,
         )
         stale_epochs = 0
@@ -564,10 +696,10 @@ def train_sharded_ctc_head(
             head=head,
             optimizer=optimizer,
             scheduler=scheduler,
-            initial_validation=initial_validation,
+            initial_validation=initial_validation_result,
             best_epoch=best_epoch,
             best_train=best_train,
-            best_validation=best_validation,
+            best_validation=best_validation_result,
             patience_reference_value=patience_reference_value,
             stale_epochs=stale_epochs,
             training_seconds=training_seconds,
@@ -589,14 +721,16 @@ def train_sharded_ctc_head(
             seed=seed,
             log_every_shards=log_every_shards,
         )
-        validation_metrics = _evaluate_cache(
+        validation_result = _evaluate_cache(
             head,
             validation_cache,
             device=device,
             batch_size=train_batch_size,
             blank_id=blank_id,
             epoch=epoch,
+            sample_groups=normalized_validation_groups,
         )
+        validation_metrics = validation_result.overall
         scheduler.step(validation_metrics.loss)
         epoch_seconds = time.monotonic() - epoch_started
         training_seconds += epoch_seconds
@@ -606,20 +740,25 @@ def train_sharded_ctc_head(
             train=train_metrics,
             validation=validation_metrics,
             epoch_seconds=epoch_seconds,
+            validation_by_group=validation_result.by_group,
         )
         history.append(current)
 
-        if (
-            validation_metrics.phoneme_error_rate,
-            validation_metrics.loss,
-        ) < (best_validation.phoneme_error_rate, best_validation.loss):
+        if _checkpoint_selection_key(
+            validation_result,
+            checkpoint_selection_metric,
+        ) < _checkpoint_selection_key(
+            best_validation_result,
+            checkpoint_selection_metric,
+        ):
             best_epoch = epoch
             best_train = train_metrics
             best_validation = validation_metrics
+            best_validation_result = validation_result
             save_ctc_head_checkpoint(best_checkpoint_path, head, vocab, best_validation, seed)
 
         early_stopping_value = _early_stopping_value(
-            validation_metrics,
+            validation_result,
             early_stopping_metric,
         )
         if early_stopping_value < patience_reference_value - early_stopping_min_delta:
@@ -636,22 +775,24 @@ def train_sharded_ctc_head(
             head=head,
             optimizer=optimizer,
             scheduler=scheduler,
-            initial_validation=initial_validation,
+            initial_validation=initial_validation_result,
             best_epoch=best_epoch,
             best_train=best_train,
-            best_validation=best_validation,
+            best_validation=best_validation_result,
             patience_reference_value=patience_reference_value,
             stale_epochs=stale_epochs,
             training_seconds=training_seconds,
             history=history,
         )
         _write_metric_history(metrics_path, history)
+        grouping_log = _validation_group_log(validation_result)
         print(
             f"epoch={epoch:03d} train_loss={train_metrics.loss:.6f} "
             f"train_PER={train_metrics.phoneme_error_rate:.4f} "
             f"val_loss={validation_metrics.loss:.6f} "
             f"val_PER={validation_metrics.phoneme_error_rate:.4f} "
             f"best_val_PER={best_validation.phoneme_error_rate:.4f} "
+            f"{grouping_log}"
             f"lr={float(optimizer.param_groups[0]['lr']):.2e} "
             f"early_stop={early_stopping_metric} stale={stale_epochs} "
             f"seconds={epoch_seconds:.1f}",
@@ -668,6 +809,10 @@ def train_sharded_ctc_head(
     if not history:
         raise RuntimeError("CTC training completed without an epoch")
     final = history[-1]
+    final_validation_result = GroupedValidationMetrics(
+        overall=final.validation,
+        by_group=final.validation_by_group,
+    )
     report = ShardedCtcReport(
         train_cache_dir=str(train_cache.root),
         validation_cache_dir=str(validation_cache.root),
@@ -686,6 +831,12 @@ def train_sharded_ctc_head(
         train_batch_size=train_batch_size,
         initial_learning_rate=learning_rate,
         final_learning_rate=float(optimizer.param_groups[0]["lr"]),
+        weight_decay=weight_decay,
+        max_gradient_norm=max_gradient_norm,
+        scheduler_patience=scheduler_patience,
+        scheduler_factor=scheduler_factor,
+        minimum_learning_rate=minimum_learning_rate,
+        seed=seed,
         epochs_requested=epochs,
         epochs_completed=final.epoch,
         resumed_from_epoch=resumed_from_epoch,
@@ -693,17 +844,48 @@ def train_sharded_ctc_head(
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
         early_stopping_metric=early_stopping_metric,
+        checkpoint_selection_metric=checkpoint_selection_metric,
+        validation_groups=sorted(set(normalized_validation_groups.values())),
+        validation_sample_groups_sha256=(
+            _sample_groups_sha256(validation_cache, normalized_validation_groups)
+            if normalized_validation_groups
+            else None
+        ),
         initial_validation_loss=initial_validation.loss,
         initial_validation_phoneme_error_rate=initial_validation.phoneme_error_rate,
+        initial_validation_by_group=_validation_group_report(initial_validation_result),
+        initial_validation_macro_phoneme_error_rate=(
+            initial_validation_result.macro_phoneme_error_rate
+        ),
+        initial_validation_worst_group=initial_validation_result.worst_group,
+        initial_validation_worst_group_phoneme_error_rate=(
+            initial_validation_result.worst_group_phoneme_error_rate
+        ),
         best_epoch=best_epoch,
         best_train_loss=best_train.loss if best_train else None,
         best_train_phoneme_error_rate=best_train.phoneme_error_rate if best_train else None,
         best_validation_loss=best_validation.loss,
         best_validation_phoneme_error_rate=best_validation.phoneme_error_rate,
+        best_validation_by_group=_validation_group_report(best_validation_result),
+        best_validation_macro_phoneme_error_rate=(
+            best_validation_result.macro_phoneme_error_rate
+        ),
+        best_validation_worst_group=best_validation_result.worst_group,
+        best_validation_worst_group_phoneme_error_rate=(
+            best_validation_result.worst_group_phoneme_error_rate
+        ),
         final_train_loss=final.train.loss,
         final_train_phoneme_error_rate=final.train.phoneme_error_rate,
         final_validation_loss=final.validation.loss,
         final_validation_phoneme_error_rate=final.validation.phoneme_error_rate,
+        final_validation_by_group=_validation_group_report(final_validation_result),
+        final_validation_macro_phoneme_error_rate=(
+            final_validation_result.macro_phoneme_error_rate
+        ),
+        final_validation_worst_group=final_validation_result.worst_group,
+        final_validation_worst_group_phoneme_error_rate=(
+            final_validation_result.worst_group_phoneme_error_rate
+        ),
         training_seconds=training_seconds,
         best_checkpoint_path=str(best_checkpoint_path),
         latest_checkpoint_path=str(latest_checkpoint_path),
@@ -712,7 +894,7 @@ def train_sharded_ctc_head(
         early_stopped=early_stopped,
         cache_sha256_verified=train_cache.sha256_verified
         and validation_cache.sha256_verified,
-        selection_metric="validation_phoneme_error_rate_then_validation_loss",
+        selection_metric=_checkpoint_selection_description(checkpoint_selection_metric),
         test_set_used=False,
         status="completed",
     )
@@ -765,7 +947,7 @@ def _train_cache_epoch(
                 target_lengths,
                 blank_id=blank_id,
             )
-            computation.loss.backward()
+            computation.loss.backward()  # type: ignore[no-untyped-call]
             torch.nn.utils.clip_grad_norm_(head.parameters(), max_gradient_norm)
             optimizer.step()
             errors, references = _batch_error_counts(
@@ -806,7 +988,8 @@ def _evaluate_cache(
     batch_size: int,
     blank_id: int,
     epoch: int,
-) -> EpochMetrics:
+    sample_groups: Mapping[str, str] | None = None,
+) -> GroupedValidationMetrics:
     import torch
 
     from qwen_hotword.modeling.ctc_head import compute_ctc
@@ -816,6 +999,9 @@ def _evaluate_cache(
     sample_count = 0
     total_errors = 0
     total_reference = 0
+    group_counts: dict[str, list[int]] = {
+        group: [0, 0, 0] for group in sorted(set((sample_groups or {}).values()))
+    }
     with torch.no_grad():
         for descriptor in cache.shards:
             samples = load_feature_shard(descriptor, num_classes=head.num_classes)
@@ -832,24 +1018,53 @@ def _evaluate_cache(
                     target_lengths,
                     blank_id=blank_id,
                 )
-                errors, references = _batch_error_counts(
+                sample_error_counts = _batch_sample_error_counts(
                     computation.logits,
                     computation.input_lengths,
                     batch,
                     blank_id=blank_id,
                 )
+                errors = sum(value[0] for value in sample_error_counts)
+                references = sum(value[1] for value in sample_error_counts)
+                if sample_groups:
+                    for sample, (sample_errors, sample_references) in zip(
+                        batch,
+                        sample_error_counts,
+                        strict=True,
+                    ):
+                        group = sample_groups[sample.sample_id]
+                        accumulator = group_counts[group]
+                        accumulator[0] += 1
+                        accumulator[1] += sample_errors
+                        accumulator[2] += sample_references
                 loss_sum += float(computation.loss.item()) * len(batch)
                 sample_count += len(batch)
                 total_errors += errors
                 total_reference += references
             del samples
-    return _finalize_metrics(
+    overall = _finalize_metrics(
         epoch,
         loss_sum=loss_sum,
         sample_count=sample_count,
         total_errors=total_errors,
         total_reference=total_reference,
     )
+    by_group = {
+        group: ValidationGroupMetrics(
+            sample_count=values[0],
+            phoneme_errors=values[1],
+            reference_phonemes=values[2],
+        )
+        for group, values in group_counts.items()
+    }
+    if by_group:
+        if sum(metrics.sample_count for metrics in by_group.values()) != sample_count:
+            raise RuntimeError("grouped validation did not cover every validation sample")
+        if sum(metrics.phoneme_errors for metrics in by_group.values()) != total_errors:
+            raise RuntimeError("grouped validation error totals differ from aggregate metrics")
+        if sum(metrics.reference_phonemes for metrics in by_group.values()) != total_reference:
+            raise RuntimeError("grouped validation references differ from aggregate metrics")
+    return GroupedValidationMetrics(overall=overall, by_group=by_group)
 
 
 def _batch_error_counts(
@@ -859,11 +1074,26 @@ def _batch_error_counts(
     *,
     blank_id: int,
 ) -> tuple[int, int]:
+    values = _batch_sample_error_counts(
+        logits,
+        input_lengths,
+        samples,
+        blank_id=blank_id,
+    )
+    return sum(value[0] for value in values), sum(value[1] for value in values)
+
+
+def _batch_sample_error_counts(
+    logits: Any,
+    input_lengths: Any,
+    samples: list[CachedSample],
+    *,
+    blank_id: int,
+) -> list[tuple[int, int]]:
     from qwen_hotword.training.edit_distance import sequence_edit_distance
 
     predictions = logits.argmax(dim=-1).detach().cpu()
-    errors = 0
-    references = 0
+    result: list[tuple[int, int]] = []
     for row, sample in enumerate(samples):
         input_length = int(input_lengths[row].item())
         hypothesis = tuple(
@@ -872,9 +1102,13 @@ def _batch_error_counts(
                 blank_id=blank_id,
             )
         )
-        errors += sequence_edit_distance(sample.token_ids, hypothesis)
-        references += len(sample.token_ids)
-    return errors, references
+        result.append(
+            (
+                sequence_edit_distance(sample.token_ids, hypothesis),
+                len(sample.token_ids),
+            )
+        )
+    return result
 
 
 def _finalize_metrics(
@@ -906,6 +1140,8 @@ def _validate_training_arguments(
     early_stopping_patience: int,
     early_stopping_min_delta: float,
     early_stopping_metric: EarlyStoppingMetric,
+    checkpoint_selection_metric: CheckpointSelectionMetric,
+    validation_sample_groups: Mapping[str, str] | None,
     train_batch_size: int,
     learning_rate: float,
     max_gradient_norm: float,
@@ -928,8 +1164,31 @@ def _validate_training_arguments(
         raise ValueError("early stopping patience must be positive")
     if early_stopping_min_delta < 0:
         raise ValueError("early stopping min delta cannot be negative")
-    if early_stopping_metric not in {"validation_loss", "validation_per"}:
-        raise ValueError("early stopping metric must be validation_loss or validation_per")
+    if early_stopping_metric not in {
+        "validation_loss",
+        "validation_per",
+        "validation_macro_per",
+    }:
+        raise ValueError(
+            "early stopping metric must be validation_loss, validation_per, "
+            "or validation_macro_per"
+        )
+    if checkpoint_selection_metric not in {
+        "validation_per",
+        "validation_macro_per",
+    }:
+        raise ValueError(
+            "checkpoint selection metric must be validation_per or validation_macro_per"
+        )
+    normalized_groups = _validate_validation_sample_groups(
+        validation_cache,
+        validation_sample_groups,
+    )
+    if (
+        early_stopping_metric == "validation_macro_per"
+        or checkpoint_selection_metric == "validation_macro_per"
+    ) and not normalized_groups:
+        raise ValueError("macro validation metrics require complete validation sample groups")
     if train_batch_size <= 0 or log_every_shards <= 0:
         raise ValueError("batch size and shard log interval must be positive")
     if learning_rate <= 0 or minimum_learning_rate <= 0 or max_gradient_norm <= 0:
@@ -957,14 +1216,130 @@ def _training_fingerprint(
 
 
 def _early_stopping_value(
-    metrics: EpochMetrics,
+    metrics: EpochMetrics | GroupedValidationMetrics,
     metric: EarlyStoppingMetric,
 ) -> float:
+    grouped = (
+        metrics
+        if isinstance(metrics, GroupedValidationMetrics)
+        else GroupedValidationMetrics(overall=metrics, by_group={})
+    )
     if metric == "validation_loss":
-        return metrics.loss
+        return grouped.overall.loss
     if metric == "validation_per":
-        return metrics.phoneme_error_rate
-    raise ValueError("early stopping metric must be validation_loss or validation_per")
+        return grouped.overall.phoneme_error_rate
+    if metric == "validation_macro_per":
+        value = grouped.macro_phoneme_error_rate
+        if value is None:
+            raise ValueError("validation_macro_per requires grouped validation metrics")
+        return value
+    raise ValueError(
+        "early stopping metric must be validation_loss, validation_per, "
+        "or validation_macro_per"
+    )
+
+
+def _checkpoint_selection_key(
+    metrics: GroupedValidationMetrics,
+    metric: CheckpointSelectionMetric,
+) -> tuple[float, ...]:
+    if metric == "validation_per":
+        return (metrics.overall.phoneme_error_rate, metrics.overall.loss)
+    if metric == "validation_macro_per":
+        macro = metrics.macro_phoneme_error_rate
+        worst = metrics.worst_group_phoneme_error_rate
+        if macro is None or worst is None:
+            raise ValueError("validation_macro_per selection requires grouped metrics")
+        return (macro, worst, metrics.overall.loss)
+    raise ValueError(
+        "checkpoint selection metric must be validation_per or validation_macro_per"
+    )
+
+
+def _checkpoint_selection_description(metric: CheckpointSelectionMetric) -> str:
+    if metric == "validation_per":
+        return "validation_phoneme_error_rate_then_validation_loss"
+    if metric == "validation_macro_per":
+        return (
+            "validation_macro_phoneme_error_rate_then_worst_group_"
+            "phoneme_error_rate_then_validation_loss"
+        )
+    raise ValueError(
+        "checkpoint selection metric must be validation_per or validation_macro_per"
+    )
+
+
+def _validation_group_log(metrics: GroupedValidationMetrics) -> str:
+    macro = metrics.macro_phoneme_error_rate
+    worst_group = metrics.worst_group
+    worst_per = metrics.worst_group_phoneme_error_rate
+    if macro is None or worst_group is None or worst_per is None:
+        return ""
+    group_values = " ".join(
+        f"val_{group}_PER={value.phoneme_error_rate:.4f}"
+        for group, value in sorted(metrics.by_group.items())
+    )
+    return (
+        f"val_macro_PER={macro:.4f} "
+        f"val_worst={worst_group}:{worst_per:.4f} "
+        f"{group_values} "
+    )
+
+
+def _validation_group_report(
+    metrics: GroupedValidationMetrics,
+) -> dict[str, dict[str, object]]:
+    return {
+        group: value.to_dict() for group, value in sorted(metrics.by_group.items())
+    }
+
+
+def _validate_validation_sample_groups(
+    cache: DiskFeatureCache,
+    sample_groups: Mapping[str, str] | None,
+) -> dict[str, str]:
+    if sample_groups is None:
+        return {}
+    normalized = dict(sample_groups)
+    if any(not isinstance(group, str) or not group for group in normalized.values()):
+        raise ValueError("validation sample groups must be non-empty strings")
+    cache_ids = {
+        sample_id for descriptor in cache.shards for sample_id in descriptor.sample_ids
+    }
+    group_ids = set(normalized)
+    if cache_ids != group_ids:
+        raise ValueError(
+            "validation sample groups do not exactly cover the cache: "
+            f"missing={len(cache_ids - group_ids)}, extra={len(group_ids - cache_ids)}"
+        )
+    return normalized
+
+
+def _sample_groups_sha256(
+    cache: DiskFeatureCache,
+    sample_groups: Mapping[str, str],
+) -> str:
+    digest = hashlib.sha256()
+    for descriptor in cache.shards:
+        for sample_id in descriptor.sample_ids:
+            digest.update(sample_id.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(sample_groups[sample_id].encode("utf-8"))
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _validate_resumed_validation_groups(
+    sample_groups: Mapping[str, str],
+    initial: GroupedValidationMetrics,
+    best: GroupedValidationMetrics,
+    history: list[ShardedEpochMetrics],
+) -> None:
+    expected = set(sample_groups.values())
+    actual_values = [set(initial.by_group), set(best.by_group)]
+    actual_values.extend(set(metric.validation_by_group) for metric in history)
+    if any(actual != expected for actual in actual_values):
+        raise ValueError("resumed grouped validation metrics do not match the requested groups")
 
 
 def _save_training_state(
@@ -975,10 +1350,10 @@ def _save_training_state(
     head: Any,
     optimizer: Any,
     scheduler: Any,
-    initial_validation: EpochMetrics,
+    initial_validation: GroupedValidationMetrics,
     best_epoch: int,
     best_train: EpochMetrics | None,
-    best_validation: EpochMetrics,
+    best_validation: GroupedValidationMetrics,
     patience_reference_value: float,
     stale_epochs: int,
     training_seconds: float,
@@ -1001,10 +1376,12 @@ def _save_training_state(
             },
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "initial_validation": initial_validation.to_dict(),
+            "initial_validation": initial_validation.overall.to_dict(),
+            "initial_validation_by_group": _validation_group_report(initial_validation),
             "best_epoch": best_epoch,
             "best_train": best_train.to_dict() if best_train else None,
-            "best_validation": best_validation.to_dict(),
+            "best_validation": best_validation.overall.to_dict(),
+            "best_validation_by_group": _validation_group_report(best_validation),
             "patience_reference_value": patience_reference_value,
             "stale_epochs": stale_epochs,
             "training_seconds": training_seconds,
@@ -1024,7 +1401,34 @@ def _sharded_metric_from_dict(value: object) -> ShardedEpochMetrics:
         train=_epoch_metric_from_dict(value["train"]),
         validation=_epoch_metric_from_dict(value["validation"]),
         epoch_seconds=float(value["epoch_seconds"]),
+        validation_by_group=_validation_groups_from_dict(
+            value.get("validation_by_group"),
+        ),
     )
+
+
+def _validation_groups_from_dict(
+    value: object,
+) -> dict[str, ValidationGroupMetrics]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("grouped validation metrics must be an object")
+    result: dict[str, ValidationGroupMetrics] = {}
+    for group, raw_metrics in value.items():
+        if not isinstance(group, str) or not group or not isinstance(raw_metrics, dict):
+            raise ValueError("grouped validation metric entries are invalid")
+        sample_count = _required_int(raw_metrics, "sample_count")
+        phoneme_errors = _required_int(raw_metrics, "phoneme_errors")
+        reference_phonemes = _required_int(raw_metrics, "reference_phonemes")
+        if sample_count <= 0 or reference_phonemes <= 0:
+            raise ValueError("grouped validation metrics must contain samples and references")
+        result[group] = ValidationGroupMetrics(
+            sample_count=sample_count,
+            phoneme_errors=phoneme_errors,
+            reference_phonemes=reference_phonemes,
+        )
+    return result
 
 
 def _epoch_metric_from_dict(value: object) -> EpochMetrics:

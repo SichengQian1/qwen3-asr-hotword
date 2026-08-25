@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
+from qwen_hotword.training.ctc_diagnostics import load_validation_sample_groups
 from qwen_hotword.training.sharded_ctc import (
     exclusive_training_run,
     load_disk_feature_cache,
@@ -39,12 +40,29 @@ def main() -> int:
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.001)
     parser.add_argument(
         "--early-stopping-metric",
-        choices=("validation_loss", "validation_per"),
+        choices=("validation_loss", "validation_per", "validation_macro_per"),
         default="validation_loss",
         help=(
-            "Metric used to count stale epochs. Best checkpoints are always selected "
-            "by validation PER, then validation loss."
+            "Metric used to count stale epochs. Macro PER requires validation groups."
         ),
+    )
+    parser.add_argument(
+        "--checkpoint-selection-metric",
+        choices=("validation_per", "validation_macro_per"),
+        default="validation_per",
+        help=(
+            "Select best checkpoints by aggregate PER/loss or by Macro PER, "
+            "worst-group PER, then aggregate loss."
+        ),
+    )
+    parser.add_argument(
+        "--validation-group-column",
+        help="Optional validation manifest field used for per-group PER metrics.",
+    )
+    parser.add_argument(
+        "--expected-validation-groups",
+        default="",
+        help="Optional comma-separated exact group set, for example en,es,pt.",
     )
     parser.add_argument("--train-batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
@@ -91,6 +109,32 @@ def main() -> int:
                 vocab_path=args.vocab,
                 verify_sha256=verify_sha256,
             )
+            expected_validation_groups = tuple(
+                value.strip()
+                for value in args.expected_validation_groups.split(",")
+                if value.strip()
+            )
+            if expected_validation_groups and not args.validation_group_column:
+                raise ValueError(
+                    "--expected-validation-groups requires --validation-group-column"
+                )
+            if (
+                args.early_stopping_metric == "validation_macro_per"
+                or args.checkpoint_selection_metric == "validation_macro_per"
+            ) and not args.validation_group_column:
+                raise ValueError(
+                    "Macro validation metrics require --validation-group-column"
+                )
+            validation_sample_groups = (
+                load_validation_sample_groups(
+                    args.validation_manifest,
+                    validation_cache,
+                    group_column=args.validation_group_column,
+                    expected_groups=expected_validation_groups,
+                )
+                if args.validation_group_column
+                else None
+            )
             print(
                 json.dumps(
                     {
@@ -101,6 +145,8 @@ def main() -> int:
                         "train_shards": train_cache.shard_count,
                         "validation_shards": validation_cache.shard_count,
                         "cache_sha256_verified": verify_sha256,
+                        "validation_group_column": args.validation_group_column,
+                        "validation_groups": list(expected_validation_groups),
                         "device": args.device,
                         "test_set_used": False,
                     },
@@ -120,6 +166,8 @@ def main() -> int:
                 early_stopping_patience=args.early_stopping_patience,
                 early_stopping_min_delta=args.early_stopping_min_delta,
                 early_stopping_metric=args.early_stopping_metric,
+                checkpoint_selection_metric=args.checkpoint_selection_metric,
+                validation_sample_groups=validation_sample_groups,
                 train_batch_size=args.train_batch_size,
                 learning_rate=args.learning_rate,
                 weight_decay=args.weight_decay,
