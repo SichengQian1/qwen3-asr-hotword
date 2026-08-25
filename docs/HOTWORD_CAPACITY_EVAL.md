@@ -628,3 +628,28 @@ chunk，也不把offline full结果注入streaming。
 参数继续固定0.86/Top-5/0.35/0.25/min posterior 0/margin 0，Raw Top-7/10只观察，
 不能扩大Prompt。历史汇总按每个`window × shortlist`分别生成`anchor_rerank`行，
 不得混算不同变体。工作区完整命令与输出检查见`docs/HANDOFF.md` 0.47。
+
+## 16. Step 4结果与Anchor引导局部精排
+
+Step 4证明候选生成已不再是总检索瓶颈。离线formal100中，shortlist 64/128/256的
+总检索P95分别为123.45/157.87/446.07 ms，其中rerank P95分别占90.68/133.09/
+413.03 ms。三档Operating Top-5 recall都为80.23%，precision都为55.42%，负例FPR
+都为25%；扩大候选集没有带来Operating收益。64档Raw Top-5/7/10 recall为
+86.63%/90.70%/93.02%，因此后续以64为性能主线、128为质量对照，停止256主线精排。
+
+流式recent窗口必须同时报告两类口径：
+
+- `final_*`：最后一个chunk仍保留的候选，衡量最终窗口状态；
+- `any_step_*`：任一因果chunk曾检出同一case/hotword，衡量真实流式发现能力。
+
+只看final会把已经检出、后来滑出recent窗口的热词误算成漏检。`any_step_*`不做TTL、
+不向后续chunk注入历史候选，也不改变在线策略，只是对已有逐chunk结果做评测聚合。
+Raw Top-5/7/10和Operating Top-5均输出recall、precision与positive case hit；负例还输出
+任一step误检率。
+
+下一步`anchor_guided`模式复用同一个近似评分器、分数公式、排序键和门控，只限制每个
+候选的滑窗起点：以Anchor的`best_offset`为中心，默认搜索前后2个decoded token
+位置。候选没有有效offset时仍回退该候选的完整搜索。报告写入`rerank_mode`和
+`anchor_start_radius`，优化历史据此区分full-search与guided，不能把两者当作等价实现。
+第一轮只测shortlist 64/128、radius 2；完整工作区命令与验收顺序见
+`docs/HANDOFF.md` 0.48。

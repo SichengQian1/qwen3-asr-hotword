@@ -24,6 +24,7 @@ from qwen_hotword.hotwords.registry import HotwordEntry, load_hotword_table
 from qwen_hotword.hotwords.scoring import (
     DecodedPhoneme,
     HotwordScoringConfig,
+    profile_anchor_guided_decoded_hotwords,
     profile_decoded_hotwords,
 )
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
@@ -32,6 +33,7 @@ DEFAULT_SHORTLIST_SIZES = (64, 128, 256)
 DEFAULT_LOOKBACK_SECONDS: tuple[float | None, ...] = (None, 2.0, 4.0, 6.0)
 OBSERVATION_KS = (5, 7, 10)
 GC_POLICIES = ("normal", "defer_during_retrieval_pass")
+RERANK_MODES = ("full_search", "anchor_guided")
 
 
 def crop_decoded_to_lookback(
@@ -90,6 +92,8 @@ def benchmark_anchor_rerank_capacity(
     warmup_queries: int = 3,
     deadline_seconds: float = 0.05,
     gc_policy: str = "defer_during_retrieval_pass",
+    rerank_mode: str = "full_search",
+    anchor_start_radius: int = 2,
     print_progress: bool = True,
 ) -> dict[str, object]:
     resolved_profiles = tuple(dict.fromkeys(profiles))
@@ -109,6 +113,10 @@ def benchmark_anchor_rerank_capacity(
         raise ValueError("deadline_seconds must be positive")
     if gc_policy not in GC_POLICIES:
         raise ValueError(f"gc_policy must be one of {GC_POLICIES}")
+    if rerank_mode not in RERANK_MODES:
+        raise ValueError(f"rerank_mode must be one of {RERANK_MODES}")
+    if anchor_start_radius < 0:
+        raise ValueError("anchor_start_radius must not be negative")
 
     anchor_config = AnchorIndexConfig(
         ngram_sizes=resolved_ngrams,
@@ -180,6 +188,8 @@ def benchmark_anchor_rerank_capacity(
                     index=index,
                     shortlist_size=max(resolved_shortlists),
                     scoring_config=scoring_config,
+                    rerank_mode=rerank_mode,
+                    anchor_start_radius=anchor_start_radius,
                 )
                 level_rows: list[dict[str, object]] = []
                 total_variants = len(resolved_lookbacks) * len(resolved_shortlists)
@@ -203,6 +213,8 @@ def benchmark_anchor_rerank_capacity(
                                     deadline_seconds=deadline_seconds,
                                     profile=profile,
                                     size=size,
+                                    rerank_mode=rerank_mode,
+                                    anchor_start_radius=anchor_start_radius,
                                 )
                                 level_rows.append(row)
                                 query_rows.append(row)
@@ -280,6 +292,8 @@ def benchmark_anchor_rerank_capacity(
             "posterior_weight": posterior_weight,
             "minimum_posterior_confidence": minimum_posterior_confidence,
             "minimum_top1_margin": minimum_top1_margin,
+            "rerank_mode": rerank_mode,
+            "anchor_start_radius": anchor_start_radius,
         },
         "gc_policy": gc_policy,
         "deadline_seconds": deadline_seconds,
@@ -295,6 +309,7 @@ def benchmark_anchor_rerank_capacity(
         "status": "pass",
         "elapsed_seconds": time.monotonic() - started,
         "mode": "anchor_shortlist_then_existing_approximate_phoneme_scorer",
+        "rerank_mode": rerank_mode,
         "query_rows": len(query_rows),
         "source_replay_rows": len(replay_rows),
         "levels": summaries,
@@ -338,6 +353,8 @@ def _run_query(
     deadline_seconds: float,
     profile: str,
     size: int,
+    rerank_mode: str,
+    anchor_start_radius: int,
 ) -> dict[str, object]:
     decoded, window_steps, cutoff_step = crop_decoded_to_lookback(
         replay_decoded_phonemes(replay),
@@ -354,12 +371,22 @@ def _run_query(
     )
     anchor_seconds = time.perf_counter() - anchor_started
     candidate_entries = tuple(entry_by_id[item.hotword_id] for item in candidates.candidates)
-    rerank = profile_decoded_hotwords(
-        decoded,
-        effective_time_steps=window_steps,
-        hotwords=candidate_entries,
-        config=scoring_config,
-    )
+    if rerank_mode == "anchor_guided":
+        rerank = profile_anchor_guided_decoded_hotwords(
+            decoded,
+            effective_time_steps=window_steps,
+            hotwords=candidate_entries,
+            start_hints={item.hotword_id: item.best_offset for item in candidates.candidates},
+            maximum_start_delta=anchor_start_radius,
+            config=scoring_config,
+        )
+    else:
+        rerank = profile_decoded_hotwords(
+            decoded,
+            effective_time_steps=window_steps,
+            hotwords=candidate_entries,
+            config=scoring_config,
+        )
     total_seconds = anchor_seconds + rerank.retrieval_seconds
     ranking_ids = tuple(match.hotword_id for match in rerank.result.ranked_matches)
     operating_ids = tuple(match.hotword_id for match in rerank.result.selected_matches)
@@ -381,6 +408,8 @@ def _run_query(
         "window_effective_time_steps": window_steps,
         "window_decoded_phonemes": len(decoded),
         "shortlist_size": shortlist_size,
+        "rerank_mode": rerank_mode,
+        "anchor_start_radius": anchor_start_radius,
         "candidate_count": len(candidates.candidates),
         "candidate_expected_hits": len(
             expected & {item.hotword_id for item in candidates.candidates}
@@ -417,6 +446,8 @@ def _warm_up(
     index: PhonemeAnchorIndex,
     shortlist_size: int,
     scoring_config: HotwordScoringConfig,
+    rerank_mode: str,
+    anchor_start_radius: int,
 ) -> None:
     for replay in replay_rows:
         case = case_by_id[str(replay["case_id"])]
@@ -427,12 +458,23 @@ def _warm_up(
             active_hotword_ids=case.active_hotword_ids,
             maximum_candidates=shortlist_size,
         )
-        profile_decoded_hotwords(
-            decoded,
-            effective_time_steps=int(replay["effective_time_steps"]),
-            hotwords=tuple(entry_by_id[item.hotword_id] for item in result.candidates),
-            config=scoring_config,
-        )
+        hotwords = tuple(entry_by_id[item.hotword_id] for item in result.candidates)
+        if rerank_mode == "anchor_guided":
+            profile_anchor_guided_decoded_hotwords(
+                decoded,
+                effective_time_steps=int(replay["effective_time_steps"]),
+                hotwords=hotwords,
+                start_hints={item.hotword_id: item.best_offset for item in result.candidates},
+                maximum_start_delta=anchor_start_radius,
+                config=scoring_config,
+            )
+        else:
+            profile_decoded_hotwords(
+                decoded,
+                effective_time_steps=int(replay["effective_time_steps"]),
+                hotwords=hotwords,
+                config=scoring_config,
+            )
 
 
 def _summarize_level(
@@ -477,6 +519,7 @@ def _summarize_level(
                     expected_total,
                 ),
             }
+            _add_any_step_quality(quality, selected, final=final)
             for k in OBSERVATION_KS:
                 hits = sum(int(row[f"raw_expected_hits_at_{k}"]) for row in final)
                 returned = sum(len(row[f"raw_top{k}_ids"]) for row in final)
@@ -540,6 +583,83 @@ def _summarize_level(
                 "test_set_used": False,
             }
     return output
+
+
+def _add_any_step_quality(
+    quality: dict[str, object],
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    final: Sequence[Mapping[str, Any]],
+) -> None:
+    expected_pairs = {
+        (str(row["case_id"]), str(hotword_id))
+        for row in final
+        for hotword_id in row["expected_hotword_ids"]
+    }
+    positive_case_ids = {
+        str(row["case_id"]) for row in final if row["expected_hotword_ids"]
+    }
+    negative_case_ids = {
+        str(row["case_id"]) for row in final if not row["expected_hotword_ids"]
+    }
+    rows_by_case: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        rows_by_case.setdefault(str(row["case_id"]), []).append(row)
+
+    def detected_pairs(key: str) -> set[tuple[str, str]]:
+        return {
+            (case_id, hotword_id)
+            for case_id, hotword_id in expected_pairs
+            if any(hotword_id in row[key] for row in rows_by_case[case_id])
+        }
+
+    def case_hit_rate(pairs: set[tuple[str, str]]) -> float | None:
+        hit_cases = {case_id for case_id, _ in pairs}
+        return _ratio(len(hit_cases), len(positive_case_ids))
+
+    candidate_pairs = detected_pairs("candidate_ids")
+    quality["any_step_candidate_correct"] = len(candidate_pairs)
+    quality["any_step_candidate_recall"] = _ratio(
+        len(candidate_pairs), len(expected_pairs)
+    )
+    quality["any_step_candidate_positive_case_hit_rate"] = case_hit_rate(candidate_pairs)
+    for k in OBSERVATION_KS:
+        key = f"raw_top{k}_ids"
+        pairs = detected_pairs(key)
+        returned_pairs = {
+            (str(row["case_id"]), str(hotword_id))
+            for row in rows
+            for hotword_id in row[key]
+        }
+        quality[f"any_step_raw_correct_at_{k}"] = len(pairs)
+        quality[f"any_step_raw_recall_at_{k}"] = _ratio(len(pairs), len(expected_pairs))
+        quality[f"any_step_raw_precision_at_{k}"] = _ratio(
+            len(pairs), len(returned_pairs)
+        )
+        quality[f"any_step_raw_positive_case_hit_rate_at_{k}"] = case_hit_rate(pairs)
+    operating_pairs = detected_pairs("operating_ids")
+    operating_returned_pairs = {
+        (str(row["case_id"]), str(hotword_id))
+        for row in rows
+        for hotword_id in row["operating_ids"]
+    }
+    quality["any_step_operating_correct_at_5"] = len(operating_pairs)
+    quality["any_step_operating_recall_at_5"] = _ratio(
+        len(operating_pairs), len(expected_pairs)
+    )
+    quality["any_step_operating_precision_at_5"] = _ratio(
+        len(operating_pairs), len(operating_returned_pairs)
+    )
+    quality["any_step_operating_positive_case_hit_rate_at_5"] = case_hit_rate(
+        operating_pairs
+    )
+    quality["any_step_negative_case_false_positive_rate"] = _ratio(
+        sum(
+            any(row["operating_ids"] for row in rows_by_case[case_id])
+            for case_id in negative_case_ids
+        ),
+        len(negative_case_ids),
+    )
 
 
 def _load_level(

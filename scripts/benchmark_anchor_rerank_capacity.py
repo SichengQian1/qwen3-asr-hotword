@@ -11,6 +11,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from qwen_hotword.hotwords.anchor_rerank import (
     GC_POLICIES,
+    RERANK_MODES,
     benchmark_anchor_rerank_capacity,
 )
 
@@ -83,6 +84,8 @@ def main() -> int:
     parser.add_argument(
         "--gc-policy", choices=GC_POLICIES, default="defer_during_retrieval_pass"
     )
+    parser.add_argument("--rerank-mode", choices=RERANK_MODES, default="full_search")
+    parser.add_argument("--anchor-start-radius", type=int, default=2)
     parser.add_argument("--quiet-progress", action="store_true")
     args = parser.parse_args()
     try:
@@ -108,6 +111,8 @@ def main() -> int:
             warmup_queries=args.warmup_queries,
             deadline_seconds=args.deadline_ms / 1000.0,
             gc_policy=args.gc_policy,
+            rerank_mode=args.rerank_mode,
+            anchor_start_radius=args.anchor_start_radius,
             print_progress=not args.quiet_progress,
         )
     except (FileExistsError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:

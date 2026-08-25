@@ -1,5 +1,123 @@
 # 工作交接记录
 
+## 0.48 2026-08-25 Step 4结果、流式指标修正与Anchor引导精排
+
+4k Step 4的离线formal100和累计流式Posterior smoke20均已完成并通过SHA256。
+本轮没有改0.86阈值、Operating Top-5、edit ratio 0.35、posterior weight 0.25、
+margin、Prompt或CTC输出。结论是：Anchor候选阶段已经足够快，当前50 ms的主要瓶颈
+明确转移到了shortlist上的全序列滑窗编辑距离精排。
+
+离线formal100的full-current结果：
+
+| shortlist | 候选Recall | Raw R@5/R@7/R@10 | Operating R@5 | Operating P@5 | 负例FPR | Anchor P95 | rerank P95 | 总P95 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64 | 95.35% | 86.63% / 90.70% / 93.02% | 80.23% | 55.42% | 25.0% | 30.88 ms | 90.68 ms | 123.45 ms |
+| 128 | 97.67% | 86.05% / 90.12% / 93.60% | 80.23% | 55.42% | 25.0% | 24.45 ms | 133.09 ms | 157.87 ms |
+| 256 | 97.67% | 86.05% / 90.12% / 92.44% | 80.23% | 55.42% | 25.0% | 33.80 ms | 413.03 ms | 446.07 ms |
+
+扩大shortlist没有改善Operating结果；64甚至略高于128/256的Raw Top-5，同时总P95
+最低。因此现阶段以64作为性能主线、128作为质量对照，不再运行256精排主线。
+负例FPR 25%是现有门控在这100条数据上的结果，不是Anchor新增误报；本步骤不靠调整
+阈值掩盖它，留给Step 5单独处理。
+
+累计流式smoke20只有20个正例、60个expected hotword，没有负例，不能估计FPR。
+其final step结果为：full-current下shortlist 64的Raw R@5/R@7/R@10为
+83.33%/86.67%/90.00%，Operating R@5为78.33%，总P95为118.36 ms；recent-2s/
+64的final Raw R@5/R@7/R@10为33.33%/35.00%/36.67%，Operating R@5为28.33%，
+总P95为44.22 ms。recent-4s/64总P95为79.52 ms，recent-6s/64为68.48 ms。
+
+recent窗口的final-only召回不能解释为真实流式漏检：热词可能在较早的因果chunk被检出，
+随后滑出最近窗口，最终行自然不再包含它。评测现已新增每个case/hotword的
+`any_step_*` Raw Top-5/7/10 recall/precision、Operating Top-5 recall/precision、
+positive case hit与负例FPR；历史汇总器也会从旧`query_results.jsonl`直接恢复这些
+指标，无需重跑旧full-search基线。
+
+下一项等价方向是Anchor引导局部精排：保留完全相同的评分、排序和Operating门控，
+但用Anchor的`best_offset`作为decoded-token起点估计，只搜索其前后2个token位置，
+而不是让每个候选扫描完整累计CTC序列。该搜索域变化必须和Step 4 full-search逐项比较，
+只有质量差异可接受且总检索P95小于50 ms才可进入主线。
+
+工作区拉取后运行新目录；当前先比较shortlist 64/128、radius 2，不运行256：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+STREAM_REPLAY_ROOT="$CAP_ROOT/replay_streaming_posterior_smoke20_v2"
+OFFLINE_FULL_ROOT="$CAP_ROOT/benchmark_anchor_rerank_offline_formal100_4000_v1"
+STREAM_FULL_ROOT="$CAP_ROOT/benchmark_anchor_rerank_streaming_smoke20_4000_v1"
+OFFLINE_GUIDED_ROOT="$CAP_ROOT/benchmark_anchor_guided_rerank_offline_formal100_4000_r2_v1"
+STREAM_GUIDED_ROOT="$CAP_ROOT/benchmark_anchor_guided_rerank_streaming_smoke20_4000_r2_v1"
+GUIDED_HISTORY_ROOT="$CAP_ROOT/optimization_history_4000_guided_r2_v1"
+
+COMMON_GUIDED_ARGS=(
+  --assets-root "$ASSET_4K_ROOT"
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+  --profiles representative
+  --sizes 4000
+  --shortlist-sizes 64,128
+  --ngram-sizes 2,3,4
+  --anchors-per-entry 24
+  --offset-tolerance 1
+  --threshold 0.86
+  --top-k 5
+  --maximum-edit-ratio 0.35
+  --posterior-weight 0.25
+  --minimum-posterior-confidence 0
+  --minimum-top1-margin 0
+  --deadline-ms 50
+  --gc-policy defer_during_retrieval_pass
+  --rerank-mode anchor_guided
+  --anchor-start-radius 2
+)
+
+test ! -e "$OFFLINE_GUIDED_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  "${COMMON_GUIDED_ARGS[@]}" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --lookbacks full \
+  --output-dir "$OFFLINE_GUIDED_ROOT"
+
+test ! -e "$STREAM_GUIDED_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  "${COMMON_GUIDED_ARGS[@]}" \
+  --replay "$STREAM_REPLAY_ROOT/ctc_replay.jsonl" \
+  --lookbacks full,2,4,6 \
+  --output-dir "$STREAM_GUIDED_ROOT"
+```
+
+检查并生成可追溯对比：
+
+```bash
+(cd "$OFFLINE_GUIDED_ROOT" && sha256sum -c sha256.txt)
+(cd "$STREAM_GUIDED_ROOT" && sha256sum -c sha256.txt)
+
+cat "$OFFLINE_GUIDED_ROOT/quality_summary.json"
+cat "$OFFLINE_GUIDED_ROOT/performance_summary.json"
+cat "$STREAM_GUIDED_ROOT/quality_summary.json"
+cat "$STREAM_GUIDED_ROOT/performance_summary.json"
+
+test ! -e "$GUIDED_HISTORY_ROOT"
+python scripts/summarize_hotword_capacity_history.py \
+  --stage full_search_offline_v1="$OFFLINE_FULL_ROOT" \
+  --stage anchor_guided_offline_r2_v1="$OFFLINE_GUIDED_ROOT" \
+  --stage full_search_streaming_v1="$STREAM_FULL_ROOT" \
+  --stage anchor_guided_streaming_r2_v1="$STREAM_GUIDED_ROOT" \
+  --profiles representative \
+  --sizes 4000 \
+  --output-dir "$GUIDED_HISTORY_ROOT"
+
+(cd "$GUIDED_HISTORY_ROOT" && sha256sum -c sha256.txt)
+cat "$GUIDED_HISTORY_ROOT/optimization_history.tsv"
+```
+
+验收顺序固定：先比较candidate recall，再比较Raw Top-5/7/10和Operating Top-5，
+流式recent窗口以`any_step_*`为主、final-only为稳定保留诊断，最后比较总检索P95/P99。
+如果radius 2丢失明显，再测radius 4；若质量等价但P95仍超50 ms，才进一步做内存分配
+和候选批处理优化，不调整阈值和Top-K。
+
 ## 0.47 2026-08-25 4k Anchor GC结论、Step 4精排实现与三语训练状态
 
 4k/50 ms六步路线的Step 3现已完成。工作区GC A/B质量文件逐字节一致；默认GC组

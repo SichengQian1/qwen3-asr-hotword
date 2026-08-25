@@ -37,6 +37,10 @@ def _base_row(case_id: str, expected: list[str]) -> dict[str, object]:
     }
 
 
+def _nonfinal_row(case_id: str, expected: list[str]) -> dict[str, object]:
+    return {**_base_row(case_id, expected), "is_final": False}
+
+
 def test_capacity_history_normalizes_existing_full_scan_and_legacy_anchor(
     tmp_path: Path,
 ) -> None:
@@ -171,3 +175,62 @@ def test_capacity_history_keeps_rerank_windows_and_shortlists_separate(
     }
     assert {row["ranking"] for row in history} == {"anchor_rerank"}
     assert all(row["operating_recall_at_5"] == 1.0 for row in history)
+
+
+def test_capacity_history_reports_streaming_any_step_recall(tmp_path: Path) -> None:
+    stage = tmp_path / "streaming"
+    nonfinal = {
+        **_nonfinal_row("positive", ["right"]),
+        "window": "recent_2s",
+        "shortlist_size": 64,
+        "candidate_ids": ["right", "wrong"],
+        "raw_top5_ids": ["right", "wrong"],
+        "raw_top7_ids": ["right", "wrong"],
+        "raw_top10_ids": ["right", "wrong"],
+        "operating_ids": ["right"],
+        "retrieval_seconds": 0.01,
+    }
+    final_positive = {
+        **_base_row("positive", ["right"]),
+        "window": "recent_2s",
+        "shortlist_size": 64,
+        "candidate_ids": ["wrong"],
+        "raw_top5_ids": ["wrong"],
+        "raw_top7_ids": ["wrong"],
+        "raw_top10_ids": ["wrong"],
+        "operating_ids": [],
+        "retrieval_seconds": 0.01,
+    }
+    final_negative = {
+        **_base_row("negative", []),
+        "window": "recent_2s",
+        "shortlist_size": 64,
+        "candidate_ids": ["wrong"],
+        "raw_top5_ids": ["wrong"],
+        "raw_top7_ids": ["wrong"],
+        "raw_top10_ids": ["wrong"],
+        "operating_ids": ["wrong"],
+        "retrieval_seconds": 0.01,
+    }
+    _write_stage(
+        stage,
+        mode="anchor_shortlist_then_existing_approximate_phoneme_scorer",
+        rows=[nonfinal, final_positive, final_negative],
+    )
+
+    report = build_hotword_capacity_history(
+        stages=(("streaming", stage),),
+        output_dir=tmp_path / "history",
+        sizes=(4000,),
+    )
+
+    history = report["history"]
+    assert isinstance(history, list)
+    row = history[0]
+    assert row["raw_recall_at_5"] == 0.0
+    assert row["operating_recall_at_5"] == 0.0
+    assert row["any_step_raw_recall_at_5"] == 1.0
+    assert row["any_step_raw_precision_at_5"] == pytest.approx(1 / 3)
+    assert row["any_step_operating_recall_at_5"] == 1.0
+    assert row["any_step_operating_precision_at_5"] == 0.5
+    assert row["any_step_negative_case_false_positive_rate"] == 1.0

@@ -154,6 +154,8 @@ def _normalize_stage_rows(
         "negative_cases": sum(not bool(row["expected_hotword_ids"]) for row in final),
         "timing_protocol": summary.get("timing_protocol"),
         "gc_policy": summary.get("gc_policy"),
+        "rerank_mode": summary.get("rerank_mode"),
+        "anchor_start_radius": summary.get("anchor_start_radius"),
         "test_set_used": False,
     }
     normalized: list[dict[str, object]] = []
@@ -288,6 +290,14 @@ def _ranking_row(
             ),
             len(positive),
         )
+        _add_any_step_ranking_metrics(
+            result,
+            rows=rows,
+            final=final,
+            key=key,
+            k=k,
+            slice_to_k=slice_to_k,
+        )
     if operating_key is not None and all(operating_key in row for row in final):
         operating_hits = sum(
             len(set(row["expected_hotword_ids"]) & set(row[operating_key]))
@@ -302,6 +312,12 @@ def _ranking_row(
         result["negative_case_false_positive_rate"] = _ratio(
             sum(bool(row[operating_key]) for row in negative), len(negative)
         )
+        _add_any_step_operating_metrics(
+            result,
+            rows=rows,
+            final=final,
+            operating_key=operating_key,
+        )
     else:
         result["operating_correct_at_5"] = None
         result["operating_recall_at_5"] = None
@@ -310,6 +326,113 @@ def _ranking_row(
     latency = [float(row[latency_key]) for row in rows]
     result.update({f"latency_{key}": value for key, value in _distribution(latency).items()})
     return result
+
+
+def _add_any_step_ranking_metrics(
+    result: dict[str, object],
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    final: Sequence[Mapping[str, Any]],
+    key: str,
+    k: int,
+    slice_to_k: bool,
+) -> None:
+    if any(key not in row for row in rows):
+        result[f"any_step_raw_correct_at_{k}"] = None
+        result[f"any_step_raw_recall_at_{k}"] = None
+        result[f"any_step_positive_case_hit_rate_at_{k}"] = None
+        return
+    expected_pairs, positive_case_ids, _ = _case_truth(final)
+    rows_by_case = _rows_by_case(rows)
+    detected = {
+        (case_id, hotword_id)
+        for case_id, hotword_id in expected_pairs
+        if any(
+            hotword_id in (list(row[key])[:k] if slice_to_k else row[key])
+            for row in rows_by_case[case_id]
+        )
+    }
+    returned = {
+        (str(row["case_id"]), str(hotword_id))
+        for row in rows
+        for hotword_id in (list(row[key])[:k] if slice_to_k else row[key])
+    }
+    result[f"any_step_raw_correct_at_{k}"] = len(detected)
+    result[f"any_step_raw_recall_at_{k}"] = _ratio(len(detected), len(expected_pairs))
+    result[f"any_step_raw_precision_at_{k}"] = _ratio(len(detected), len(returned))
+    result[f"any_step_positive_case_hit_rate_at_{k}"] = _ratio(
+        len({case_id for case_id, _ in detected}), len(positive_case_ids)
+    )
+
+
+def _add_any_step_operating_metrics(
+    result: dict[str, object],
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    final: Sequence[Mapping[str, Any]],
+    operating_key: str,
+) -> None:
+    if any(operating_key not in row for row in rows):
+        result["any_step_operating_correct_at_5"] = None
+        result["any_step_operating_recall_at_5"] = None
+        result["any_step_operating_positive_case_hit_rate_at_5"] = None
+        result["any_step_negative_case_false_positive_rate"] = None
+        return
+    expected_pairs, positive_case_ids, negative_case_ids = _case_truth(final)
+    rows_by_case = _rows_by_case(rows)
+    detected = {
+        (case_id, hotword_id)
+        for case_id, hotword_id in expected_pairs
+        if any(hotword_id in row[operating_key] for row in rows_by_case[case_id])
+    }
+    returned = {
+        (str(row["case_id"]), str(hotword_id))
+        for row in rows
+        for hotword_id in row[operating_key]
+    }
+    result["any_step_operating_correct_at_5"] = len(detected)
+    result["any_step_operating_recall_at_5"] = _ratio(
+        len(detected), len(expected_pairs)
+    )
+    result["any_step_operating_precision_at_5"] = _ratio(
+        len(detected), len(returned)
+    )
+    result["any_step_operating_positive_case_hit_rate_at_5"] = _ratio(
+        len({case_id for case_id, _ in detected}), len(positive_case_ids)
+    )
+    result["any_step_negative_case_false_positive_rate"] = _ratio(
+        sum(
+            any(row[operating_key] for row in rows_by_case[case_id])
+            for case_id in negative_case_ids
+        ),
+        len(negative_case_ids),
+    )
+
+
+def _case_truth(
+    final: Sequence[Mapping[str, Any]],
+) -> tuple[set[tuple[str, str]], set[str], set[str]]:
+    expected_pairs = {
+        (str(row["case_id"]), str(hotword_id))
+        for row in final
+        for hotword_id in row["expected_hotword_ids"]
+    }
+    positive_case_ids = {
+        str(row["case_id"]) for row in final if row["expected_hotword_ids"]
+    }
+    negative_case_ids = {
+        str(row["case_id"]) for row in final if not row["expected_hotword_ids"]
+    }
+    return expected_pairs, positive_case_ids, negative_case_ids
+
+
+def _rows_by_case(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, list[Mapping[str, Any]]]:
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["case_id"]), []).append(row)
+    return grouped
 
 
 def _distribution(values: Sequence[float]) -> dict[str, float | int | None]:

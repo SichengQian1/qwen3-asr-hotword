@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -182,17 +183,7 @@ def profile_decoded_hotwords(
 ) -> ProfiledHotwordScoringResult:
     scoring_config = config or HotwordScoringConfig()
     scoring_config.validate()
-    if effective_time_steps <= 0:
-        raise ValueError("effective_time_steps must be positive")
-    if any(
-        item.token_id <= 0
-        or item.start_step < 0
-        or item.end_step <= item.start_step
-        or item.end_step > effective_time_steps
-        or not 0.0 <= item.confidence <= 1.0
-        for item in decoded
-    ):
-        raise ValueError("decoded phonemes are outside the effective CTC time axis")
+    _validate_decoded(decoded, effective_time_steps=effective_time_steps)
 
     matching_started = time.perf_counter()
     matches = [
@@ -201,49 +192,55 @@ def profile_decoded_hotwords(
         if len(candidate.token_ids) >= scoring_config.minimum_phonemes
     ]
     matching_seconds = time.perf_counter() - matching_started
-    sorting_started = time.perf_counter()
-    matches.sort(
-        key=lambda item: (
-            -item.score,
-            item.edit_ratio,
-            -item.posterior_confidence,
-            item.hotword_id,
-        )
-    )
-    sorting_seconds = time.perf_counter() - sorting_started
-    selection_started = time.perf_counter()
-    qualified = [
-        match
-        for match in matches
-        if match.score >= scoring_config.score_threshold
-        and match.edit_ratio <= scoring_config.maximum_edit_ratio
-        and match.posterior_confidence >= scoring_config.minimum_posterior_confidence
-    ]
-    suppressed_reason: str | None = None
-    if not qualified:
-        suppressed_reason = "below_threshold"
-        selected: list[HotwordMatch] = []
-    elif (
-        len(qualified) > 1
-        and qualified[0].score - qualified[1].score < scoring_config.minimum_top1_margin
-    ):
-        suppressed_reason = "ambiguous_top_matches"
-        selected = []
-    else:
-        selected = qualified[: scoring_config.top_k]
-    selection_seconds = time.perf_counter() - selection_started
-    return ProfiledHotwordScoringResult(
-        result=HotwordScoringResult(
-            effective_time_steps=effective_time_steps,
-            decoded_token_ids=tuple(item.token_id for item in decoded),
-            decoded_confidences=tuple(item.confidence for item in decoded),
-            ranked_matches=tuple(matches),
-            selected_matches=tuple(selected),
-            suppressed_reason=suppressed_reason,
-        ),
+    return _finish_profiled_matches(
+        decoded,
+        effective_time_steps=effective_time_steps,
+        matches=matches,
         matching_seconds=matching_seconds,
-        sorting_seconds=sorting_seconds,
-        selection_seconds=selection_seconds,
+        config=scoring_config,
+    )
+
+
+def profile_anchor_guided_decoded_hotwords(
+    decoded: tuple[DecodedPhoneme, ...],
+    *,
+    effective_time_steps: int,
+    hotwords: list[HotwordEntry] | tuple[HotwordEntry, ...],
+    start_hints: Mapping[str, int | None],
+    maximum_start_delta: int = 2,
+    config: HotwordScoringConfig | None = None,
+) -> ProfiledHotwordScoringResult:
+    """Use the same scorer near the Anchor-estimated decoded-token start."""
+    if maximum_start_delta < 0:
+        raise ValueError("maximum_start_delta must not be negative")
+    missing_hints = sorted(
+        entry.hotword_id for entry in hotwords if entry.hotword_id not in start_hints
+    )
+    if missing_hints:
+        raise ValueError(f"anchor-guided candidates are missing start hints: {missing_hints[:5]}")
+    scoring_config = config or HotwordScoringConfig()
+    scoring_config.validate()
+    _validate_decoded(decoded, effective_time_steps=effective_time_steps)
+
+    matching_started = time.perf_counter()
+    matches = [
+        _score_candidate(
+            candidate,
+            decoded,
+            scoring_config,
+            start_hint=start_hints[candidate.hotword_id],
+            maximum_start_delta=maximum_start_delta,
+        )
+        for candidate in hotwords
+        if len(candidate.token_ids) >= scoring_config.minimum_phonemes
+    ]
+    matching_seconds = time.perf_counter() - matching_started
+    return _finish_profiled_matches(
+        decoded,
+        effective_time_steps=effective_time_steps,
+        matches=matches,
+        matching_seconds=matching_seconds,
+        config=scoring_config,
     )
 
 
@@ -251,6 +248,9 @@ def _score_candidate(
     candidate: HotwordEntry,
     decoded: tuple[DecodedPhoneme, ...],
     config: HotwordScoringConfig,
+    *,
+    start_hint: int | None = None,
+    maximum_start_delta: int | None = None,
 ) -> HotwordMatch:
     target = candidate.token_ids
     if not decoded:
@@ -274,7 +274,12 @@ def _score_candidate(
     minimum_width = min(maximum_width, max(1, len(target) - maximum_delta))
     best: tuple[float, int, float, int, int, int] | None = None
     for width in range(minimum_width, maximum_width + 1):
-        for start in range(0, len(decoded) - width + 1):
+        for start in _candidate_starts(
+            decoded_length=len(decoded),
+            width=width,
+            start_hint=start_hint,
+            maximum_start_delta=maximum_start_delta,
+        ):
             end = start + width
             distance = sequence_edit_distance(target, decoded_ids[start:end])
             denominator = max(len(target), width)
@@ -310,4 +315,91 @@ def _score_candidate(
         decoded_end=end,
         start_step=decoded[start].start_step,
         end_step=decoded[end - 1].end_step,
+    )
+
+
+def _candidate_starts(
+    *,
+    decoded_length: int,
+    width: int,
+    start_hint: int | None,
+    maximum_start_delta: int | None,
+) -> range:
+    maximum_start = decoded_length - width
+    if start_hint is None or maximum_start_delta is None:
+        return range(0, maximum_start + 1)
+    center = min(max(0, start_hint), maximum_start)
+    return range(
+        max(0, center - maximum_start_delta),
+        min(maximum_start, center + maximum_start_delta) + 1,
+    )
+
+
+def _validate_decoded(
+    decoded: tuple[DecodedPhoneme, ...], *, effective_time_steps: int
+) -> None:
+    if effective_time_steps <= 0:
+        raise ValueError("effective_time_steps must be positive")
+    if any(
+        item.token_id <= 0
+        or item.start_step < 0
+        or item.end_step <= item.start_step
+        or item.end_step > effective_time_steps
+        or not 0.0 <= item.confidence <= 1.0
+        for item in decoded
+    ):
+        raise ValueError("decoded phonemes are outside the effective CTC time axis")
+
+
+def _finish_profiled_matches(
+    decoded: tuple[DecodedPhoneme, ...],
+    *,
+    effective_time_steps: int,
+    matches: list[HotwordMatch],
+    matching_seconds: float,
+    config: HotwordScoringConfig,
+) -> ProfiledHotwordScoringResult:
+    sorting_started = time.perf_counter()
+    matches.sort(
+        key=lambda item: (
+            -item.score,
+            item.edit_ratio,
+            -item.posterior_confidence,
+            item.hotword_id,
+        )
+    )
+    sorting_seconds = time.perf_counter() - sorting_started
+    selection_started = time.perf_counter()
+    qualified = [
+        match
+        for match in matches
+        if match.score >= config.score_threshold
+        and match.edit_ratio <= config.maximum_edit_ratio
+        and match.posterior_confidence >= config.minimum_posterior_confidence
+    ]
+    suppressed_reason: str | None = None
+    if not qualified:
+        suppressed_reason = "below_threshold"
+        selected: list[HotwordMatch] = []
+    elif (
+        len(qualified) > 1
+        and qualified[0].score - qualified[1].score < config.minimum_top1_margin
+    ):
+        suppressed_reason = "ambiguous_top_matches"
+        selected = []
+    else:
+        selected = qualified[: config.top_k]
+    selection_seconds = time.perf_counter() - selection_started
+    return ProfiledHotwordScoringResult(
+        result=HotwordScoringResult(
+            effective_time_steps=effective_time_steps,
+            decoded_token_ids=tuple(item.token_id for item in decoded),
+            decoded_confidences=tuple(item.confidence for item in decoded),
+            ranked_matches=tuple(matches),
+            selected_matches=tuple(selected),
+            suppressed_reason=suppressed_reason,
+        ),
+        matching_seconds=matching_seconds,
+        sorting_seconds=sorting_seconds,
+        selection_seconds=selection_seconds,
     )

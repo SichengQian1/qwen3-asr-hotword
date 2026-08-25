@@ -25,6 +25,7 @@ from qwen_hotword.hotwords.registry import HotwordEntry, load_hotword_table, wri
 from qwen_hotword.hotwords.scoring import (
     DecodedPhoneme,
     HotwordScoringConfig,
+    profile_anchor_guided_decoded_hotwords,
     profile_decoded_hotwords,
     score_decoded_hotwords,
     score_hotwords,
@@ -224,6 +225,74 @@ def test_fast_edit_distance_is_exactly_equivalent_to_editops() -> None:
         hypothesis = tuple(generator.randrange(1, 12) for _ in range(generator.randrange(0, 18)))
         assert sequence_edit_distance(reference, hypothesis) == len(
             sequence_editops(reference, hypothesis)
+        )
+
+
+def test_anchor_guided_scorer_matches_full_search_with_accurate_start_hints() -> None:
+    def entry(hotword_id: str, token_ids: tuple[int, ...]) -> HotwordEntry:
+        tokens = tuple(str(token_id) for token_id in token_ids)
+        return HotwordEntry(
+            hotword_id=hotword_id,
+            language="pt-BR",
+            surface=hotword_id,
+            normalized=hotword_id,
+            words=(hotword_id,),
+            pronunciation=" ".join(tokens),
+            phoneme_tokens=tokens,
+            token_ids=token_ids,
+            source="test",
+            validation_occurrences=1,
+        )
+
+    decoded = tuple(
+        DecodedPhoneme(token_id, 0.99, index, index + 1)
+        for index, token_id in enumerate((8, 9, 1, 2, 3, 4, 7, 6))
+    )
+    hotwords = (entry("target", (1, 2, 3, 4)), entry("near", (1, 2, 3, 5)))
+    config = HotwordScoringConfig(score_threshold=0.86, top_k=5)
+
+    full = profile_decoded_hotwords(
+        decoded,
+        effective_time_steps=len(decoded),
+        hotwords=hotwords,
+        config=config,
+    )
+    guided = profile_anchor_guided_decoded_hotwords(
+        decoded,
+        effective_time_steps=len(decoded),
+        hotwords=hotwords,
+        start_hints={"target": 2, "near": 2},
+        maximum_start_delta=1,
+        config=config,
+    )
+
+    assert guided.result == full.result
+
+
+def test_anchor_guided_scorer_requires_every_candidate_hint() -> None:
+    entry = HotwordEntry(
+        hotword_id="target",
+        language="pt-BR",
+        surface="target",
+        normalized="target",
+        words=("target",),
+        pronunciation="1 2 3 4",
+        phoneme_tokens=("1", "2", "3", "4"),
+        token_ids=(1, 2, 3, 4),
+        source="test",
+        validation_occurrences=1,
+    )
+    decoded = tuple(
+        DecodedPhoneme(token_id, 0.99, index, index + 1)
+        for index, token_id in enumerate((1, 2, 3, 4))
+    )
+
+    with pytest.raises(ValueError, match="missing start hints"):
+        profile_anchor_guided_decoded_hotwords(
+            decoded,
+            effective_time_steps=4,
+            hotwords=(entry,),
+            start_hints={},
         )
 
 

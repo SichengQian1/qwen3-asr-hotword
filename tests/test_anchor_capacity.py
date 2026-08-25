@@ -148,7 +148,27 @@ def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
     ]
     _write_jsonl(level / "cases.jsonl", cases)
     replay = tmp_path / "replay.jsonl"
-    replay_rows = []
+    replay_rows = [
+        {
+            "case_id": "positive",
+            "sample_id": "sample-positive",
+            "expected_hotword_ids": ["target"],
+            "chunk_id": 0,
+            "cumulative_audio_sec": 2.0,
+            "is_final": False,
+            "is_tail_flush": False,
+            "effective_time_steps": 4,
+            "decoded": [
+                {
+                    "token_id": token_id,
+                    "confidence": 0.99,
+                    "start_step": position,
+                    "end_step": position + 1,
+                }
+                for position, token_id in enumerate((1, 2, 3, 4))
+            ],
+        }
+    ]
     for case_id, token_ids in (
         ("positive", (1, 2, 3, 4, 31, 32, 33, 34)),
         ("negative", (30, 31, 32, 33, 34, 35, 36, 37)),
@@ -186,6 +206,8 @@ def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
         shortlist_sizes=(8,),
         lookback_seconds=(None, 2.0),
         warmup_queries=0,
+        rerank_mode="anchor_guided",
+        anchor_start_radius=2,
         print_progress=False,
     )
 
@@ -195,14 +217,17 @@ def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
     recent = quality["representative"]["100"]["recent_2s"]["8"]
     assert full["raw_recall_at_5"] == 1.0
     assert recent["raw_recall_at_5"] == 0.0
+    assert recent["any_step_raw_recall_at_5"] == 1.0
+    assert recent["any_step_operating_recall_at_5"] == 1.0
     assert "raw_precision_at_7" in full
     assert "raw_precision_at_10" in full
     performance = json.loads(
         (output / "performance_summary.json").read_text(encoding="utf-8")
     )["representative"]["100"]["full_current"]["8"]
-    assert performance["retrieval_seconds"]["count"] == 2
-    assert performance["anchor_seconds"]["count"] == 2
-    assert performance["rerank_seconds"]["count"] == 2
+    assert performance["retrieval_seconds"]["count"] == 3
+    assert performance["anchor_seconds"]["count"] == 3
+    assert performance["rerank_seconds"]["count"] == 3
+    assert report["rerank_mode"] == "anchor_guided"
     assert (output / "sha256.txt").is_file()
 
 
