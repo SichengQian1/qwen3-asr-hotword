@@ -282,6 +282,23 @@ def test_v3_asset_build_is_deterministic_has_spans_and_refuses_overwrite(
     assert first_summary["actual_case_counts"] == targets
     cases = load_multi_nested_cases(first / "multi_nested_cases_v3.jsonl")
     assert all(len(case.active_hotword_ids) == 100 for case in cases)
+    capacity_rows = [
+        json.loads(line)
+        for line in (first / "multi_nested_cases_v3.jsonl").read_text().splitlines()
+    ]
+    capacity_rows[0]["active_hotword_ids"].append("capacity-extra-hotword")
+    capacity_path = tmp_path / "capacity_cases.jsonl"
+    capacity_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in capacity_rows),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="100 unique active hotwords"):
+        load_multi_nested_cases(capacity_path)
+    capacity_cases = load_multi_nested_cases(
+        capacity_path,
+        expected_active_hotwords=None,
+    )
+    assert len(capacity_cases[0].active_hotword_ids) == 101
     assert all(
         left[1] <= right[0] or right[1] <= left[0]
         for case in cases

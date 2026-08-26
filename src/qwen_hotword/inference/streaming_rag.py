@@ -224,6 +224,7 @@ def run_streaming_rag_evaluation(
         if boundary_path is not None
         else _load_offline_selection_for_format(
             offline_format=offline_format,
+            offline_control_mode=offline_control_mode,
             offline_dir=paths["offline"],
             validation_path=paths["validation"],
             cases_path=paths["cases"],
@@ -348,6 +349,7 @@ def run_streaming_rag_evaluation(
 def _load_offline_selection_for_format(
     *,
     offline_format: str,
+    offline_control_mode: str,
     offline_dir: Path,
     validation_path: Path,
     cases_path: Path,
@@ -365,6 +367,7 @@ def _load_offline_selection_for_format(
         validation_path,
         cases_path,
         hotword_by_id,
+        allow_variable_active_hotwords=offline_control_mode == "selection_only",
     )
 
 
@@ -629,6 +632,8 @@ def _load_multi_nested_offline_selection(
     validation_path: Path,
     cases_path: Path,
     hotword_by_id: Mapping[str, Any],
+    *,
+    allow_variable_active_hotwords: bool = False,
 ) -> tuple[StreamingSample, ...]:
     selection_path = offline_dir / "sample_selection.json"
     if not selection_path.is_file():
@@ -638,7 +643,13 @@ def _load_multi_nested_offline_selection(
     if not isinstance(raw_samples, list):
         raise ValueError("offline multi-nested selection has no samples list")
     records = load_validation_manifest(validation_path)
-    cases = {case.case_id: case for case in load_multi_nested_cases(cases_path)}
+    cases = {
+        case.case_id: case
+        for case in load_multi_nested_cases(
+            cases_path,
+            expected_active_hotwords=None if allow_variable_active_hotwords else 100,
+        )
+    }
     samples = []
     for line_number, raw in enumerate(raw_samples, start=1):
         if not isinstance(raw, dict):

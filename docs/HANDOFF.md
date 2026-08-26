@@ -1,5 +1,17 @@
 # 工作交接记录
 
+## 0.53 2026-08-26 4k流式套件case loader热修复
+
+首次`streaming_gate_suite_4k_smoke20_v1`在模型加载前失败，报错
+`must have 100 unique active hotwords`。原因是Step 6的selection-only路径仍调用旧v3
+loader，而旧loader为原formal100资产写死了100个active hotwords。4k容量case本身
+没有问题，GPU和`gpu_memory_utilization=0.15`也尚未进入执行。
+
+修复后：严格v3路径默认仍要求恰100个；只有显式`selection_only`路径允许可变
+active容量，但仍强制ID唯一、expected是active子集，case/sample/audio唯一，并与
+formal100选择的sample、audio和参考文本逐条核对。已有失败输出不需删除：拉取
+补丁后在原套件命令末尾加`--resume`即可继续。
+
 ## 0.52 2026-08-26 4k五组流式端到端套件与分阶段时延
 
 Step 5门控扫描已收口，现进入Step 6端到端Prompt过滤诊断。新套件固定在同一

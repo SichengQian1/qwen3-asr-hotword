@@ -374,7 +374,13 @@ def load_validation_samples(path: str | Path) -> tuple[ValidationSample, ...]:
     return tuple(samples)
 
 
-def load_multi_nested_cases(path: str | Path) -> tuple[MultiNestedCase, ...]:
+def load_multi_nested_cases(
+    path: str | Path,
+    *,
+    expected_active_hotwords: int | None = 100,
+) -> tuple[MultiNestedCase, ...]:
+    if expected_active_hotwords is not None and expected_active_hotwords <= 0:
+        raise ValueError("expected active hotword count must be positive")
     rows: list[MultiNestedCase] = []
     seen_cases: set[str] = set()
     seen_samples: set[str] = set()
@@ -426,8 +432,16 @@ def load_multi_nested_cases(path: str | Path) -> tuple[MultiNestedCase, ...]:
                 ),
                 selection_reason=_required_string(raw, "selection_reason", line_number),
             )
-            if len(row.active_hotword_ids) != 100 or len(set(row.active_hotword_ids)) != 100:
-                raise ValueError(f"v3 case {row.case_id} must have 100 unique active hotwords")
+            if len(set(row.active_hotword_ids)) != len(row.active_hotword_ids):
+                raise ValueError(f"v3 case {row.case_id} must have unique active hotwords")
+            if (
+                expected_active_hotwords is not None
+                and len(row.active_hotword_ids) != expected_active_hotwords
+            ):
+                raise ValueError(
+                    f"v3 case {row.case_id} must have "
+                    f"{expected_active_hotwords} unique active hotwords"
+                )
             if not set(row.containment_expected_ids).issubset(row.active_hotword_ids):
                 raise ValueError(f"v3 case {row.case_id} expects inactive hotwords")
             if (
