@@ -146,9 +146,21 @@ def test_summary_and_latency_keep_missing_timestamps_explicit() -> None:
         }
     ]
     summary = _build_summary(rows)
-    assert summary["groups"]["D"]["hotword_exact_recall"] == 1.0
-    assert summary["groups"]["D"]["final_prompted_hotword_precision"] == 1.0
-    assert summary["groups"]["D"]["wrong_injected_write_through_rate"] == 0.0
+    quality = summary["groups"]["D"]
+    assert quality["hotword_exact_recall"] == 1.0
+    assert quality["final_prompted_hotword_precision"] == 1.0
+    assert quality["wrong_injected_write_through_rate"] == 0.0
+    assert quality["correct_prompt_injected_hotwords"] == 1
+    assert quality["correct_prompt_adopted_hotwords"] == 1
+    assert quality["correct_prompt_adoption_rate"] == 1.0
+    assert quality["wrong_injected_hotwords"] == 1
+    assert quality["wrong_prompt_filtered_hotwords"] == 1
+    assert quality["wrong_prompt_filter_rate"] == 1.0
+    assert quality["wrong_prompt_written_hotwords"] == 0
+    assert quality["wrong_prompt_landing_rate"] == 0.0
+    assert quality["final_hotword_recall"] == 1.0
+    assert quality["final_hotword_precision"] == 1.0
+    assert quality["prompt_causal_metrics"]["correct_prompt_adoption_rate"] == 1.0
     timeline = [
         {
             "case_id": "case-1",
@@ -168,6 +180,55 @@ def test_summary_and_latency_keep_missing_timestamps_explicit() -> None:
     compute = latency["groups"]["D"]["compute"]
     assert compute["chunk_metrics"]["retrieval_seconds"]["p99"] == pytest.approx(0.04)
     assert compute["retrieval_over_50ms_rate"] == 0.0
+
+
+def test_prompt_causal_metrics_separate_adoption_filtering_and_landing() -> None:
+    rows = [
+        {
+            "case_id": "case-1",
+            "sample_id": "sample-1",
+            "experiment_group": "D",
+            "reference_text": "hot word",
+            "prediction": "hot word cold word",
+            "expected_hotword_ids": ["hot"],
+            "expected_hotwords": ["hot word"],
+            "matched_expected_hotword_ids": ["hot"],
+            "injected_hotword_ids": ["hot", "wrong"],
+            "injected_hotwords": ["hot word", "cold word"],
+            "injected_candidates": [
+                {"hotword_id": "hot", "surface": "hot word"},
+                {"hotword_id": "wrong", "surface": "cold word"},
+            ],
+            "inference_seconds": 0.1,
+        },
+        {
+            "case_id": "case-2",
+            "sample_id": "sample-2",
+            "experiment_group": "D",
+            "reference_text": "warm word",
+            "prediction": "ordinary text",
+            "expected_hotword_ids": ["warm"],
+            "expected_hotwords": ["warm word"],
+            "matched_expected_hotword_ids": [],
+            "injected_hotword_ids": ["warm"],
+            "injected_hotwords": ["warm word"],
+            "injected_candidates": [
+                {"hotword_id": "warm", "surface": "warm word"},
+            ],
+            "inference_seconds": 0.1,
+        },
+    ]
+    quality = _build_summary(rows)["groups"]["D"]
+    assert quality["correct_prompt_injected_hotwords"] == 2
+    assert quality["correct_prompt_adopted_hotwords"] == 1
+    assert quality["correct_prompt_adoption_rate"] == 0.5
+    assert quality["wrong_injected_hotwords"] == 1
+    assert quality["wrong_prompt_filtered_hotwords"] == 0
+    assert quality["wrong_prompt_filter_rate"] == 0.0
+    assert quality["wrong_prompt_written_hotwords"] == 1
+    assert quality["wrong_prompt_landing_rate"] == 1.0
+    assert quality["final_hotword_recall"] == 0.5
+    assert quality["final_hotword_precision"] == 0.5
 
 
 def test_multi_nested_offline_control_requires_exact_top5_and_inputs(tmp_path: Path) -> None:

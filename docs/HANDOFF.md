@@ -1,5 +1,61 @@
 # 工作交接记录
 
+## 0.56 2026-08-26 流式端到端Prompt因果指标补全
+
+formal100已按同一选择完成C、D5 conservative、D7 balanced、D7 recall-first和E，
+但旧汇总没有显式给出“正确Prompt采用率”，且`final_prompted_hotword_precision`容易被
+误读为错误候选过滤率。现已在不改变推理结果的前提下补齐以下显式指标：
+
+- `correct_prompt_adoption_rate`：曾注入的正确sample-hotword对中，最终文本出现该词的比例；
+- `wrong_prompt_filter_rate`：曾注入的错误sample-hotword对中，最终文本未出现该词的比例；
+- `wrong_prompt_landing_rate`：曾注入的错误sample-hotword对中，最终真正落字的比例；
+- `final_hotword_recall`：最终正确的expected热词数 / expected热词总数；
+- `final_hotword_precision`：最终正确expected热词数 /（最终正确expected热词数 + 最终落字的
+  错误注入热词数）；
+- 继续保留WER/CER、相对C组变化和`negative_hotword_hallucination_rate`。
+
+计数单位固定为“每个样本内去重、跨chunk累计的sample-hotword对”，不会把同一个候选在
+多个2秒step反复注入重复计数。汇总同时保存正确注入/采用、错误注入/过滤/落字的原始
+计数和嵌套`prompt_causal_metrics`，方便复核分母。
+
+旧formal100的错误候选最终过滤率可以由既有落字率反算：conservative约69.42%、
+balanced约83.70%、recall-first约92.83%。此前约79%的
+`final_prompted_hotword_precision`不是“只过滤21%的错误候选”，而是“所有最终落字的
+Prompt候选中约21%为错误”；两者分母不同。
+
+现有100条sample shard已经包含重汇总所需字段。工作区拉取后用原formal100套件命令加
+`--resume`即可；所有sample shard存在时不会加载Qwen、CTC或重跑音频，只会重读分片并
+重写summary/README/SHA256。重汇总后重点回传：
+
+```bash
+(cd "$SUITE_FORMAL_ROOT" && sha256sum -c sha256.txt)
+
+jq '{
+  sample_count,
+  profiles: (.profiles | with_entries(.value |= {
+    gate,
+    quality: (.quality | {
+      correct_prompt_injected_hotwords,
+      correct_prompt_adopted_hotwords,
+      correct_prompt_adoption_rate,
+      wrong_injected_hotwords,
+      wrong_prompt_filtered_hotwords,
+      wrong_prompt_filter_rate,
+      wrong_prompt_written_hotwords,
+      wrong_prompt_landing_rate,
+      final_hotword_recall,
+      final_hotword_precision,
+      wer,
+      cer,
+      negative_hotword_hallucination_rate
+    })
+  }))
+}' "$SUITE_FORMAL_ROOT/suite_summary.json"
+```
+
+这一步只补全因果统计口径，不调整4k词库、Anchor shortlist、门控参数、Prompt模板或
+流式2 s / 2 chunks / 5 tokenizer tokens语义。
+
 ## 0.55 2026-08-26 4k五组流式端到端formal100结果
 
 `streaming_gate_suite_4k_formal100_v1`已完成100条工程校准样本，其中80条正样本、

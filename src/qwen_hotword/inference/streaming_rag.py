@@ -903,6 +903,7 @@ def _quality_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
         char_errors += _edit_distance(ref_chars, hyp_chars)
         char_total += len(ref_chars)
     negative_count = sum(not bool(row["expected_hotword_ids"]) for row in rows)
+    correct_injected = 0
     prompted_true_positive = 0
     prompted_false_positive = 0
     wrong_injected = 0
@@ -919,14 +920,44 @@ def _quality_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
             surface = str(candidate.get("surface", ""))
             written = bool(surface) and strict_phrase_match(prediction, surface)
             if hotword_id in expected_ids:
+                correct_injected += 1
                 prompted_true_positive += int(written)
             else:
                 wrong_injected += 1
                 prompted_false_positive += int(written)
+    wrong_filtered = wrong_injected - prompted_false_positive
+    has_prompt_candidates = correct_injected + wrong_injected > 0
+    final_hotword_precision = (
+        _ratio(matched_total, matched_total + prompted_false_positive)
+        if has_prompt_candidates
+        else None
+    )
+    prompt_causal_metrics = {
+        "scope": "unique_sample_hotword_pairs_ever_injected_across_streaming_steps",
+        "correct_prompt_injected_hotwords": correct_injected,
+        "correct_prompt_adopted_hotwords": prompted_true_positive,
+        "correct_prompt_adoption_rate": _ratio(
+            prompted_true_positive,
+            correct_injected,
+        ),
+        "wrong_prompt_injected_hotwords": wrong_injected,
+        "wrong_prompt_filtered_hotwords": wrong_filtered,
+        "wrong_prompt_filter_rate": _ratio(wrong_filtered, wrong_injected),
+        "wrong_prompt_written_hotwords": prompted_false_positive,
+        "wrong_prompt_landing_rate": _ratio(prompted_false_positive, wrong_injected),
+        "final_hotword_recall": _ratio(matched_total, expected_total),
+        "final_hotword_precision": final_hotword_precision,
+        "final_hotword_precision_scope": (
+            "correct_expected_hotword_matches_divided_by_correct_expected_matches_plus_"
+            "wrong_injected_hotwords_written"
+        ),
+    }
     return {
         "samples": len(rows),
         "positive_samples": len(positive),
         "hotword_exact_recall": _ratio(matched_total, expected_total),
+        "final_hotword_recall": _ratio(matched_total, expected_total),
+        "final_hotword_precision": final_hotword_precision,
         "sample_hotword_hit_rate": _ratio(
             sum(
                 set(row["expected_hotword_ids"]).issubset(row["matched_expected_hotword_ids"])
@@ -964,6 +995,17 @@ def _quality_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
             prompted_false_positive,
             wrong_injected,
         ),
+        "correct_prompt_adoption_rate": _ratio(
+            prompted_true_positive,
+            correct_injected,
+        ),
+        "wrong_prompt_filter_rate": _ratio(wrong_filtered, wrong_injected),
+        "wrong_prompt_landing_rate": _ratio(prompted_false_positive, wrong_injected),
+        "correct_prompt_injected_hotwords": correct_injected,
+        "correct_prompt_adopted_hotwords": prompted_true_positive,
+        "wrong_prompt_filtered_hotwords": wrong_filtered,
+        "wrong_prompt_written_hotwords": prompted_false_positive,
+        "prompt_causal_metrics": prompt_causal_metrics,
         "prompted_true_positive_hotwords": prompted_true_positive,
         "prompted_false_positive_hotwords": prompted_false_positive,
         "wrong_injected_hotwords": wrong_injected,

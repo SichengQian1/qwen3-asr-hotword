@@ -24,6 +24,11 @@ def test_gate_suite_combines_same_selection_and_preserves_latency(tmp_path: Path
         )
         summary["groups"][profile.group] = {
             "hotword_exact_recall": 0.9 if profile.group != "C" else 0.5,
+            "final_hotword_recall": 0.9 if profile.group != "C" else 0.5,
+            "final_hotword_precision": 0.8 if profile.group != "C" else None,
+            "correct_prompt_adoption_rate": 0.85 if profile.group != "C" else None,
+            "wrong_prompt_filter_rate": 0.75 if profile.group != "C" else None,
+            "wrong_prompt_landing_rate": 0.25 if profile.group != "C" else None,
             "sample_hotword_hit_rate": 0.8,
             "wer": 0.1,
             "cer": 0.05,
@@ -63,3 +68,8 @@ def test_gate_suite_combines_same_selection_and_preserves_latency(tmp_path: Path
         report["comparisons_vs_no_rag"]["recall_first"]["hotword_exact_recall"]
         == 0.4
     )
+    assert (
+        report["comparisons_vs_no_rag"]["recall_first"]["final_hotword_recall"]
+        == 0.4
+    )
+    assert report["comparisons_vs_no_rag"]["recall_first"]["final_hotword_precision"] is None

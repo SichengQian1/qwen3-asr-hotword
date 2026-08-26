@@ -138,6 +138,11 @@ def _quality_delta(current: object, baseline: Mapping[str, Any]) -> dict[str, fl
         raise ValueError("profile quality is not a mapping")
     names = (
         "hotword_exact_recall",
+        "final_hotword_recall",
+        "final_hotword_precision",
+        "correct_prompt_adoption_rate",
+        "wrong_prompt_filter_rate",
+        "wrong_prompt_landing_rate",
         "sample_hotword_hit_rate",
         "wer",
         "cer",
