@@ -126,6 +126,10 @@ def test_summary_and_latency_keep_missing_timestamps_explicit() -> None:
             "matched_expected_hotword_ids": ["hot"],
             "injected_hotword_ids": ["hot"],
             "injected_hotwords": ["hot word"],
+            "injected_candidates": [
+                {"hotword_id": "hot", "surface": "hot word"},
+                {"hotword_id": "wrong", "surface": "cold word"},
+            ],
             "boundary_bucket": None,
             "hotword_metrics": [
                 {
@@ -143,9 +147,27 @@ def test_summary_and_latency_keep_missing_timestamps_explicit() -> None:
     ]
     summary = _build_summary(rows)
     assert summary["groups"]["D"]["hotword_exact_recall"] == 1.0
-    latency = _build_latency_summary(rows)
+    assert summary["groups"]["D"]["final_prompted_hotword_precision"] == 1.0
+    assert summary["groups"]["D"]["wrong_injected_write_through_rate"] == 0.0
+    timeline = [
+        {
+            "case_id": "case-1",
+            "experiment_group": "D",
+            "chunk_id": 0,
+            "compute_timing": {
+                "step_total_seconds": 0.2,
+                "retrieval_seconds": 0.04,
+                "qwen_streaming_seconds": 0.1,
+                "retrieval_over_50ms": False,
+            },
+        }
+    ]
+    latency = _build_latency_summary(rows, timeline)
     assert latency["groups"]["D"]["ctc_first_detect_latency_sec"]["count"] == 0
     assert latency["groups"]["D"]["chunks_from_injection_to_first_correct"]["median"] == 0.0
+    compute = latency["groups"]["D"]["compute"]
+    assert compute["chunk_metrics"]["retrieval_seconds"]["p99"] == pytest.approx(0.04)
+    assert compute["retrieval_over_50ms_rate"] == 0.0
 
 
 def test_multi_nested_offline_control_requires_exact_top5_and_inputs(tmp_path: Path) -> None:
@@ -257,6 +279,39 @@ def test_multi_nested_offline_control_requires_exact_top5_and_inputs(tmp_path: P
             dtype="bfloat16",
             max_new_tokens=None,
         )
+
+    paths["hotwords"].write_text("expanded-hotwords\n", encoding="utf-8")
+    paths["cases"].write_text("expanded-cases\n", encoding="utf-8")
+    selection_only = _validate_offline_control(
+        offline_format="multi_nested_v3",
+        control_mode="selection_only",
+        paths=paths,
+        threshold=0.75,
+        top_k=7,
+        retrieval_mode="operating",
+        maximum_edit_ratio=0.35,
+        posterior_weight=0.25,
+        minimum_posterior_confidence=0.5,
+        minimum_top1_margin=0.0,
+        prompt_template="Reference: {hotwords}",
+        language="Portuguese",
+        dtype="bfloat16",
+        max_new_tokens=None,
+    )
+    assert selection_only["control_mode"] == "selection_only"
+    assert selection_only["validated_retrieval_config"] is None
+    assert selection_only["current_retrieval_config_not_compared"] == {
+        "mode": "operating",
+        "threshold": 0.75,
+        "top_k": 7,
+        "maximum_edit_ratio": 0.35,
+        "minimum_posterior_confidence": 0.5,
+        "minimum_top1_margin": 0.0,
+        "posterior_weight": 0.25,
+        "minimum_phonemes": 4,
+        "guards_applied": True,
+        "candidate_source": "operating_matches",
+    }
 
 
 def test_multi_nested_offline_control_accepts_explicit_forced_topk(tmp_path: Path) -> None:

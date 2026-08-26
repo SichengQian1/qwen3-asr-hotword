@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import gc
+import time
 from pathlib import Path
 from typing import Any
 
 from qwen_hotword.config import EXPECTED_MODEL_NAME, ModelConfig
+from qwen_hotword.hotwords.anchor_index import AnchorIndexConfig, PhonemeAnchorIndex
 from qwen_hotword.hotwords.registry import HotwordEntry
 from qwen_hotword.hotwords.scoring import (
     HotwordMatch,
     HotwordScoringConfig,
     HotwordScoringResult,
+    decode_ctc_posterior,
+    profile_anchor_guided_decoded_hotwords,
     score_hotwords,
 )
 from qwen_hotword.inference.streaming_core import StreamingCandidate
@@ -77,6 +82,10 @@ class CumulativeAudioCtcDetector:
         language: str,
         scoring_config: HotwordScoringConfig,
         retrieval_mode: str,
+        retrieval_backend: str,
+        anchor_shortlist_size: int,
+        anchor_start_radius: int,
+        anchor_config: AnchorIndexConfig,
         device: str,
     ) -> None:
         self.wrapper = encoder_wrapper
@@ -89,7 +98,22 @@ class CumulativeAudioCtcDetector:
         if retrieval_mode not in {"operating", "forced_topk"}:
             raise ValueError(f"unknown CTC retrieval mode: {retrieval_mode}")
         self.retrieval_mode = retrieval_mode
+        if retrieval_backend not in {"full_scan", "anchor_guided"}:
+            raise ValueError(f"unknown CTC retrieval backend: {retrieval_backend}")
+        if anchor_shortlist_size <= 0:
+            raise ValueError("anchor shortlist size must be positive")
+        if anchor_start_radius < 0:
+            raise ValueError("anchor start radius must not be negative")
+        self.retrieval_backend = retrieval_backend
+        self.anchor_shortlist_size = anchor_shortlist_size
+        self.anchor_start_radius = anchor_start_radius
+        self.anchor_index = (
+            PhonemeAnchorIndex(hotwords, config=anchor_config)
+            if retrieval_backend == "anchor_guided"
+            else None
+        )
         self.device = device
+        self.last_timing: dict[str, object] = {}
 
     def __call__(
         self,
@@ -100,12 +124,14 @@ class CumulativeAudioCtcDetector:
 
         from qwen_hotword.modeling.audio_encoder import extract_padded_ln_post
 
+        total_started = time.perf_counter()
         active = []
         for hotword_id in active_hotword_ids:
             try:
                 active.append(self.hotword_by_id[hotword_id])
             except KeyError as error:
                 raise ValueError(f"unknown active hotword ID: {hotword_id}") from error
+        processor_started = time.perf_counter()
         prompt = build_audio_prompt(self.wrapper.processor, self.language)
         processor_batch = self.wrapper.processor(
             text=[prompt],
@@ -113,6 +139,7 @@ class CumulativeAudioCtcDetector:
             return_tensors="pt",
             padding=True,
         )
+        processor_seconds = time.perf_counter() - processor_started
         input_features = processor_batch["input_features"].to(
             device=self.wrapper.model.device,
             dtype=self.wrapper.model.dtype,
@@ -120,29 +147,106 @@ class CumulativeAudioCtcDetector:
         feature_attention_mask = processor_batch["feature_attention_mask"].to(
             device=self.wrapper.model.device
         )
+        _synchronize_cuda(torch, self.device)
+        encoder_started = time.perf_counter()
         encoder = extract_padded_ln_post(
             self.wrapper.model.thinker.audio_tower,
             input_features,
             feature_attention_mask,
             no_grad=True,
         )
+        _synchronize_cuda(torch, self.device)
+        encoder_seconds = time.perf_counter() - encoder_started
         hidden = encoder.hidden_states.to(device=self.device, dtype=torch.float32)
         lengths = encoder.input_lengths.to(device=self.device)
+        _synchronize_cuda(torch, self.device)
+        head_started = time.perf_counter()
         with torch.no_grad():
             logits = self.head(hidden, input_lengths=lengths)
             effective = self.head.output_lengths(lengths)
-        scored = score_hotwords(
-            logits[0],
-            input_length=int(effective[0].item()),
-            hotwords=tuple(active),
-            config=self.scoring_config,
-            blank_id=0,
-        )
+        effective_steps = int(effective[0].item())
+        _synchronize_cuda(torch, self.device)
+        head_seconds = time.perf_counter() - head_started
+        retrieval_started = time.perf_counter()
+        anchor_seconds = 0.0
+        matching_seconds = 0.0
+        sorting_seconds = 0.0
+        selection_seconds = 0.0
+        decoded_seconds = 0.0
+        candidate_count = len(active)
+        postings_visited = 0
+        if self.anchor_index is None:
+            scored = score_hotwords(
+                logits[0],
+                input_length=effective_steps,
+                hotwords=tuple(active),
+                config=self.scoring_config,
+                blank_id=0,
+            )
+        else:
+            decode_started = time.perf_counter()
+            decoded = decode_ctc_posterior(
+                logits[0],
+                input_length=effective_steps,
+                blank_id=0,
+            )
+            decoded_seconds = time.perf_counter() - decode_started
+            gc_was_enabled = gc.isenabled()
+            if gc_was_enabled:
+                gc.disable()
+            try:
+                anchor_started = time.perf_counter()
+                shortlist = self.anchor_index.query(
+                    tuple(item.token_id for item in decoded),
+                    confidences=tuple(item.confidence for item in decoded),
+                    active_hotword_ids=active_hotword_ids,
+                    maximum_candidates=self.anchor_shortlist_size,
+                )
+                anchor_seconds = time.perf_counter() - anchor_started
+                candidate_entries = tuple(
+                    self.hotword_by_id[item.hotword_id] for item in shortlist.candidates
+                )
+                profiled = profile_anchor_guided_decoded_hotwords(
+                    decoded,
+                    effective_time_steps=effective_steps,
+                    hotwords=candidate_entries,
+                    start_hints={
+                        item.hotword_id: item.best_offset for item in shortlist.candidates
+                    },
+                    maximum_start_delta=self.anchor_start_radius,
+                    config=self.scoring_config,
+                )
+            finally:
+                if gc_was_enabled:
+                    gc.enable()
+            scored = profiled.result
+            matching_seconds = profiled.matching_seconds
+            sorting_seconds = profiled.sorting_seconds
+            selection_seconds = profiled.selection_seconds
+            candidate_count = len(shortlist.candidates)
+            postings_visited = shortlist.postings_visited
+        retrieval_seconds = time.perf_counter() - retrieval_started
         matches = select_streaming_ctc_matches(
             scored,
             scoring_config=self.scoring_config,
             retrieval_mode=self.retrieval_mode,
         )
+        self.last_timing = {
+            "ctc_processor_seconds": processor_seconds,
+            "ctc_encoder_seconds": encoder_seconds,
+            "ctc_head_seconds": head_seconds,
+            "ctc_decode_seconds": decoded_seconds,
+            "anchor_query_seconds": anchor_seconds,
+            "hotword_matching_seconds": matching_seconds,
+            "hotword_sorting_seconds": sorting_seconds,
+            "hotword_selection_seconds": selection_seconds,
+            "retrieval_seconds": retrieval_seconds,
+            "detector_total_seconds": time.perf_counter() - total_started,
+            "retrieval_backend": self.retrieval_backend,
+            "active_hotwords": len(active),
+            "shortlist_candidates": candidate_count,
+            "postings_visited": postings_visited,
+        }
         return tuple(
             StreamingCandidate(
                 hotword_id=match.hotword_id,
@@ -179,6 +283,12 @@ def load_cumulative_ctc_detector(
     dtype: str,
     scoring_config: HotwordScoringConfig,
     retrieval_mode: str = "operating",
+    retrieval_backend: str = "full_scan",
+    anchor_shortlist_size: int = 64,
+    anchor_start_radius: int = 2,
+    anchor_ngram_sizes: tuple[int, ...] = (2, 3, 4),
+    anchors_per_entry: int = 24,
+    anchor_offset_tolerance: int = 1,
 ) -> CumulativeAudioCtcDetector:
     import torch
 
@@ -218,5 +328,18 @@ def load_cumulative_ctc_detector(
         language=language,
         scoring_config=scoring_config,
         retrieval_mode=retrieval_mode,
+        retrieval_backend=retrieval_backend,
+        anchor_shortlist_size=anchor_shortlist_size,
+        anchor_start_radius=anchor_start_radius,
+        anchor_config=AnchorIndexConfig(
+            ngram_sizes=anchor_ngram_sizes,
+            anchors_per_entry=anchors_per_entry,
+            offset_tolerance=anchor_offset_tolerance,
+        ),
         device=device,
     )
+
+
+def _synchronize_cuda(torch: Any, device: str) -> None:
+    if str(device).startswith("cuda") and torch.cuda.is_available():
+        torch.cuda.synchronize(device)

@@ -710,3 +710,20 @@ sha256.txt
 
 完整工作区命令见`docs/HANDOFF.md` 0.50。扫描推荐点只用于下一轮端到端诊断；由于选点
 和报告来自同一formal100，不得把它当成独立测试集上的最终泛化指标。
+
+## 19. 4k流式Prompt过滤端到端诊断
+
+Step 6不再用缓存Posterior时延代替真实运行。D组每个2秒step实际执行累计
+Qwen Encoder、Temporal 2x CTC Head、greedy decode、Anchor Top-64和局部重排，然后在
+同一step刷新Prompt并调用官方Qwen流式解码。组间只改Operating门控，不改
+checkpoint、Prompt、chunk或rollback窗口。
+
+五组套件记录两类精确率：检索Operating Precision由Step 5门控扫描给出；
+`final_prompted_hotword_precision`是经Qwen过滤后最终真正写入转写的Prompt热词
+Precision。`wrong_injected_write_through_rate`用来防止“最终Precision高只是因为所有热词
+都没被利用”的误判；必须同时看热词Recall、WER/CER、负例幻觉和write-through。
+
+时延同时保存纯检索、CTC Encoder/Head、Prompt/Qwen、整个chunk和整条音频的
+P50/P90/P95/P99/max。“纯检索50 ms”仍只约束decode+Anchor+重排；完整step不应
+被错标为50 ms。样本级端到端时延不包含磁盘音频加载，但包含detector、Prompt刷新
+和Qwen流式解码。完整命令、resume和结果检查见`docs/HANDOFF.md` 0.52。

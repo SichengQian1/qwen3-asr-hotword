@@ -1,5 +1,91 @@
 # 工作交接记录
 
+## 0.52 2026-08-26 4k五组流式端到端套件与分阶段时延
+
+Step 5门控扫描已收口，现进入Step 6端到端Prompt过滤诊断。新套件固定在同一
+formal100选择上跑五个概念组：
+
+1. `no_rag`：流式C组；
+2. `conservative`：0.86 / edit 0.35 / posterior min 0 / Top-5；
+3. `balanced`：0.82 / edit 0.35 / posterior min 0.5 / Top-7；
+4. `recall_first`：0.75 / edit 0.35 / posterior min 0.5 / Top-7；
+5. `oracle`：流式E组。
+
+新增`anchor_guided`真实流式detector路径：当前累计音频经Qwen Encoder和固定
+Temporal 2x CTC Head后，先做greedy phoneme decode，再用2/3/4-gram Anchor生成Top-64
+shortlist，最后只在shortlist上运行原近似评分和Operating门控。Anchor/重排期间
+暂停Python GC，退出detector后恢复；不改CTC checkpoint、Prompt模板或Qwen流式
+2 s / 2 chunks / 5 tokenizer tokens语义。
+
+每个chunk在`chunk_timeline.jsonl.compute_timing`记录：Processor、Encoder、CTC Head、
+CTC decode、Anchor query、shortlist matching/sort/select、纯检索、Prompt build/refresh、
+Qwen streaming/finish和整步wall clock。`latency_summary.json`输出P50/P90/P95/P99/max，
+并单独记录纯检索超过50 ms比例。样本级`inference_seconds`是detector+Prompt+Qwen
+的实测端到端wall clock，不包含从磁盘加载音频；`real_time_factor`同时保存。
+
+最终质量新增`final_prompted_hotword_precision`和
+`wrong_injected_write_through_rate`：前者表示最终真正写入文本的Prompt热词精确率，
+后者表示错误注入候选有多少被Qwen照抄。这两项用于判断检索端低Precision是否
+真会传导到最终ASR。
+
+工作区先拉20条smoke：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+V3_ROOT=outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested
+OFFLINE100_ROOT="$V3_ROOT/prompt_multi_nested_formal100_top5_v1"
+SUITE_SMOKE_ROOT="$CAP_ROOT/streaming_gate_suite_4k_smoke20_v1"
+
+test ! -e "$SUITE_SMOKE_ROOT"
+CUDA_VISIBLE_DEVICES=4 python scripts/run_streaming_gate_profile_suite.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords "$ASSET_4K_ROOT/representative/size_4000/hotwords.jsonl" \
+  --cases "$ASSET_4K_ROOT/representative/size_4000/cases.jsonl" \
+  --hotword-families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --ctc-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --offline-rag-dir "$OFFLINE100_ROOT" \
+  --ctc-checkpoint outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt \
+  --output-dir "$SUITE_SMOKE_ROOT" \
+  --max-samples 20 \
+  --language Portuguese \
+  --gpu-memory-utilization 0.50
+```
+
+中断后原命令末尾加`--resume`。检查：
+
+```bash
+(cd "$SUITE_SMOKE_ROOT" && sha256sum -c sha256.txt)
+jq '{sample_count, profiles: (.profiles | with_entries(.value |= {
+  gate,
+  quality: (.quality | {
+    hotword_exact_recall,
+    sample_hotword_hit_rate,
+    final_prompted_hotword_precision,
+    wrong_injected_write_through_rate,
+    negative_hotword_hallucination_rate,
+    wer,
+    cer,
+    mean_inference_seconds
+  }),
+  compute: (.latency.compute | {
+    sample_inference_seconds,
+    sample_real_time_factor,
+    retrieval_over_50ms_rate,
+    chunk_metrics
+  })
+}))}' "$SUITE_SMOKE_ROOT/suite_summary.json"
+```
+
+smoke通过后改用新目录`streaming_gate_suite_4k_formal100_v1`并删除
+`--max-samples 20`跑满100条。套件内部顺序运行`C,E`、conservative D、balanced D、
+recall-first D；每个子目录都可独立resume，根目录最后生成`suite_summary.json`和
+SHA256。这一轮是工程校准集诊断，不是封存test泛化结论。
+
 ## 0.51 2026-08-26 4k门控扫描结果与端到端诊断决策
 
 离线formal100完整64候选门控扫描已完成，SHA256全部通过。检索性能稳定满足目标：

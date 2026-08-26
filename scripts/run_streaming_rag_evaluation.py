@@ -33,6 +33,15 @@ def main() -> int:
         choices=("retrieved_v2", "multi_nested_v3"),
         default="retrieved_v2",
     )
+    parser.add_argument(
+        "--offline-control-mode",
+        choices=("strict", "selection_only"),
+        default="strict",
+        help=(
+            "Use strict offline A/B controls, or reuse only their sealed sample selection. "
+            "selection_only permits C/D/E groups only and records the waived comparisons."
+        ),
+    )
     parser.add_argument("--hotword-families")
     parser.add_argument("--ctc-report")
     parser.add_argument("--ctc-checkpoint", required=True)
@@ -58,6 +67,16 @@ def main() -> int:
             "The mode must match the offline control report."
         ),
     )
+    parser.add_argument(
+        "--retrieval-backend",
+        choices=("full_scan", "anchor_guided"),
+        default="full_scan",
+    )
+    parser.add_argument("--anchor-shortlist-size", type=int, default=64)
+    parser.add_argument("--anchor-start-radius", type=int, default=2)
+    parser.add_argument("--anchor-ngram-sizes", default="2,3,4")
+    parser.add_argument("--anchors-per-entry", type=int, default=24)
+    parser.add_argument("--anchor-offset-tolerance", type=int, default=1)
     parser.add_argument("--maximum-edit-ratio", type=float, default=0.35)
     parser.add_argument("--posterior-weight", type=float, default=0.25)
     parser.add_argument("--minimum-posterior-confidence", type=float, default=0.0)
@@ -78,6 +97,14 @@ def main() -> int:
     args = parser.parse_args()
     groups = tuple(item.strip().upper() for item in args.groups.split(",") if item.strip())
     try:
+        anchor_ngram_sizes = tuple(
+            int(item.strip())
+            for item in args.anchor_ngram_sizes.split(",")
+            if item.strip()
+        )
+    except ValueError as error:
+        parser.error(f"invalid --anchor-ngram-sizes: {error}")
+    try:
         report = run_streaming_rag_evaluation(
             model_path=args.model,
             validation_manifest_path=args.validation_manifest,
@@ -86,6 +113,7 @@ def main() -> int:
             cases_path=args.cases,
             offline_rag_dir=args.offline_rag_dir,
             offline_format=args.offline_format,
+            offline_control_mode=args.offline_control_mode,
             hotword_families_path=args.hotword_families,
             ctc_report_path=args.ctc_report,
             ctc_checkpoint_path=args.ctc_checkpoint,
@@ -99,6 +127,12 @@ def main() -> int:
             threshold=args.threshold,
             top_k=args.top_k,
             retrieval_mode=args.retrieval_mode,
+            retrieval_backend=args.retrieval_backend,
+            anchor_shortlist_size=args.anchor_shortlist_size,
+            anchor_start_radius=args.anchor_start_radius,
+            anchor_ngram_sizes=anchor_ngram_sizes,
+            anchors_per_entry=args.anchors_per_entry,
+            anchor_offset_tolerance=args.anchor_offset_tolerance,
             maximum_edit_ratio=args.maximum_edit_ratio,
             posterior_weight=args.posterior_weight,
             minimum_posterior_confidence=args.minimum_posterior_confidence,

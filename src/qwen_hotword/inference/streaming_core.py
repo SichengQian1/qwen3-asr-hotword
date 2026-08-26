@@ -5,7 +5,7 @@ import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from qwen_hotword.inference.hotword_prompt import (
     build_hotword_prompt,
@@ -314,6 +314,7 @@ def run_streaming_sample(
     accumulated_ids: list[str] = []
     started = time.monotonic()
     for chunk in chunks:
+        step_started = time.perf_counter()
         cumulative = waveform[: chunk.end_sample]
         raw_before = str(getattr(state, "_raw_decoded", getattr(state, "text", "")))
         rollback = official_prefix_snapshot(
@@ -325,10 +326,17 @@ def run_streaming_sample(
             is_tail_flush=chunk.is_tail_flush,
         )
         candidates: tuple[StreamingCandidate, ...] = ()
+        detector_timing: dict[str, object] = {}
+        detector_seconds: float | None = None
         if group == "D":
             if ctc_detector is None:
                 raise ValueError("group D requires a causal CTC detector")
+            detector_started = time.perf_counter()
             candidates = tuple(ctc_detector(cumulative, sample.active_hotword_ids))
+            detector_seconds = time.perf_counter() - detector_started
+            raw_timing = getattr(ctc_detector, "last_timing", None)
+            if isinstance(raw_timing, Mapping):
+                detector_timing = dict(raw_timing)
         elif group == "E":
             candidates = tuple(
                 StreamingCandidate(
@@ -342,8 +350,12 @@ def run_streaming_sample(
             )
         injected_ids = tuple(candidate.hotword_id for candidate in candidates)
         injected_surfaces = tuple(candidate.surface for candidate in candidates)
+        prompt_started = time.perf_counter()
         prompt = build_hotword_prompt(injected_surfaces, template=prompt_template)
+        prompt_build_seconds = time.perf_counter() - prompt_started
+        prompt_refresh_seconds = 0.0
         if group in {"D", "E"}:
+            prompt_refresh_started = time.perf_counter()
             refresh_streaming_prompt(
                 backend,
                 state,
@@ -353,11 +365,14 @@ def run_streaming_sample(
                 unfixed_token_num=unfixed_token_num,
                 chunk_size_sec=chunk_size_sec,
             )
+            prompt_refresh_seconds = time.perf_counter() - prompt_refresh_started
+        qwen_started = time.perf_counter()
         if chunk.is_tail_flush:
             backend.streaming_transcribe(waveform[chunk.start_sample : chunk.end_sample], state)
             backend.finish_streaming_transcribe(state)
         else:
             backend.streaming_transcribe(waveform[chunk.start_sample : chunk.end_sample], state)
+        qwen_streaming_seconds = time.perf_counter() - qwen_started
         current_text = str(getattr(state, "text", ""))
         raw_after = str(getattr(state, "_raw_decoded", current_text))
         after = tokenizer_rollback(
@@ -381,6 +396,21 @@ def run_streaming_sample(
                 strict=True,
             )
         }
+        timing = {
+            "detector_wall_seconds": detector_seconds,
+            "prompt_build_seconds": prompt_build_seconds,
+            "prompt_refresh_seconds": prompt_refresh_seconds,
+            "qwen_streaming_seconds": qwen_streaming_seconds,
+            "step_total_seconds": time.perf_counter() - step_started,
+            **detector_timing,
+        }
+        retrieval_seconds = timing.get("retrieval_seconds")
+        timing["retrieval_over_50ms"] = (
+            float(retrieval_seconds) > 0.05
+            if isinstance(retrieval_seconds, int | float)
+            and not isinstance(retrieval_seconds, bool)
+            else None
+        )
         timeline.append(
             {
                 "case_id": sample.case_id,
@@ -407,11 +437,24 @@ def run_streaming_sample(
                 "raw_decoded": raw_after,
                 "expected_hotword_status": expected_status,
                 "partial_change": _partial_change(previous_text, current_text),
+                "compute_timing": timing,
             }
         )
         previous_text = current_text
     if not chunks or not chunks[-1].is_tail_flush:
+        finish_started = time.perf_counter()
         backend.finish_streaming_transcribe(state)
+        finish_seconds = time.perf_counter() - finish_started
+        if timeline:
+            timing = dict(cast(Mapping[str, object], timeline[-1]["compute_timing"]))
+            timing["qwen_finalize_seconds"] = finish_seconds
+            timing["qwen_streaming_seconds"] = (
+                cast(float, timing["qwen_streaming_seconds"]) + finish_seconds
+            )
+            timing["step_total_seconds"] = (
+                cast(float, timing["step_total_seconds"]) + finish_seconds
+            )
+            timeline[-1]["compute_timing"] = timing
     elapsed = time.monotonic() - started
     final_text = str(getattr(state, "text", ""))
     result = summarize_streaming_sample(
@@ -420,6 +463,7 @@ def run_streaming_sample(
         final_text=final_text,
         timeline=timeline,
         inference_seconds=elapsed,
+        audio_duration_sec=len(waveform) / sample_rate,
     )
     return result, tuple(timeline)
 
@@ -431,6 +475,7 @@ def summarize_streaming_sample(
     final_text: str,
     timeline: Sequence[Mapping[str, Any]],
     inference_seconds: float,
+    audio_duration_sec: float | None = None,
 ) -> dict[str, object]:
     timing_by_id = {timing.hotword_id: timing for timing in sample.timings}
     hotword_metrics: list[dict[str, object]] = []
@@ -526,6 +571,23 @@ def summarize_streaming_sample(
                 ),
             }
         )
+    compute_totals: dict[str, float] = {}
+    for row in timeline:
+        timing = row.get("compute_timing")
+        if not isinstance(timing, Mapping):
+            continue
+        for name, value in timing.items():
+            if (
+                name.endswith("_seconds")
+                and isinstance(value, int | float)
+                and not isinstance(value, bool)
+            ):
+                compute_totals[name] = compute_totals.get(name, 0.0) + float(value)
+    injected_by_id = {
+        str(candidate["hotword_id"]): str(candidate["surface"])
+        for row in timeline
+        for candidate in row["ctc_top_k"]
+    }
     return {
         "case_id": sample.case_id,
         "sample_id": sample.sample_id,
@@ -549,6 +611,10 @@ def summarize_streaming_sample(
         "injected_hotwords": sorted(
             {str(surface) for row in timeline for surface in row["injected_hotwords"]}
         ),
+        "injected_candidates": [
+            {"hotword_id": hotword_id, "surface": injected_by_id[hotword_id]}
+            for hotword_id in sorted(injected_by_id)
+        ],
         "boundary_bucket": sample.boundary_bucket,
         "primary_group": sample.primary_group,
         "redundant_family_ids": list(sample.redundant_family_ids),
@@ -560,6 +626,13 @@ def summarize_streaming_sample(
             bool(row["fixed_prefix"]) and bool(row["partial_change"]["changed"]) for row in timeline
         ),
         "inference_seconds": inference_seconds,
+        "audio_duration_sec": audio_duration_sec,
+        "real_time_factor": (
+            inference_seconds / audio_duration_sec
+            if audio_duration_sec is not None and audio_duration_sec > 0
+            else None
+        ),
+        "compute_timing_totals": compute_totals,
         "failure_reason": classify_streaming_failure(
             group=group,
             expected=bool(sample.expected_hotword_ids),

@@ -184,6 +184,42 @@ def test_tail_flush_runs_and_current_ctc_candidate_affects_same_step() -> None:
     assert result["matched_expected_hotword_ids"] == ["hot"]
 
 
+def test_chunk_timeline_records_detector_retrieval_and_end_to_end_timing() -> None:
+    class TimedDetector:
+        def __init__(self) -> None:
+            self.last_timing: dict[str, object] = {}
+
+        def __call__(
+            self, _audio: list[float], _active: tuple[str, ...]
+        ) -> list[StreamingCandidate]:
+            self.last_timing = {
+                "ctc_encoder_seconds": 0.02,
+                "retrieval_seconds": 0.06,
+                "retrieval_backend": "anchor_guided",
+            }
+            return [StreamingCandidate("hot", "hot word", 0.9, 0.0, 0.9)]
+
+    result, timeline = run_streaming_sample(
+        backend=FakeBackend(["hello hot word"]),
+        waveform=[0.0] * 16_000,
+        sample=_sample(),
+        group="D",
+        hotword_surfaces={"hot": "hot word", "wrong": "cold word"},
+        ctc_detector=TimedDetector(),
+        prompt_template="Reference only: {hotwords}",
+    )
+    timing = timeline[0]["compute_timing"]
+    assert isinstance(timing, dict)
+    assert timing["retrieval_backend"] == "anchor_guided"
+    assert timing["retrieval_seconds"] == pytest.approx(0.06)
+    assert timing["retrieval_over_50ms"] is True
+    assert timing["step_total_seconds"] >= 0
+    totals = result["compute_timing_totals"]
+    assert isinstance(totals, dict)
+    assert totals["retrieval_seconds"] == pytest.approx(0.06)
+    assert result["real_time_factor"] is not None
+
+
 def test_explicit_asr_language_overrides_manifest_language() -> None:
     backend = FakeBackend(["olá"])
     sample = StreamingSample(

@@ -54,6 +54,7 @@ def run_streaming_rag_evaluation(
     cases_path: str | Path,
     offline_rag_dir: str | Path,
     offline_format: str = "retrieved_v2",
+    offline_control_mode: str = "strict",
     hotword_families_path: str | Path | None = None,
     ctc_report_path: str | Path | None = None,
     ctc_checkpoint_path: str | Path,
@@ -67,6 +68,12 @@ def run_streaming_rag_evaluation(
     threshold: float = 0.86,
     top_k: int = 3,
     retrieval_mode: str = "operating",
+    retrieval_backend: str = "full_scan",
+    anchor_shortlist_size: int = 64,
+    anchor_start_radius: int = 2,
+    anchor_ngram_sizes: tuple[int, ...] = (2, 3, 4),
+    anchors_per_entry: int = 24,
+    anchor_offset_tolerance: int = 1,
     maximum_edit_ratio: float = 0.35,
     posterior_weight: float = 0.25,
     minimum_posterior_confidence: float = 0.0,
@@ -88,8 +95,16 @@ def run_streaming_rag_evaluation(
         raise ValueError("max_samples must not be negative")
     if offline_format not in {"retrieved_v2", "multi_nested_v3"}:
         raise ValueError("offline_format must be retrieved_v2 or multi_nested_v3")
+    if offline_control_mode not in {"strict", "selection_only"}:
+        raise ValueError("offline_control_mode must be strict or selection_only")
+    if offline_control_mode == "selection_only" and any(
+        group in {"A", "B"} for group in group_set
+    ):
+        raise ValueError("selection_only control permits streaming groups C,D,E only")
     if retrieval_mode not in {"operating", "forced_topk"}:
         raise ValueError("retrieval_mode must be operating or forced_topk")
+    if retrieval_backend not in {"full_scan", "anchor_guided"}:
+        raise ValueError("retrieval_backend must be full_scan or anchor_guided")
     if retrieval_mode == "forced_topk" and offline_format != "multi_nested_v3":
         raise ValueError("forced_topk currently requires --offline-format multi_nested_v3")
     if offline_format == "multi_nested_v3" and (
@@ -126,6 +141,7 @@ def run_streaming_rag_evaluation(
         raise FileNotFoundError(f"boundary manifest does not exist: {boundary_path}")
     offline_control = _validate_offline_control(
         offline_format=offline_format,
+        control_mode=offline_control_mode,
         paths=paths,
         threshold=threshold,
         top_k=top_k,
@@ -187,6 +203,13 @@ def run_streaming_rag_evaluation(
         seed=seed,
         offline_format=offline_format,
         offline_control=offline_control,
+        offline_control_mode=offline_control_mode,
+        retrieval_backend=retrieval_backend,
+        anchor_shortlist_size=anchor_shortlist_size,
+        anchor_start_radius=anchor_start_radius,
+        anchor_ngram_sizes=list(anchor_ngram_sizes),
+        anchors_per_entry=anchors_per_entry,
+        anchor_offset_tolerance=anchor_offset_tolerance,
     )
     destination = paths["output"]
     shard_dir = destination / "sample_shards"
@@ -254,6 +277,12 @@ def run_streaming_rag_evaluation(
             dtype=dtype,
             scoring_config=scoring,
             retrieval_mode=retrieval_mode,
+            retrieval_backend=retrieval_backend,
+            anchor_shortlist_size=anchor_shortlist_size,
+            anchor_start_radius=anchor_start_radius,
+            anchor_ngram_sizes=anchor_ngram_sizes,
+            anchors_per_entry=anchors_per_entry,
+            anchor_offset_tolerance=anchor_offset_tolerance,
         )
     backend = None
     if missing_streaming_groups:
@@ -303,7 +332,7 @@ def run_streaming_rag_evaluation(
     _apply_comparative_failure_classes(results)
     summary = _build_summary(results)
     boundary_summary = _build_boundary_summary(results)
-    latency_summary = _build_latency_summary(results)
+    latency_summary = _build_latency_summary(results, timeline)
     failures = [row for row in results if row.get("failure_reason")]
     _write_jsonl(destination / "sample_results.jsonl", results)
     _write_jsonl(destination / "chunk_timeline.jsonl", timeline)
@@ -342,6 +371,7 @@ def _load_offline_selection_for_format(
 def _validate_offline_control(
     *,
     offline_format: str,
+    control_mode: str = "strict",
     paths: Mapping[str, Path],
     threshold: float,
     top_k: int,
@@ -355,6 +385,8 @@ def _validate_offline_control(
     dtype: str,
     max_new_tokens: int | None,
 ) -> dict[str, object]:
+    if control_mode not in {"strict", "selection_only"}:
+        raise ValueError("control_mode must be strict or selection_only")
     report_name = (
         "multi_nested_prompt_report.json"
         if offline_format == "multi_nested_v3"
@@ -387,24 +419,25 @@ def _validate_offline_control(
         expected_retrieval["candidate_source"] = (
             "operating_matches" if guards_applied else f"ranked_matches[:{top_k}]"
         )
-    retrieval = report.get("retrieval_config")
     mismatches = []
-    if not isinstance(retrieval, dict):
-        mismatches.append("missing retrieval_config")
-    else:
-        for key, value in expected_retrieval.items():
-            offline_value = retrieval.get(key)
-            if key == "mode" and "mode" not in retrieval:
-                offline_value = "operating"
-            if key in {"minimum_phonemes", "guards_applied", "candidate_source"} and (
-                key not in retrieval and retrieval_mode == "operating"
-            ):
-                continue
-            if offline_value != value:
-                mismatches.append(
-                    f"retrieval_config.{key}: "
-                    f"offline={offline_value!r}, streaming={value!r}"
-                )
+    if control_mode == "strict":
+        retrieval = report.get("retrieval_config")
+        if not isinstance(retrieval, dict):
+            mismatches.append("missing retrieval_config")
+        else:
+            for key, value in expected_retrieval.items():
+                offline_value = retrieval.get(key)
+                if key == "mode" and "mode" not in retrieval:
+                    offline_value = "operating"
+                if key in {"minimum_phonemes", "guards_applied", "candidate_source"} and (
+                    key not in retrieval and retrieval_mode == "operating"
+                ):
+                    continue
+                if offline_value != value:
+                    mismatches.append(
+                        f"retrieval_config.{key}: "
+                        f"offline={offline_value!r}, streaming={value!r}"
+                    )
 
     prompt = report.get("prompt_interface")
     if not isinstance(prompt, dict):
@@ -461,11 +494,16 @@ def _validate_offline_control(
                 "ctc_report": "ctc_report",
             }
         )
+    validated_input_names = (
+        input_names
+        if control_mode == "strict"
+        else {key: input_names[key] for key in ("validation_manifest", "vocab")}
+    )
     report_inputs = report.get("inputs")
     if not isinstance(report_inputs, dict):
         mismatches.append("missing inputs")
     else:
-        for report_name_key, path_key in input_names.items():
+        for report_name_key, path_key in validated_input_names.items():
             identity = report_inputs.get(report_name_key)
             actual_sha = _file_identity(paths[path_key])["sha256"]
             if not isinstance(identity, dict) or identity.get("sha256") != actual_sha:
@@ -492,15 +530,18 @@ def _validate_offline_control(
             "minimum_top1_margin": minimum_top1_margin,
             "time_axis": "temporal_upsample_2x_only",
         }
-        scoring = ctc_report.get("scoring_config") if isinstance(ctc_report, dict) else None
-        if not isinstance(scoring, dict):
-            mismatches.append("ctc_report.scoring_config is missing")
-        else:
-            mismatches.extend(
-                f"ctc_report.scoring_config.{key} differs"
-                for key, value in expected_scoring.items()
-                if scoring.get(key) != value
+        if control_mode == "strict":
+            scoring = (
+                ctc_report.get("scoring_config") if isinstance(ctc_report, dict) else None
             )
+            if not isinstance(scoring, dict):
+                mismatches.append("ctc_report.scoring_config is missing")
+            else:
+                mismatches.extend(
+                    f"ctc_report.scoring_config.{key} differs"
+                    for key, value in expected_scoring.items()
+                    if scoring.get(key) != value
+                )
         checkpoint_sha = _file_identity(paths["checkpoint"])["sha256"]
         if (
             not isinstance(ctc_report, dict)
@@ -517,15 +558,26 @@ def _validate_offline_control(
         raise ValueError("offline control report has invalid total_cases")
     return {
         "status": "pass",
+        "control_mode": control_mode,
         "offline_format": offline_format,
         "report": _file_identity(report_path),
         "qwen_asr_version": streaming_version,
         "max_new_tokens": resolved_max_new_tokens,
         "selection_profile": selection.get("profile"),
         "total_cases": total_cases,
-        "validated_retrieval_config": expected_retrieval,
+        "validated_retrieval_config": (
+            expected_retrieval if control_mode == "strict" else None
+        ),
+        "current_retrieval_config_not_compared": (
+            expected_retrieval if control_mode == "selection_only" else None
+        ),
         "validated_prompt_template": True,
-        "validated_input_sha256": sorted(input_names),
+        "validated_input_sha256": sorted(validated_input_names),
+        "selection_only_waivers": (
+            ["offline retrieval config", "hotword table SHA256", "case table SHA256"]
+            if control_mode == "selection_only"
+            else []
+        ),
         "validated_model_fields": ["path", "dtype", "max_new_tokens"],
     }
 
@@ -761,6 +813,7 @@ def _load_offline_predictions(
                 ],
                 "injected_hotword_ids": list(raw.get("injected_hotword_ids", [])),
                 "injected_hotwords": list(raw.get("injected_hotwords", [])),
+                "injected_candidates": [],
                 "boundary_bucket": sample.boundary_bucket,
                 "primary_group": sample.primary_group,
                 "redundant_family_ids": list(sample.redundant_family_ids),
@@ -839,6 +892,26 @@ def _quality_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
         char_errors += _edit_distance(ref_chars, hyp_chars)
         char_total += len(ref_chars)
     negative_count = sum(not bool(row["expected_hotword_ids"]) for row in rows)
+    prompted_true_positive = 0
+    prompted_false_positive = 0
+    wrong_injected = 0
+    for row in rows:
+        expected_ids = set(row["expected_hotword_ids"])
+        prediction = str(row["prediction"])
+        candidates = row.get("injected_candidates", [])
+        if not isinstance(candidates, list):
+            continue
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            hotword_id = str(candidate.get("hotword_id", ""))
+            surface = str(candidate.get("surface", ""))
+            written = bool(surface) and strict_phrase_match(prediction, surface)
+            if hotword_id in expected_ids:
+                prompted_true_positive += int(written)
+            else:
+                wrong_injected += 1
+                prompted_false_positive += int(written)
     return {
         "samples": len(rows),
         "positive_samples": len(positive),
@@ -872,6 +945,17 @@ def _quality_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
             ),
             negative_count,
         ),
+        "final_prompted_hotword_precision": _ratio(
+            prompted_true_positive,
+            prompted_true_positive + prompted_false_positive,
+        ),
+        "wrong_injected_write_through_rate": _ratio(
+            prompted_false_positive,
+            wrong_injected,
+        ),
+        "prompted_true_positive_hotwords": prompted_true_positive,
+        "prompted_false_positive_hotwords": prompted_false_positive,
+        "wrong_injected_hotwords": wrong_injected,
         "failure_counts": dict(
             Counter(row.get("failure_reason") for row in rows if row.get("failure_reason"))
         ),
@@ -935,7 +1019,10 @@ def _build_boundary_summary(results: Sequence[Mapping[str, Any]]) -> dict[str, o
     return {"schema_version": 2, "buckets": buckets}
 
 
-def _build_latency_summary(results: Sequence[Mapping[str, Any]]) -> dict[str, object]:
+def _build_latency_summary(
+    results: Sequence[Mapping[str, Any]],
+    timeline: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, object]:
     metrics: dict[str, dict[str, object]] = {}
     names = (
         "ctc_first_detect_latency_sec",
@@ -961,6 +1048,58 @@ def _build_latency_summary(results: Sequence[Mapping[str, Any]]) -> dict[str, ob
             if item.get("mutable_at_first_detect") is not None
         ]
         metrics[group]["mutable_at_first_detect_rate"] = _ratio(sum(mutable), len(mutable))
+        group_results = [row for row in results if row["experiment_group"] == group]
+        group_timeline = [row for row in timeline if row["experiment_group"] == group]
+        timing_names = (
+            "step_total_seconds",
+            "detector_wall_seconds",
+            "ctc_processor_seconds",
+            "ctc_encoder_seconds",
+            "ctc_head_seconds",
+            "ctc_decode_seconds",
+            "anchor_query_seconds",
+            "hotword_matching_seconds",
+            "hotword_sorting_seconds",
+            "hotword_selection_seconds",
+            "retrieval_seconds",
+            "prompt_build_seconds",
+            "prompt_refresh_seconds",
+            "qwen_streaming_seconds",
+            "qwen_finalize_seconds",
+        )
+        metrics[group]["compute"] = {
+            "sample_inference_seconds": _distribution(
+                row.get("inference_seconds") for row in group_results
+            ),
+            "sample_real_time_factor": _distribution(
+                row.get("real_time_factor") for row in group_results
+            ),
+            "chunk_metrics": {
+                name: _distribution(
+                    timing.get(name)
+                    for row in group_timeline
+                    if isinstance((timing := row.get("compute_timing")), Mapping)
+                )
+                for name in timing_names
+            },
+            "retrieval_over_50ms_rate": _ratio(
+                sum(
+                    bool(timing["retrieval_over_50ms"])
+                    for row in group_timeline
+                    if isinstance((timing := row.get("compute_timing")), Mapping)
+                    and timing.get("retrieval_over_50ms") is not None
+                ),
+                sum(
+                    1
+                    for row in group_timeline
+                    if isinstance((timing := row.get("compute_timing")), Mapping)
+                    and timing.get("retrieval_over_50ms") is not None
+                ),
+            ),
+            "latency_scope": (
+                "measured_wall_clock_per_streaming_step; retrieval excludes CTC encoder"
+            ),
+        }
     return {"schema_version": 2, "groups": metrics}
 
 
@@ -1094,13 +1233,25 @@ def _collect_shards(
 def _distribution(values: Iterable[Any]) -> dict[str, object]:
     clean = sorted(float(value) for value in values if value is not None)
     if not clean:
-        return {"count": 0, "mean": None, "median": None, "p90": None, "p95": None}
+        return {
+            "count": 0,
+            "max": None,
+            "mean": None,
+            "median": None,
+            "p50": None,
+            "p90": None,
+            "p95": None,
+            "p99": None,
+        }
     return {
         "count": len(clean),
+        "max": clean[-1],
         "mean": mean(clean),
         "median": median(clean),
+        "p50": _percentile(clean, 0.50),
         "p90": _percentile(clean, 0.90),
         "p95": _percentile(clean, 0.95),
+        "p99": _percentile(clean, 0.99),
     }
 
 
