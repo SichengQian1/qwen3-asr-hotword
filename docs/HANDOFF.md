@@ -1,5 +1,56 @@
 # 工作交接记录
 
+## 0.55 2026-08-26 4k五组流式端到端formal100结果
+
+`streaming_gate_suite_4k_formal100_v1`已完成100条工程校准样本，其中80条正样本、
+20条无热词负样本；五组均`status=pass`，未读取封存test集。正式结果如下：
+
+| 组 | Exact recall | 样本命中率 | 最终Prompt精确率 | 负样本最终幻觉率 | WER | CER |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| no-RAG | 89.53% | 78.75% | 不适用 | 0% | 8.30% | 3.39% |
+| conservative 0.86/Top-5 | 91.28% | 82.50% | 78.61% | 0% | 8.84% | 3.78% |
+| balanced 0.82/Top-7 | 91.28% | 82.50% | 79.21% | 0% | 8.84% | 3.89% |
+| recall-first 0.75/Top-7 | 93.02% | 85.00% | 79.06% | 0% | 8.50% | 3.92% |
+| Oracle | 93.60% | 86.25% | 100% | 0% | 8.10% | 3.36% |
+
+Recall-first为160/172，Oracle为161/172，两者只差1个热词；相对no-RAG，Recall-first
+提升3.49个百分点，样本命中率提升6.25个百分点。说明4k Anchor shortlist和放宽后的
+CTC门控已接近当前流式Qwen/Prompt机制的Oracle上限，继续单纯降低threshold的收益很小。
+Oracle仍有11个`prompt_injected_but_decoder_failed`，确认剩余问题不能全部归因于检索。
+
+Qwen确实有显著过滤作用，但不是无条件安全：
+
+- conservative/balanced/recall-first分别注入121/227/558个错误候选，最终错误写穿比例
+  为30.58%/16.30%/7.17%；对应最终Prompt真/假热词为136/37、141/37、151/40。
+- 20条纯负样本中，错误候选注入样本率分别为25%/45%/90%，但三个组最终热词幻觉率
+  都是0%。因此Qwen对纯负样本的错误Prompt过滤很好。
+- 最终约79%的Prompt精确率主要被正样本中的`nested_family_plus_two`和
+  `nested_long_present`拉低；Qwen会在已有正确热词语境中写入错误的同族或嵌套近邻。
+  这类错误不能用“负样本幻觉率为0”掩盖。
+- 三个正常RAG组的WER/CER均比no-RAG略差；Recall-first的WER只增加0.20个百分点，
+  但CER增加0.53个百分点。Oracle反而略优于no-RAG，说明问题来自错误候选集合，而不是
+  Prompt机制必然损害通用识别。
+
+4,000词纯检索目标在322个流式step上继续稳定通过：
+
+| 组 | P50 | P95 | P99 | max | 超50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| conservative | 26.56 ms | 39.10 ms | 42.86 ms | 49.66 ms | 0% |
+| balanced | 25.06 ms | 36.35 ms | 41.36 ms | 47.50 ms | 0% |
+| recall-first | 25.32 ms | 38.23 ms | 40.43 ms | 43.90 ms | 0% |
+
+上述50 ms目标只针对CTC greedy decode + Anchor query + shortlist重排，不包含Encoder与
+Head。包含CTC Encoder/Head后的detector P95约93.7至100.0 ms；再包含Prompt和Qwen的
+step P95约290至306 ms。三个RAG组样本RTF中位数约0.081至0.085、P95约0.142至0.150，
+仍满足实时处理；冷启动长尾继续单独保留，不能混同纯检索预算。
+
+当前决策：4k已满足“纯检索P95 < 50 ms、端到端Recall > 90%”，但没有满足最终Prompt
+Precision 85%。如果暂时不把85%作为硬门槛，Recall-first是召回上限诊断点，
+conservative是错误注入更少的安全点；balanced没有提供召回收益，暂不推荐。下一阶段
+不再做全局threshold放宽，而应先导出并分析37至40个最终假热词，重点设计显式的
+同族/嵌套冲突消解；同时可用纯离线Anchor评测向5k以上做容量阶梯，只有前一档仍满足
+P95 < 50 ms和Recall > 90%时才做昂贵端到端复验。
+
 ## 0.54 2026-08-26 4k五组流式端到端smoke20结果
 
 热修复后，`streaming_gate_suite_4k_smoke20_v1`在物理GPU 2上完成，根汇总
