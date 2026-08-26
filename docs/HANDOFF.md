@@ -1,5 +1,42 @@
 # 工作交接记录
 
+## 0.57 2026-08-26 formal100 Prompt因果指标结果
+
+现有formal100分片经`--resume`完成纯重汇总，C、D5、D7-balanced、D7-recall和E使用同一
+批100条（80正/20负），没有重跑模型或改变推理结果。核心指标：
+
+| 组 | 正确Prompt采用率 | 错误Prompt过滤率 | 错误落字率 | 最终Recall | 最终Precision |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| D5 conservative | 136/145 = 93.79% | 84/121 = 69.42% | 37/121 = 30.58% | 91.28% | 80.93% |
+| D7 balanced | 141/152 = 92.76% | 190/227 = 83.70% | 37/227 = 16.30% | 91.28% | 80.93% |
+| D7 recall-first | 151/161 = 93.79% | 518/558 = 92.83% | 40/558 = 7.17% | 93.02% | 80.00% |
+| E Oracle | 161/172 = 93.60% | 不适用 | 0 | 93.60% | 100% |
+
+正确Prompt一旦进入候选，三个D组的最终采用率都约93%，与Oracle的93.60%接近。说明
+Qwen能够稳定利用正确Prompt；Recall-first最终Recall只比Oracle低1/172，即0.58个百分点。
+
+Qwen也能过滤大部分错误Prompt，但过滤比例不能脱离候选基数解释。Recall-first虽然过滤
+92.83%，却注入558个错误sample-hotword对，剩余40个落字；D5只过滤69.42%，但错误候选
+总量只有121，最终同样约37个落字。因此此前约79%的`final_prompted_hotword_precision`
+并不与92.83%的错误过滤率矛盾。
+
+20条纯负样本中，D5/balanced/recall-first分别有5/9/18条收到错误候选，错误候选数为
+9/25/88，但最终错误落字均为0，负样本最终幻觉率均为0%。主要污染发生在本身含热词的
+正样本：Recall-first的40个错误落字全部集中在`nested_family_plus_two`的25个和
+`nested_long_present`的15个。同族/嵌套冲突是下一步Precision优化的明确目标。
+
+通用文本变化：C组WER/CER为8.30%/3.39%；D5为8.84%/3.78%，balanced为8.84%/3.89%，
+recall-first为8.50%/3.92%，Oracle为8.10%/3.36%。Recall-first提供最高D组Recall且WER
+仅比C高0.20个百分点，但CER高0.53个百分点；D5的Recall较低1.74个百分点，但错误候选
+更少且CER更好。balanced相对D5没有Recall或最终Precision收益，错误候选更多、CER更差，
+暂时淘汰。
+
+正式结论：Qwen可以过滤错误Prompt，尤其能完全保护这20个纯负样本，但不能可靠消解
+正样本中的同族/嵌套近邻。若Precision 85%暂不作为硬门槛，Recall-first作为容量上限
+测试配置，D5作为保守对照；当前4k结果仍不是达到85% Precision的最终产品配置。后续
+容量测试可以先用纯离线Anchor向5k以上推进，同时单独导出40个错误落字做family-aware
+冲突消解，避免继续通过全局降低threshold增加候选噪声。
+
 ## 0.56 2026-08-26 流式端到端Prompt因果指标补全
 
 formal100已按同一选择完成C、D5 conservative、D7 balanced、D7 recall-first和E，
