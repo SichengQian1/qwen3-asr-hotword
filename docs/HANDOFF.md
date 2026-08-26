@@ -1,5 +1,53 @@
 # 工作交接记录
 
+## 0.51 2026-08-26 4k门控扫描结果与端到端诊断决策
+
+离线formal100完整64候选门控扫描已完成，SHA256全部通过。检索性能稳定满足目标：
+P50/P95/P99/max为26.73/34.69/38.37/44.44 ms，100条中没有查询超过50 ms。共扫描
+3,168个门控组合，得到17个Recall/Precision/FPR Pareto点。
+
+固定基线`0.86 / edit 0.35 / Top-5`为138/172，Recall 80.23%，Precision 55.42%，
+负例FPR 25%。Recall-first推荐点为`threshold 0.75 / edit 0.35 / minimum posterior
+0.5 / margin 0 / Top-7`：155/172，Recall 90.12%，Precision 26.59%，负例FPR 90%。
+Top-10同门控可到158/172、Recall 91.86%，但Precision进一步降到22.60%，因此第一轮
+端到端诊断优先Top-7，不把Top-10作为主推荐。
+
+扫描没有任何点同时达到Recall 90%和Precision 85%。这说明单纯放宽门控能补回Recall，
+但会带入大量错误候选；它是定位CTC门控与Qwen Prompt容错能力的诊断配置，不是可直接
+上线的产品配置。建议端到端至少保留三条CTC路径：保守0.86/Top-5、平衡0.82/Top-7
+（Recall 86.05%、Precision 42.65%、FPR 45%）和Recall-first 0.75/Top-7，再加Oracle。
+
+本轮还修正了`best_by_top_k`在某个Top-K没有达到目标Recall时的回退排序：旧逻辑会继续
+先最大化Precision，导致Top-5显示Recall仅22.09%的点；新逻辑在未达目标时先最大化
+Recall，再比较Precision/FPR。总体Top-7推荐不受该报告问题影响。拉取修复后只需删除
+并重跑很快的`GATE_SWEEP_ROOT`，不需要重跑`GATE_SOURCE_ROOT`、Qwen、CTC或Anchor。
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+GATE_SWEEP_ROOT_V2="$CAP_ROOT/operating_gate_sweep_offline_4000_r2_v2"
+test ! -e "$GATE_SWEEP_ROOT_V2"
+
+python scripts/sweep_hotword_operating_points.py \
+  --benchmark-dir "$GATE_SOURCE_ROOT" \
+  --output-dir "$GATE_SWEEP_ROOT_V2" \
+  --profile representative \
+  --size 4000 \
+  --window full_current \
+  --shortlist-size 64 \
+  --top-ks 5,7,10 \
+  --thresholds 0,0.50,0.60,0.70,0.75,0.80,0.82,0.84,0.86,0.88,0.90 \
+  --maximum-edit-ratios 0.35,0.40,0.45,0.50,0.60,1.0 \
+  --minimum-posterior-confidences 0,0.25,0.50,0.75 \
+  --minimum-top1-margins 0,0.01,0.02,0.05 \
+  --selection-scope final \
+  --target-recall 0.90 \
+  --diagnostic-precision-target 0.85 \
+  --deadline-ms 50
+```
+
+V2只修正未达标Top-K的展示与推荐，全部扫描点、总体Top-7推荐和性能数据应与V1一致。
+
 ## 0.50 2026-08-26 Step 5门控扫描与Recall-first端到端候选
 
 4k/50 ms路线现处于Step 5后段。Anchor-guided shortlist 64已经满足性能目标，但固定

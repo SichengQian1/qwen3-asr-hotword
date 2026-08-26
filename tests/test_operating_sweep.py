@@ -66,7 +66,7 @@ def _benchmark(tmp_path: Path, *, complete: bool = True) -> Path:
         {
             **common,
             "case_id": "positive",
-            "expected_hotword_ids": ["target"],
+            "expected_hotword_ids": ["distractor", "target"],
             "top_matches": [
                 _match("distractor", score=0.88, edit_ratio=0.10),
                 _match("target", score=0.83, edit_ratio=0.40),
@@ -117,7 +117,7 @@ def test_operating_sweep_selects_recall_first_point_and_preserves_baseline(
         (output / "recommended_config.json").read_text(encoding="utf-8")
     )
     assert recommendation["status"] == "target_recall_met"
-    assert recommendation["source_baseline"]["final"]["recall"] == 0.0
+    assert recommendation["source_baseline"]["final"]["recall"] == 0.5
     assert recommendation["recall_first"]["config"] == {
         "maximum_edit_ratio": 0.4,
         "minimum_posterior_confidence": 0.0,
@@ -126,10 +126,11 @@ def test_operating_sweep_selects_recall_first_point_and_preserves_baseline(
         "top_k": 2,
     }
     assert recommendation["recall_first"]["final"]["recall"] == 1.0
-    assert recommendation["recall_first"]["final"]["precision"] == pytest.approx(1 / 3)
+    assert recommendation["recall_first"]["final"]["precision"] == pytest.approx(2 / 3)
     assert recommendation["strict_recall_and_precision_point_count"] == 0
     assert set(recommendation["source_gates_by_top_k"]) == {"1", "2"}
     assert recommendation["best_by_top_k"]["1"]["status"] == "target_recall_not_met"
+    assert recommendation["best_by_top_k"]["1"]["recall_first"]["final"]["recall"] == 0.5
     assert recommendation["best_by_top_k"]["2"]["status"] == "target_recall_met"
     assert (output / "pareto_frontier.jsonl").is_file()
     assert (output / "sha256.txt").is_file()

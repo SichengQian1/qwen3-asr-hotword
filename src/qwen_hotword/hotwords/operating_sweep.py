@@ -384,13 +384,22 @@ def _recommend(
         for point in recall_eligible
         if _metric(point[scope], "precision") >= diagnostic_precision_target
     ]
-    pool = recall_eligible if recall_eligible else list(points)
-    recall_first = min(pool, key=lambda point: _recommendation_key(point, scope=scope))
+    if recall_eligible:
+        recall_first = min(
+            recall_eligible,
+            key=lambda point: _recommendation_key(point, scope=scope),
+        )
+    else:
+        recall_first = min(
+            points,
+            key=lambda point: _fallback_recall_key(point, scope=scope),
+        )
     return {
         "status": "target_recall_met" if recall_eligible else "target_recall_not_met",
         "selection_policy": (
             "among points meeting recall and latency, maximize precision then minimize "
-            "negative FPR; diagnostic precision target is reported but non-blocking"
+            "negative FPR; if no point meets recall, maximize recall first; diagnostic "
+            "precision target is reported but non-blocking"
         ),
         "recall_eligible_point_count": len(recall_eligible),
         "strict_recall_and_precision_point_count": len(strict),
@@ -410,6 +419,22 @@ def _recommendation_key(point: Mapping[str, Any], *, scope: str) -> tuple[float,
         -_metric(metrics, "precision"),
         _metric(metrics, "negative_case_false_positive_rate"),
         -_metric(metrics, "recall"),
+        _metric(metrics, "mean_returned_per_query"),
+        float(config["top_k"]),
+        -float(config["threshold"]),
+        float(config["maximum_edit_ratio"]),
+        -float(config["minimum_posterior_confidence"]),
+        -float(config["minimum_top1_margin"]),
+    )
+
+
+def _fallback_recall_key(point: Mapping[str, Any], *, scope: str) -> tuple[float, ...]:
+    metrics = point[scope]
+    config = point["config"]
+    return (
+        -_metric(metrics, "recall"),
+        -_metric(metrics, "precision"),
+        _metric(metrics, "negative_case_false_positive_rate"),
         _metric(metrics, "mean_returned_per_query"),
         float(config["top_k"]),
         -float(config["threshold"]),

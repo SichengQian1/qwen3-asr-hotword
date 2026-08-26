@@ -694,6 +694,8 @@ posterior weight必须重新精排，不能在已截断或已排序JSON上近似
 最小化FPR并偏好较小Top-K。Precision 85%当前是诊断目标，不是硬阻塞条件。
 `recommended_config.json`还分别保留Top-5/7/10在原门控下的结果和每个Top-K自己的最优
 Recall-first点，便于逐步比较，不只输出一个跨Top-K总推荐。
+如果某个Top-K没有任何点达到目标Recall，报告回退为先最大化Recall、再最大化Precision
+和最小化FPR；不能把高Precision但极低Recall的点标成该Top-K的Recall-first推荐。
 
 产物包括：
 
