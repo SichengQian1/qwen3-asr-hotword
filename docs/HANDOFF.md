@@ -1,5 +1,67 @@
 # 工作交接记录
 
+## 0.54 2026-08-26 4k五组流式端到端smoke20结果
+
+热修复后，`streaming_gate_suite_4k_smoke20_v1`在物理GPU 2上完成，根汇总
+`status=pass`，共20个样本、每组67个流式step，未读取封存test集。实际运行使用
+`gpu_memory_utilization=0.15`。这20条恰好全部是正样本，因此本轮可以验证正样本召回、
+错误Prompt候选是否写穿和计算时延，但`negative_hotword_hallucination_rate`及
+`negative_wrong_hotword_injection_rate`均为null，不能把本轮的Prompt精确率1.0解释成
+包含负样本的产品精确率。
+
+最终质量：
+
+| 组 | 热词exact recall | 样本命中率 | WER | CER | 错误注入候选 | 错误写穿率 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| no-RAG | 91.67% | 75% | 6.56% | 3.02% | 0 | 不适用 |
+| conservative 0.86/Top-5 | 95.00% | 85% | 5.63% | 2.38% | 20 | 0% |
+| balanced 0.82/Top-7 | 95.00% | 85% | 5.63% | 2.81% | 39 | 0% |
+| recall-first 0.75/Top-7 | 95.00% | 85% | 6.25% | 3.09% | 103 | 0% |
+| Oracle | 95.00% | 85% | 6.25% | 2.88% | 0 | 不适用 |
+
+三个正常RAG组均比no-RAG多3.33个百分点热词召回；但放宽到balanced或recall-first没有
+超过conservative的最终召回。conservative同时拥有最少错误注入、最低CER和并列最低
+WER，因此是当前smoke中的临时最优运行点。错误候选20/39/103个均未写入最终文本，
+说明Qwen在这20个正样本上有明显Prompt过滤能力；正式100条包含20个负样本后，才能
+判断这种过滤能否可靠抑制负样本幻觉。
+
+Oracle也只有95% recall，3个失败均为`prompt_injected_but_decoder_failed`。因此本轮
+剩余5%不是单纯放宽CTC门控即可解决：至少在这批样本中，流式解码、Prompt利用或
+fixed/unfixed机制已经构成上限。正常RAG失败则为CTC从未检出或检出太晚已固定；
+conservative为2/1，balanced和recall-first均为1/2。
+
+4,000词纯检索（CTC greedy decode + Anchor + shortlist重排，不含Encoder/Head）全部满足
+50 ms目标：
+
+| 组 | P50 | P95 | P99 | max | 超50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| conservative | 25.36 ms | 36.87 ms | 39.20 ms | 39.22 ms | 0% |
+| balanced | 24.87 ms | 38.34 ms | 39.99 ms | 40.26 ms | 0% |
+| recall-first | 26.33 ms | 38.29 ms | 39.48 ms | 39.64 ms | 0% |
+
+包含Encoder、Head、检索、Prompt和Qwen的step P95约378/370/411 ms；样本级平均推理
+约0.857/0.891/0.877 s，RTF中位数约0.088/0.091/0.093，整体具备实时性。但三个独立
+进程的首轮冷启动/编译高度疑似主导了长尾：step max达到5.35至5.68 s、P99达到
+2.08至2.26 s；正式报告需同时
+保留全量冷启动指标和稳态指标，不能用当前20条的长尾直接代表在线稳态。Oracle与
+no-RAG在同一个子进程中顺序运行，Oracle均值更低也不能解释成Oracle天然更快。
+
+`ctc_first_detect_latency_sec`、`first_correct_latency_sec`和
+`stabilization_latency_sec`计数为0，不是程序漏跑，而是这套自然formal case没有人工或
+强制对齐的热词声学起止时间；这些“相对热词声学结束”的延迟只能由边界覆盖集报告。
+
+下一步先校验smoke根目录和四个子目录SHA256，然后以新目录跑满formal100。原命令仅需：
+
+```bash
+SUITE_FORMAL_ROOT="$CAP_ROOT/streaming_gate_suite_4k_formal100_v1"
+test ! -e "$SUITE_FORMAL_ROOT"
+```
+
+将`--output-dir "$SUITE_SMOKE_ROOT"`改为`--output-dir "$SUITE_FORMAL_ROOT"`，删除
+`--max-samples 20`，其余模型、资产、checkpoint、流式参数和三组门控必须完全不变。
+formal100用于回答负样本幻觉、错误候选写穿及三个门控的最终取舍；在结果出来前不调整
+阈值、Top-K或Prompt模板。
+
 ## 0.53 2026-08-26 4k流式套件case loader热修复
 
 首次`streaming_gate_suite_4k_smoke20_v1`在模型加载前失败，报错
