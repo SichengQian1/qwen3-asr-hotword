@@ -1,5 +1,108 @@
 # 工作交接记录
 
+## 0.50 2026-08-26 Step 5门控扫描与Recall-first端到端候选
+
+4k/50 ms路线现处于Step 5后段。Anchor-guided shortlist 64已经满足性能目标，但固定
+`threshold=0.86 / maximum_edit_ratio=0.35 / Operating Top-5`在离线formal100上只有
+80.23% Operating recall。Operating上限扩大到7或10几乎不增加召回，说明主要损失来自
+门控拒绝，而不是输出槽位不足。第一轮端到端RAG前，先做一次纯CPU门控重放；精确率
+85%继续记录，但本轮不作为硬性阻塞条件。
+
+新增：
+
+- `benchmark_anchor_rerank_capacity.py --saved-ranked-matches`：可把完整shortlist的精排
+  特征写入`query_results.jsonl`。默认仍保存20条以兼容旧行为；门控扫描必须保存64条，
+  否则被拒绝候选之后可能由第21至64名补位，旧Top-20不能给出精确结果。
+- `scripts/sweep_hotword_operating_points.py`：不重跑Qwen、CTC、Anchor或编辑距离，只对
+  完整已排序shortlist精确重放threshold、maximum edit ratio、minimum posterior、
+  minimum top-1 margin和Operating Top-K。
+- 输出`source_baseline`、全部`sweep_results.jsonl`、Recall/Precision/FPR Pareto前沿和
+  `recall_first`推荐点。推荐规则为：P95先不超过50 ms，Recall先达到90%，再最大化
+  Precision、最小化负例FPR并偏好更小Top-K。85% Precision只输出可达性，不参与阻塞。
+- Posterior weight本轮固定为0.25。它会改变候选排序，不能仅凭当前已排序结果安全重放；
+  如门控扫描仍不够，再单独做重新精排的posterior-weight消融。
+
+工作区拉取后先生成一份完整64候选的离线扫描源，使用新目录，不覆盖旧基线：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+GATE_SOURCE_ROOT="$CAP_ROOT/benchmark_anchor_guided_offline_4000_r2_gate_source_v1"
+GATE_SWEEP_ROOT="$CAP_ROOT/operating_gate_sweep_offline_4000_r2_v1"
+
+test ! -e "$GATE_SOURCE_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  --assets-root "$ASSET_4K_ROOT" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --output-dir "$GATE_SOURCE_ROOT" \
+  --profiles representative \
+  --sizes 4000 \
+  --shortlist-sizes 64 \
+  --lookbacks full \
+  --ngram-sizes 2,3,4 \
+  --anchors-per-entry 24 \
+  --offset-tolerance 1 \
+  --threshold 0.86 \
+  --top-k 5 \
+  --maximum-edit-ratio 0.35 \
+  --posterior-weight 0.25 \
+  --minimum-posterior-confidence 0 \
+  --minimum-top1-margin 0 \
+  --deadline-ms 50 \
+  --gc-policy defer_during_retrieval_pass \
+  --rerank-mode anchor_guided \
+  --anchor-start-radius 2 \
+  --saved-ranked-matches 64
+
+test ! -e "$GATE_SWEEP_ROOT"
+python scripts/sweep_hotword_operating_points.py \
+  --benchmark-dir "$GATE_SOURCE_ROOT" \
+  --output-dir "$GATE_SWEEP_ROOT" \
+  --profile representative \
+  --size 4000 \
+  --window full_current \
+  --shortlist-size 64 \
+  --top-ks 5,7,10 \
+  --thresholds 0,0.50,0.60,0.70,0.75,0.80,0.82,0.84,0.86,0.88,0.90 \
+  --maximum-edit-ratios 0.35,0.40,0.45,0.50,0.60,1.0 \
+  --minimum-posterior-confidences 0,0.25,0.50,0.75 \
+  --minimum-top1-margins 0,0.01,0.02,0.05 \
+  --selection-scope final \
+  --target-recall 0.90 \
+  --diagnostic-precision-target 0.85 \
+  --deadline-ms 50
+```
+
+检查与回传：
+
+```bash
+(cd "$GATE_SOURCE_ROOT" && sha256sum -c sha256.txt)
+(cd "$GATE_SWEEP_ROOT" && sha256sum -c sha256.txt)
+
+cat "$GATE_SWEEP_ROOT/summary.json"
+jq '{
+  status,
+  source_baseline: (.source_baseline | {config, final}),
+  recall_first: (.recall_first | {config, final}),
+  best_by_top_k: (.best_by_top_k | with_entries(
+    .value |= {status, recall_first: (.recall_first | {config, final})}
+  )),
+  delta_from_source_baseline,
+  strict_recall_and_precision_point_count
+}' "$GATE_SWEEP_ROOT/recommended_config.json"
+
+sed -n '1,20p' "$GATE_SWEEP_ROOT/pareto_frontier.jsonl"
+```
+
+拿到结果后冻结两个端到端配置：保守组继续用0.86/0.35/Top-5；Recall-first组使用扫描
+推荐点。随后做离线/流式保守RAG、流式Recall-first RAG和Oracle对照。该扫描使用既有
+formal100作为工程校准集，推荐点不是独立测试集上的最终产品阈值，不能把扫描后的同集
+指标表述为泛化结论。
+
 ## 0.49 2026-08-26 Operating Top-5/7/10质量观察
 
 4k Anchor引导精排已证明Top-64离线P95为34.68 ms、Top-128为45.84 ms，且相对

@@ -208,6 +208,7 @@ def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
         warmup_queries=0,
         rerank_mode="anchor_guided",
         anchor_start_radius=2,
+        saved_ranked_matches=8,
         print_progress=False,
     )
 
@@ -233,6 +234,13 @@ def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
     assert performance["anchor_seconds"]["count"] == 3
     assert performance["rerank_seconds"]["count"] == 3
     assert report["rerank_mode"] == "anchor_guided"
+    assert report["saved_ranked_matches"] == 8
+    query_rows = [
+        json.loads(line)
+        for line in (output / "query_results.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert all(row["ranked_matches_complete"] for row in query_rows)
+    assert all(len(row["top_matches"]) == row["ranked_matches_available"] for row in query_rows)
     assert (output / "sha256.txt").is_file()
 
 

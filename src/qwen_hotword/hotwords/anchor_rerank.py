@@ -95,6 +95,7 @@ def benchmark_anchor_rerank_capacity(
     gc_policy: str = "defer_during_retrieval_pass",
     rerank_mode: str = "full_search",
     anchor_start_radius: int = 2,
+    saved_ranked_matches: int = 20,
     print_progress: bool = True,
 ) -> dict[str, object]:
     resolved_profiles = tuple(dict.fromkeys(profiles))
@@ -118,6 +119,8 @@ def benchmark_anchor_rerank_capacity(
         raise ValueError(f"rerank_mode must be one of {RERANK_MODES}")
     if anchor_start_radius < 0:
         raise ValueError("anchor_start_radius must not be negative")
+    if saved_ranked_matches <= 0:
+        raise ValueError("saved_ranked_matches must be positive")
 
     anchor_config = AnchorIndexConfig(
         ngram_sizes=resolved_ngrams,
@@ -216,6 +219,7 @@ def benchmark_anchor_rerank_capacity(
                                     size=size,
                                     rerank_mode=rerank_mode,
                                     anchor_start_radius=anchor_start_radius,
+                                    saved_ranked_matches=saved_ranked_matches,
                                 )
                                 level_rows.append(row)
                                 query_rows.append(row)
@@ -279,6 +283,7 @@ def benchmark_anchor_rerank_capacity(
         "sizes": list(resolved_sizes),
         "shortlist_sizes": list(resolved_shortlists),
         "operating_observation_ks": list(OBSERVATION_KS),
+        "saved_ranked_matches": saved_ranked_matches,
         "lookback_seconds": [value for value in resolved_lookbacks],
         "window_method": "current_cumulative_ctc_frame_axis_causal_crop",
         "anchor_config": {
@@ -313,6 +318,7 @@ def benchmark_anchor_rerank_capacity(
         "mode": "anchor_shortlist_then_existing_approximate_phoneme_scorer",
         "rerank_mode": rerank_mode,
         "operating_observation_ks": list(OBSERVATION_KS),
+        "saved_ranked_matches": saved_ranked_matches,
         "query_rows": len(query_rows),
         "source_replay_rows": len(replay_rows),
         "levels": summaries,
@@ -358,6 +364,7 @@ def _run_query(
     size: int,
     rerank_mode: str,
     anchor_start_radius: int,
+    saved_ranked_matches: int,
 ) -> dict[str, object]:
     decoded, window_steps, cutoff_step = crop_decoded_to_lookback(
         replay_decoded_phonemes(replay),
@@ -443,7 +450,14 @@ def _run_query(
         "rerank_seconds": rerank.retrieval_seconds,
         "retrieval_seconds": total_seconds,
         "over_deadline": total_seconds > deadline_seconds,
-        "top_matches": [match.to_dict() for match in rerank.result.ranked_matches[:20]],
+        "ranked_matches_available": len(rerank.result.ranked_matches),
+        "ranked_matches_complete": (
+            saved_ranked_matches >= len(rerank.result.ranked_matches)
+        ),
+        "top_matches": [
+            match.to_dict()
+            for match in rerank.result.ranked_matches[:saved_ranked_matches]
+        ],
     }
     for k in OBSERVATION_KS:
         selected = ranking_ids[:k]

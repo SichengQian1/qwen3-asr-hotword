@@ -86,6 +86,15 @@ def main() -> int:
     )
     parser.add_argument("--rerank-mode", choices=RERANK_MODES, default="full_search")
     parser.add_argument("--anchor-start-radius", type=int, default=2)
+    parser.add_argument(
+        "--saved-ranked-matches",
+        type=int,
+        default=20,
+        help=(
+            "Number of ranked match records saved per query. Use the shortlist size "
+            "when a later exact Operating-gate sweep must refill rejected ranks."
+        ),
+    )
     parser.add_argument("--quiet-progress", action="store_true")
     args = parser.parse_args()
     try:
@@ -113,6 +122,7 @@ def main() -> int:
             gc_policy=args.gc_policy,
             rerank_mode=args.rerank_mode,
             anchor_start_radius=args.anchor_start_radius,
+            saved_ranked_matches=args.saved_ranked_matches,
             print_progress=not args.quiet_progress,
         )
     except (FileExistsError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:

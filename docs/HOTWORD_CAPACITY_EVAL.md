@@ -669,3 +669,42 @@ Raw Top-7/10只说明正确热词是否进入相应排名，不能回答现有0.
 固定4k guided基线的重跑命令和输出检查见`docs/HANDOFF.md` 0.49。该轮仍冻结全部检索
 参数；结果用于判断“扩大Operating观察上限”本身的Recall收益和Precision代价，不作为
 Prompt Top-K变更授权。
+
+## 18. Step 5 Operating门控扫描
+
+门控扫描必须建立在完整保存的精排shortlist上。只保存原Top-20时，如果threshold、edit
+ratio或posterior门控拒绝前排候选，第21至64名可能补入Operating结果，因此不能把旧
+Top-20报告当作精确门控重放。先用`--saved-ranked-matches 64`生成独立benchmark目录，
+再用`sweep_hotword_operating_points.py`扫描：
+
+```text
+Operating Top-K
+score threshold
+maximum edit ratio
+minimum posterior confidence
+minimum top-1 margin
+```
+
+Posterior weight在该重放中保持源benchmark值，因为它参与score并改变完整排序。要扫描
+posterior weight必须重新精排，不能在已截断或已排序JSON上近似推断。
+
+每个扫描点同时输出final和any-step的Recall、Precision、正例case hit、负例FPR、返回
+候选数与错误候选数。离线formal100用`final`选点；流式验证使用`any_step`解释因果检出。
+推荐逻辑先要求源检索P95不超过50 ms和Recall达到目标，再在合格点内最大化Precision、
+最小化FPR并偏好较小Top-K。Precision 85%当前是诊断目标，不是硬阻塞条件。
+`recommended_config.json`还分别保留Top-5/7/10在原门控下的结果和每个Top-K自己的最优
+Recall-first点，便于逐步比较，不只输出一个跨Top-K总推荐。
+
+产物包括：
+
+```text
+run_config.json
+sweep_results.jsonl
+pareto_frontier.jsonl
+recommended_config.json
+summary.json
+sha256.txt
+```
+
+完整工作区命令见`docs/HANDOFF.md` 0.50。扫描推荐点只用于下一轮端到端诊断；由于选点
+和报告来自同一formal100，不得把它当成独立测试集上的最终泛化指标。
