@@ -1,5 +1,96 @@
 # 工作交接记录
 
+## 0.49 2026-08-26 Operating Top-5/7/10质量观察
+
+4k Anchor引导精排已证明Top-64离线P95为34.68 ms、Top-128为45.84 ms，且相对
+full-search没有质量损失。现有Raw Top-7/10 recall可观察正确词是否落在第6至10名，
+但旧报告只对Top-5应用0.86/edit/posterior/margin门控，无法判断扩大Operating上限后
+Recall和Precision的真实变化。
+
+评测现同时输出Operating@5/@7/@10：三档复用完全相同的候选分数与门控，仅改变门控
+通过后最多保留的观察数量。`--top-k 5`仍是实际运行和Prompt注入配置；Operating@7/10
+只用于容量研究，不会改写线上Top-5基线。每档输出：
+
+```text
+operating_correct_at_{5,7,10}
+operating_recall_at_{5,7,10}
+operating_precision_at_{5,7,10}
+operating_positive_case_hit_rate_at_{5,7,10}
+negative_case_false_positive_rate_at_{5,7,10}
+any_step_operating_*_at_{5,7,10}
+```
+
+旧`operating_ids`、`negative_case_false_positive_rate`和所有`*_at_5`字段保留兼容。
+历史汇总器会读取新字段；旧输出只能填Top-5，Top-7/10保持`null`，不能由Raw结果推测。
+
+工作区拉取后用新目录重跑现有guided benchmark：
+
+```bash
+git pull origin codex/g2p-coverage-scan
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE_REPLAY_ROOT="$CAP_ROOT/replay_offline_formal100_v1"
+STREAM_REPLAY_ROOT="$CAP_ROOT/replay_streaming_posterior_smoke20_v2"
+OFFLINE_OPK_ROOT="$CAP_ROOT/benchmark_anchor_guided_offline_4000_r2_operating_k_v1"
+STREAM_OPK_ROOT="$CAP_ROOT/benchmark_anchor_guided_streaming_4000_r2_operating_k_v1"
+
+COMMON_OPK_ARGS=(
+  --assets-root "$ASSET_4K_ROOT"
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+  --profiles representative
+  --sizes 4000
+  --shortlist-sizes 64,128
+  --ngram-sizes 2,3,4
+  --anchors-per-entry 24
+  --offset-tolerance 1
+  --threshold 0.86
+  --top-k 5
+  --maximum-edit-ratio 0.35
+  --posterior-weight 0.25
+  --minimum-posterior-confidence 0
+  --minimum-top1-margin 0
+  --deadline-ms 50
+  --gc-policy defer_during_retrieval_pass
+  --rerank-mode anchor_guided
+  --anchor-start-radius 2
+)
+
+test ! -e "$OFFLINE_OPK_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  "${COMMON_OPK_ARGS[@]}" \
+  --replay "$OFFLINE_REPLAY_ROOT/ctc_replay.jsonl" \
+  --lookbacks full \
+  --output-dir "$OFFLINE_OPK_ROOT"
+
+test ! -e "$STREAM_OPK_ROOT"
+python scripts/benchmark_anchor_rerank_capacity.py \
+  "${COMMON_OPK_ARGS[@]}" \
+  --replay "$STREAM_REPLAY_ROOT/ctc_replay.jsonl" \
+  --lookbacks full,2,4,6 \
+  --output-dir "$STREAM_OPK_ROOT"
+```
+
+返回以下短输出即可：
+
+```bash
+(cd "$OFFLINE_OPK_ROOT" && sha256sum -c sha256.txt)
+(cd "$STREAM_OPK_ROOT" && sha256sum -c sha256.txt)
+
+jq '.representative["4000"].full_current' \
+  "$OFFLINE_OPK_ROOT/quality_summary.json"
+
+jq '.representative["4000"]' \
+  "$STREAM_OPK_ROOT/quality_summary.json"
+
+cat "$OFFLINE_OPK_ROOT/performance_summary.json"
+cat "$STREAM_OPK_ROOT/performance_summary.json"
+```
+
+这轮只补观察指标，不调阈值、edit ratio、posterior、Anchor、shortlist或Prompt。拿到
+Operating@5/7/10后再画Recall/Precision变化，决定下一步是允许自适应上限7，还是先做
+置信度校准。
+
 ## 0.48 2026-08-25 Step 4结果、流式指标修正与Anchor引导精排
 
 4k Step 4的离线formal100和累计流式Posterior smoke20均已完成并通过SHA256。

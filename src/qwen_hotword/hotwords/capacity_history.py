@@ -98,10 +98,12 @@ def build_hotword_capacity_history(
             "raw_precision_at_k": (
                 "correct expected hotword hits divided by actual returned raw candidates"
             ),
-            "operating_precision_at_5": (
-                "correct expected hotword hits divided by actually selected Operating candidates"
+            "operating_precision_at_k": (
+                "correct expected hotword hits divided by actually selected Operating@K candidates"
             ),
-            "top7_top10_usage": "observation_only_not_prompt_injection",
+            "top7_top10_usage": (
+                "Operating observation only; runtime prompt injection remains Top-5"
+            ),
         },
         "profiles": list(resolved_profiles),
         "sizes": None if resolved_sizes is None else list(resolved_sizes),
@@ -298,31 +300,63 @@ def _ranking_row(
             k=k,
             slice_to_k=slice_to_k,
         )
-    if operating_key is not None and all(operating_key in row for row in final):
+    for k in OBSERVATION_KS:
+        resolved_operating_key = _resolve_operating_key(
+            final[0], base_key=operating_key, k=k
+        )
+        if resolved_operating_key is None or any(
+            resolved_operating_key not in row for row in final
+        ):
+            result[f"operating_correct_at_{k}"] = None
+            result[f"operating_recall_at_{k}"] = None
+            result[f"operating_precision_at_{k}"] = None
+            result[f"operating_positive_case_hit_rate_at_{k}"] = None
+            result[f"negative_case_false_positive_rate_at_{k}"] = None
+            result[f"any_step_operating_correct_at_{k}"] = None
+            result[f"any_step_operating_recall_at_{k}"] = None
+            result[f"any_step_operating_precision_at_{k}"] = None
+            result[f"any_step_operating_positive_case_hit_rate_at_{k}"] = None
+            result[f"any_step_negative_case_false_positive_rate_at_{k}"] = None
+            continue
         operating_hits = sum(
-            len(set(row["expected_hotword_ids"]) & set(row[operating_key]))
+            len(
+                set(row["expected_hotword_ids"])
+                & set(row[resolved_operating_key])
+            )
             for row in final
         )
-        operating_selected = sum(len(row[operating_key]) for row in final)
-        result["operating_correct_at_5"] = operating_hits
-        result["operating_recall_at_5"] = _ratio(operating_hits, expected_total)
-        result["operating_precision_at_5"] = _ratio(
+        operating_selected = sum(len(row[resolved_operating_key]) for row in final)
+        result[f"operating_correct_at_{k}"] = operating_hits
+        result[f"operating_recall_at_{k}"] = _ratio(operating_hits, expected_total)
+        result[f"operating_precision_at_{k}"] = _ratio(
             operating_hits, operating_selected
         )
-        result["negative_case_false_positive_rate"] = _ratio(
-            sum(bool(row[operating_key]) for row in negative), len(negative)
+        result[f"operating_positive_case_hit_rate_at_{k}"] = _ratio(
+            sum(
+                bool(
+                    set(row["expected_hotword_ids"])
+                    & set(row[resolved_operating_key])
+                )
+                for row in positive
+            ),
+            len(positive),
+        )
+        result[f"negative_case_false_positive_rate_at_{k}"] = _ratio(
+            sum(bool(row[resolved_operating_key]) for row in negative), len(negative)
         )
         _add_any_step_operating_metrics(
             result,
             rows=rows,
             final=final,
-            operating_key=operating_key,
+            operating_key=resolved_operating_key,
+            k=k,
         )
-    else:
-        result["operating_correct_at_5"] = None
-        result["operating_recall_at_5"] = None
-        result["operating_precision_at_5"] = None
-        result["negative_case_false_positive_rate"] = None
+    result["negative_case_false_positive_rate"] = result[
+        "negative_case_false_positive_rate_at_5"
+    ]
+    result["any_step_negative_case_false_positive_rate"] = result[
+        "any_step_negative_case_false_positive_rate_at_5"
+    ]
     latency = [float(row[latency_key]) for row in rows]
     result.update({f"latency_{key}": value for key, value in _distribution(latency).items()})
     return result
@@ -371,12 +405,14 @@ def _add_any_step_operating_metrics(
     rows: Sequence[Mapping[str, Any]],
     final: Sequence[Mapping[str, Any]],
     operating_key: str,
+    k: int,
 ) -> None:
     if any(operating_key not in row for row in rows):
-        result["any_step_operating_correct_at_5"] = None
-        result["any_step_operating_recall_at_5"] = None
-        result["any_step_operating_positive_case_hit_rate_at_5"] = None
-        result["any_step_negative_case_false_positive_rate"] = None
+        result[f"any_step_operating_correct_at_{k}"] = None
+        result[f"any_step_operating_recall_at_{k}"] = None
+        result[f"any_step_operating_precision_at_{k}"] = None
+        result[f"any_step_operating_positive_case_hit_rate_at_{k}"] = None
+        result[f"any_step_negative_case_false_positive_rate_at_{k}"] = None
         return
     expected_pairs, positive_case_ids, negative_case_ids = _case_truth(final)
     rows_by_case = _rows_by_case(rows)
@@ -390,23 +426,37 @@ def _add_any_step_operating_metrics(
         for row in rows
         for hotword_id in row[operating_key]
     }
-    result["any_step_operating_correct_at_5"] = len(detected)
-    result["any_step_operating_recall_at_5"] = _ratio(
+    result[f"any_step_operating_correct_at_{k}"] = len(detected)
+    result[f"any_step_operating_recall_at_{k}"] = _ratio(
         len(detected), len(expected_pairs)
     )
-    result["any_step_operating_precision_at_5"] = _ratio(
+    result[f"any_step_operating_precision_at_{k}"] = _ratio(
         len(detected), len(returned)
     )
-    result["any_step_operating_positive_case_hit_rate_at_5"] = _ratio(
+    result[f"any_step_operating_positive_case_hit_rate_at_{k}"] = _ratio(
         len({case_id for case_id, _ in detected}), len(positive_case_ids)
     )
-    result["any_step_negative_case_false_positive_rate"] = _ratio(
+    result[f"any_step_negative_case_false_positive_rate_at_{k}"] = _ratio(
         sum(
             any(row[operating_key] for row in rows_by_case[case_id])
             for case_id in negative_case_ids
         ),
         len(negative_case_ids),
     )
+
+
+def _resolve_operating_key(
+    row: Mapping[str, Any], *, base_key: str | None, k: int
+) -> str | None:
+    for candidate in (
+        f"operating_top{k}_ids",
+        f"reference_operating_top{k}_ids",
+    ):
+        if candidate in row:
+            return candidate
+    if k == 5 and base_key is not None and base_key in row:
+        return base_key
+    return None
 
 
 def _case_truth(

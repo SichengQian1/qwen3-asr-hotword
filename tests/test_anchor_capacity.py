@@ -219,6 +219,11 @@ def test_anchor_rerank_reports_causal_windows_quality_and_total_latency(
     assert recent["raw_recall_at_5"] == 0.0
     assert recent["any_step_raw_recall_at_5"] == 1.0
     assert recent["any_step_operating_recall_at_5"] == 1.0
+    assert recent["any_step_operating_recall_at_7"] == 1.0
+    assert recent["any_step_operating_precision_at_10"] == 1.0
+    assert full["operating_recall_at_7"] == 1.0
+    assert full["operating_precision_at_10"] == 1.0
+    assert full["negative_case_false_positive_rate_at_7"] == 0.0
     assert "raw_precision_at_7" in full
     assert "raw_precision_at_10" in full
     performance = json.loads(

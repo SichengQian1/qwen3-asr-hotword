@@ -148,6 +148,9 @@ def test_capacity_history_keeps_rerank_windows_and_shortlists_separate(
                 "raw_top7_ids": ["right", "wrong"],
                 "raw_top10_ids": ["right", "wrong"],
                 "operating_ids": ["right"],
+                "operating_top5_ids": ["right"],
+                "operating_top7_ids": ["right", "wrong"],
+                "operating_top10_ids": ["right", "wrong"],
                 "retrieval_seconds": latency,
             }
         )
@@ -175,6 +178,8 @@ def test_capacity_history_keeps_rerank_windows_and_shortlists_separate(
     }
     assert {row["ranking"] for row in history} == {"anchor_rerank"}
     assert all(row["operating_recall_at_5"] == 1.0 for row in history)
+    assert all(row["operating_recall_at_7"] == 1.0 for row in history)
+    assert all(row["operating_precision_at_7"] == 0.5 for row in history)
 
 
 def test_capacity_history_reports_streaming_any_step_recall(tmp_path: Path) -> None:

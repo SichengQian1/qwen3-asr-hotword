@@ -29,6 +29,7 @@ from qwen_hotword.hotwords.scoring import (
     profile_decoded_hotwords,
     score_decoded_hotwords,
     score_hotwords,
+    select_operating_matches,
 )
 from qwen_hotword.phonemes.coverage import PhonemeVocab, load_phoneme_vocab
 from qwen_hotword.training.edit_distance import (
@@ -52,6 +53,56 @@ def _tokens(index: int, *, width: int) -> tuple[int, ...]:
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def test_operating_observation_caps_reuse_the_same_gates() -> None:
+    decoded = tuple(
+        DecodedPhoneme(
+            token_id=token_id,
+            confidence=0.99,
+            start_step=index,
+            end_step=index + 1,
+        )
+        for index, token_id in enumerate((1, 2, 3, 4))
+    )
+    entries = tuple(
+        HotwordEntry(
+            hotword_id=f"match-{index}",
+            language="pt-BR",
+            surface=f"match-{index}",
+            normalized=f"match-{index}",
+            words=(f"match-{index}",),
+            pronunciation="a b c d",
+            phoneme_tokens=("a", "b", "c", "d"),
+            token_ids=(1, 2, 3, 4),
+            source="test",
+            validation_occurrences=1,
+        )
+        for index in range(8)
+    )
+    config = HotwordScoringConfig(score_threshold=0.86, top_k=5)
+    profiled = profile_decoded_hotwords(
+        decoded,
+        effective_time_steps=4,
+        hotwords=entries,
+        config=config,
+    )
+
+    operating5, reason5 = select_operating_matches(
+        profiled.result.ranked_matches, config=config, top_k=5
+    )
+    operating7, reason7 = select_operating_matches(
+        profiled.result.ranked_matches, config=config, top_k=7
+    )
+    operating10, reason10 = select_operating_matches(
+        profiled.result.ranked_matches, config=config, top_k=10
+    )
+
+    assert len(operating5) == 5
+    assert len(operating7) == 7
+    assert len(operating10) == 8
+    assert reason5 is reason7 is reason10 is None
+    assert profiled.result.selected_matches == operating5
 
 
 def _capacity_inputs(tmp_path: Path) -> dict[str, Path]:

@@ -97,6 +97,34 @@ class ProfiledHotwordScoringResult:
         return self.matching_seconds + self.sorting_seconds + self.selection_seconds
 
 
+def select_operating_matches(
+    ranked_matches: tuple[HotwordMatch, ...],
+    *,
+    config: HotwordScoringConfig,
+    top_k: int | None = None,
+) -> tuple[tuple[HotwordMatch, ...], str | None]:
+    """Apply the configured Operating gates with an optional observation cap."""
+    config.validate()
+    resolved_top_k = config.top_k if top_k is None else top_k
+    if resolved_top_k <= 0:
+        raise ValueError("top_k must be positive")
+    qualified = tuple(
+        match
+        for match in ranked_matches
+        if match.score >= config.score_threshold
+        and match.edit_ratio <= config.maximum_edit_ratio
+        and match.posterior_confidence >= config.minimum_posterior_confidence
+    )
+    if not qualified:
+        return (), "below_threshold"
+    if (
+        len(qualified) > 1
+        and qualified[0].score - qualified[1].score < config.minimum_top1_margin
+    ):
+        return (), "ambiguous_top_matches"
+    return qualified[:resolved_top_k], None
+
+
 def decode_ctc_posterior(
     logits: Any,
     *,
@@ -370,25 +398,9 @@ def _finish_profiled_matches(
     )
     sorting_seconds = time.perf_counter() - sorting_started
     selection_started = time.perf_counter()
-    qualified = [
-        match
-        for match in matches
-        if match.score >= config.score_threshold
-        and match.edit_ratio <= config.maximum_edit_ratio
-        and match.posterior_confidence >= config.minimum_posterior_confidence
-    ]
-    suppressed_reason: str | None = None
-    if not qualified:
-        suppressed_reason = "below_threshold"
-        selected: list[HotwordMatch] = []
-    elif (
-        len(qualified) > 1
-        and qualified[0].score - qualified[1].score < config.minimum_top1_margin
-    ):
-        suppressed_reason = "ambiguous_top_matches"
-        selected = []
-    else:
-        selected = qualified[: config.top_k]
+    selected, suppressed_reason = select_operating_matches(
+        tuple(matches), config=config
+    )
     selection_seconds = time.perf_counter() - selection_started
     return ProfiledHotwordScoringResult(
         result=HotwordScoringResult(
@@ -396,7 +408,7 @@ def _finish_profiled_matches(
             decoded_token_ids=tuple(item.token_id for item in decoded),
             decoded_confidences=tuple(item.confidence for item in decoded),
             ranked_matches=tuple(matches),
-            selected_matches=tuple(selected),
+            selected_matches=selected,
             suppressed_reason=suppressed_reason,
         ),
         matching_seconds=matching_seconds,

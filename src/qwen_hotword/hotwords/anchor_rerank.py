@@ -26,6 +26,7 @@ from qwen_hotword.hotwords.scoring import (
     HotwordScoringConfig,
     profile_anchor_guided_decoded_hotwords,
     profile_decoded_hotwords,
+    select_operating_matches,
 )
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
 
@@ -277,6 +278,7 @@ def benchmark_anchor_rerank_capacity(
         "profiles": list(resolved_profiles),
         "sizes": list(resolved_sizes),
         "shortlist_sizes": list(resolved_shortlists),
+        "operating_observation_ks": list(OBSERVATION_KS),
         "lookback_seconds": [value for value in resolved_lookbacks],
         "window_method": "current_cumulative_ctc_frame_axis_causal_crop",
         "anchor_config": {
@@ -310,6 +312,7 @@ def benchmark_anchor_rerank_capacity(
         "elapsed_seconds": time.monotonic() - started,
         "mode": "anchor_shortlist_then_existing_approximate_phoneme_scorer",
         "rerank_mode": rerank_mode,
+        "operating_observation_ks": list(OBSERVATION_KS),
         "query_rows": len(query_rows),
         "source_replay_rows": len(replay_rows),
         "levels": summaries,
@@ -389,7 +392,18 @@ def _run_query(
         )
     total_seconds = anchor_seconds + rerank.retrieval_seconds
     ranking_ids = tuple(match.hotword_id for match in rerank.result.ranked_matches)
-    operating_ids = tuple(match.hotword_id for match in rerank.result.selected_matches)
+    operating_ids_by_k = {
+        k: tuple(
+            match.hotword_id
+            for match in select_operating_matches(
+                rerank.result.ranked_matches,
+                config=scoring_config,
+                top_k=k,
+            )[0]
+        )
+        for k in OBSERVATION_KS
+    }
+    operating_ids = operating_ids_by_k[scoring_config.top_k]
     expected = set(case.expected_hotword_ids)
     row: dict[str, object] = {
         "schema_version": 1,
@@ -435,6 +449,14 @@ def _run_query(
         selected = ranking_ids[:k]
         row[f"raw_top{k}_ids"] = list(selected)
         row[f"raw_expected_hits_at_{k}"] = len(expected & set(selected))
+        operating_selected = operating_ids_by_k[k]
+        row[f"operating_top{k}_ids"] = list(operating_selected)
+        row[f"operating_expected_hits_at_{k}"] = len(
+            expected & set(operating_selected)
+        )
+        row[f"negative_false_positive_at_{k}"] = (
+            not expected and bool(operating_selected)
+        )
     return row
 
 
@@ -530,30 +552,36 @@ def _summarize_level(
                     sum(int(row[f"raw_expected_hits_at_{k}"]) > 0 for row in positive),
                     len(positive),
                 )
-            operating_hits = sum(
-                int(row["operating_expected_hits_at_5"]) for row in final
-            )
-            operating_returned = sum(len(row["operating_ids"]) for row in final)
-            quality.update(
-                {
-                    "operating_correct_at_5": operating_hits,
-                    "operating_recall_at_5": _ratio(operating_hits, expected_total),
-                    "operating_precision_at_5": _ratio(
-                        operating_hits, operating_returned
+                operating_hits = sum(
+                    int(row[f"operating_expected_hits_at_{k}"]) for row in final
+                )
+                operating_returned = sum(
+                    len(row[f"operating_top{k}_ids"]) for row in final
+                )
+                quality[f"operating_correct_at_{k}"] = operating_hits
+                quality[f"operating_recall_at_{k}"] = _ratio(
+                    operating_hits, expected_total
+                )
+                quality[f"operating_precision_at_{k}"] = _ratio(
+                    operating_hits, operating_returned
+                )
+                quality[f"operating_positive_case_hit_rate_at_{k}"] = _ratio(
+                    sum(
+                        int(row[f"operating_expected_hits_at_{k}"]) > 0
+                        for row in positive
                     ),
-                    "operating_positive_case_hit_rate_at_5": _ratio(
-                        sum(
-                            int(row["operating_expected_hits_at_5"]) > 0
-                            for row in positive
-                        ),
-                        len(positive),
+                    len(positive),
+                )
+                quality[f"negative_case_false_positive_rate_at_{k}"] = _ratio(
+                    sum(
+                        bool(row[f"negative_false_positive_at_{k}"])
+                        for row in negative
                     ),
-                    "negative_case_false_positive_rate": _ratio(
-                        sum(bool(row["negative_false_positive"]) for row in negative),
-                        len(negative),
-                    ),
-                }
-            )
+                    len(negative),
+                )
+            quality["negative_case_false_positive_rate"] = quality[
+                "negative_case_false_positive_rate_at_5"
+            ]
             retrieval = [float(row["retrieval_seconds"]) for row in selected]
             performance = {
                 "anchor_seconds": _distribution(
@@ -637,29 +665,34 @@ def _add_any_step_quality(
             len(pairs), len(returned_pairs)
         )
         quality[f"any_step_raw_positive_case_hit_rate_at_{k}"] = case_hit_rate(pairs)
-    operating_pairs = detected_pairs("operating_ids")
-    operating_returned_pairs = {
-        (str(row["case_id"]), str(hotword_id))
-        for row in rows
-        for hotword_id in row["operating_ids"]
-    }
-    quality["any_step_operating_correct_at_5"] = len(operating_pairs)
-    quality["any_step_operating_recall_at_5"] = _ratio(
-        len(operating_pairs), len(expected_pairs)
-    )
-    quality["any_step_operating_precision_at_5"] = _ratio(
-        len(operating_pairs), len(operating_returned_pairs)
-    )
-    quality["any_step_operating_positive_case_hit_rate_at_5"] = case_hit_rate(
-        operating_pairs
-    )
-    quality["any_step_negative_case_false_positive_rate"] = _ratio(
-        sum(
-            any(row["operating_ids"] for row in rows_by_case[case_id])
-            for case_id in negative_case_ids
-        ),
-        len(negative_case_ids),
-    )
+    for k in OBSERVATION_KS:
+        key = f"operating_top{k}_ids"
+        operating_pairs = detected_pairs(key)
+        operating_returned_pairs = {
+            (str(row["case_id"]), str(hotword_id))
+            for row in rows
+            for hotword_id in row[key]
+        }
+        quality[f"any_step_operating_correct_at_{k}"] = len(operating_pairs)
+        quality[f"any_step_operating_recall_at_{k}"] = _ratio(
+            len(operating_pairs), len(expected_pairs)
+        )
+        quality[f"any_step_operating_precision_at_{k}"] = _ratio(
+            len(operating_pairs), len(operating_returned_pairs)
+        )
+        quality[f"any_step_operating_positive_case_hit_rate_at_{k}"] = case_hit_rate(
+            operating_pairs
+        )
+        quality[f"any_step_negative_case_false_positive_rate_at_{k}"] = _ratio(
+            sum(
+                any(row[key] for row in rows_by_case[case_id])
+                for case_id in negative_case_ids
+            ),
+            len(negative_case_ids),
+        )
+    quality["any_step_negative_case_false_positive_rate"] = quality[
+        "any_step_negative_case_false_positive_rate_at_5"
+    ]
 
 
 def _load_level(

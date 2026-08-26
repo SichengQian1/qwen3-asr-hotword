@@ -653,3 +653,19 @@ Raw Top-5/7/10和Operating Top-5均输出recall、precision与positive case hit�
 `anchor_start_radius`，优化历史据此区分full-search与guided，不能把两者当作等价实现。
 第一轮只测shortlist 64/128、radius 2；完整工作区命令与验收顺序见
 `docs/HANDOFF.md` 0.48。
+
+## 17. Operating Top-5/7/10观察口径
+
+Raw Top-7/10只说明正确热词是否进入相应排名，不能回答现有0.86、edit ratio、posterior
+和margin门控之后的Recall/Precision。Anchor rerank报告因此新增Operating@5/@7/@10。
+它们共享同一次候选生成、局部精排和排序，只改变门控通过后最多保留的观察数量，额外
+统计不进入检索延迟计时。
+
+实际运行仍由`--top-k 5`控制，`operating_ids`继续表示真实Top-5输出；新增
+`operating_top7_ids`和`operating_top10_ids`仅用于评测。每档同时输出final与流式
+`any_step` correct、recall、precision、positive case hit和负例FPR。容量历史对旧输出
+保持兼容：旧阶段只有Operating@5，@7/@10必须为`null`，不得拿Raw@7/@10代替。
+
+固定4k guided基线的重跑命令和输出检查见`docs/HANDOFF.md` 0.49。该轮仍冻结全部检索
+参数；结果用于判断“扩大Operating观察上限”本身的Recall收益和Precision代价，不作为
+Prompt Top-K变更授权。
