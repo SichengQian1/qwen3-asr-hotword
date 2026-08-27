@@ -3,14 +3,50 @@
 ## 0.57 2026-08-26 formal100 Prompt因果指标结果
 
 现有formal100分片经`--resume`完成纯重汇总，C、D5、D7-balanced、D7-recall和E使用同一
-批100条（80正/20负），没有重跑模型或改变推理结果。核心指标：
+批100条（80正/20负），没有重跑模型或改变推理结果。
 
-| 组 | 正确Prompt采用率 | 错误Prompt过滤率 | 错误落字率 | 最终Recall | 最终Precision |
+五组共同使用官方流式语义`chunk_size_sec=2.0`、`unfixed_chunk_num=2`、
+`unfixed_token_num=5`；正常RAG组共同使用4k热词库、`anchor_guided`检索、shortlist 64、
+start radius 2、音素2/3/4-gram、每词24个anchor、offset tolerance 1、
+`maximum_edit_ratio=0.35`、`posterior_weight=0.25`和`minimum_top1_margin=0`。推理使用
+Portuguese、bfloat16、物理GPU 2映射为逻辑`cuda:0`、`gpu_memory_utilization=0.15`。
+各组差异参数如下：
+
+| 组 | RAG/候选来源 | threshold | minimum posterior | Top-K |
+| --- | --- | ---: | ---: | ---: |
+| C no-RAG | 不注入热词 | 不适用 | 不适用 | 不适用 |
+| D5 conservative | CTC + Anchor operating gate | 0.86 | 0.0 | 5 |
+| D7 balanced | CTC + Anchor operating gate | 0.82 | 0.5 | 7 |
+| D7 recall-first | CTC + Anchor operating gate | 0.75 | 0.5 | 7 |
+| E Oracle | 只注入样本expected热词，不运行CTC检索门控 | 不适用 | 不适用 | expected数量 |
+
+核心质量指标：
+
+| 组 | 正确Prompt采用率 | 错误Prompt过滤率 | 错误落字率 | 最终Recall | 最终Precision | WER / CER |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| C no-RAG | 不适用 | 不适用 | 不适用 | 89.53% | 不适用 | 8.30% / 3.39% |
+| D5 conservative | 136/145 = 93.79% | 84/121 = 69.42% | 37/121 = 30.58% | 91.28% | 80.93% | 8.84% / 3.78% |
+| D7 balanced | 141/152 = 92.76% | 190/227 = 83.70% | 37/227 = 16.30% | 91.28% | 80.93% | 8.84% / 3.89% |
+| D7 recall-first | 151/161 = 93.79% | 518/558 = 92.83% | 40/558 = 7.17% | 93.02% | 80.00% | 8.50% / 3.92% |
+| E Oracle | 161/172 = 93.60% | 不适用 | 0 | 93.60% | 100% | 8.10% / 3.36% |
+
+formal100时延如下；纯检索列为322个流式step上的CTC greedy decode + Anchor query +
+shortlist重排，不含CTC Encoder/Head，这一列才对应`P95 < 50 ms`目标。Detector列包含
+Processor、CTC Encoder/Head、decode和检索；step列再包含Prompt刷新与同轮Qwen流式解码。
+样本耗时不含音频文件读取，长尾值保留冷启动/编译影响：
+
+| 组 | 纯检索 P50 / P95 / P99 / max | Detector P95 | 完整step P95 | 样本推理均值 | 样本RTF中位数 / P95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| D5 conservative | 136/145 = 93.79% | 84/121 = 69.42% | 37/121 = 30.58% | 91.28% | 80.93% |
-| D7 balanced | 141/152 = 92.76% | 190/227 = 83.70% | 37/227 = 16.30% | 91.28% | 80.93% |
-| D7 recall-first | 151/161 = 93.79% | 518/558 = 92.83% | 40/558 = 7.17% | 93.02% | 80.00% |
-| E Oracle | 161/172 = 93.60% | 不适用 | 0 | 93.60% | 100% |
+| C no-RAG | 不适用 | 不适用 | 175.60 ms | 291.88 ms | 0.039 / 0.093 |
+| D5 conservative | 26.56 / 39.10 / 42.86 / 49.66 ms | 94.70 ms | 290.24 ms | 576.83 ms | 0.085 / 0.144 |
+| D7 balanced | 25.06 / 36.35 / 41.36 / 47.50 ms | 99.98 ms | 302.73 ms | 585.73 ms | 0.082 / 0.150 |
+| D7 recall-first | 25.32 / 38.23 / 40.43 / 43.90 ms | 93.70 ms | 306.27 ms | 538.22 ms | 0.081 / 0.142 |
+| E Oracle | 不适用 | 不适用 | 78.27 ms | 149.18 ms | 0.025 / 0.045 |
+
+C组完整step的P99/max为274.16/4171.32 ms；三个D组Detector max分别为
+1128.61/1166.58/661.16 ms，完整step max分别为5339.26/5436.83/4747.31 ms。
+这些冷启动长尾不能计入50 ms纯检索验收，也不能静默删除。E组绕过Detector且与C组存在
+同进程运行顺序和预热差异，因此E比C快不能解释成Oracle Prompt本身具有加速作用。
 
 正确Prompt一旦进入候选，三个D组的最终采用率都约93%，与Oracle的93.60%接近。说明
 Qwen能够稳定利用正确Prompt；Recall-first最终Recall只比Oracle低1/172，即0.58个百分点。
