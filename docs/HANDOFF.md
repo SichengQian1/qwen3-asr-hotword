@@ -1,11 +1,110 @@
 # 工作交接记录
 
+## 0.58 2026-08-28 D5 Recall-first Top-K隔离组与Prompt召回口径
+
+4k formal100套件新增`recall_first_top5`组：`threshold=0.75`、
+`minimum_posterior_confidence=0.5`、`Top-K=5`。它与现有`recall_first` Top-7共享
+完全相同的Anchor、精排、score threshold、posterior和margin参数，只改变Top-K，
+用于隔离第6至7名候选对Prompt注入、最终Recall/Precision、WER/CER和时延的影响。
+
+Prompt因果汇总新增`prompt_hotword_recall`：曾进入Prompt的正确expected
+sample-hotword对数 / expected sample-hotword总数。formal100分母固定为172；例如原
+D5 conservative为145/172、D7 balanced为152/172、D7 recall-first为161/172。
+`correct_prompt_adoption_rate`继续表示正确候选进入Prompt后最终被Qwen写出的比例。
+`wrong_prompt_landing_rate`继续表示错误注入候选最终落字的比例；
+`wrong_prompt_filter_rate`与它互为补数，JSON中保留兼容，但不再在核心表重复展示。
+
+套件现在包含六个profile：C no-RAG、D5 conservative、D7 balanced、
+D5 recall-first、D7 recall-first和E Oracle。对原五组formal100目录使用完全相同命令
+增加`--resume`时，只允许这一项profile的加法升级；已有五个完整子目录保持只读并由根
+汇总直接复用，新`recall_first_top5/`子目录只运行新增D5组。根`suite_summary.json`
+从既有`sample_results.jsonl`补算Prompt热词召回，不要求旧子运行跨Git提交resume。
+不能改变其他输入、运行参数或SHA身份。
+新增D5结果尚未在H200运行，0.57表格先保留明确的“待工作区实测”，不得由D7截断
+结果推测。
+
+本次不是只交付本地实现。工作区应拉取`codex/g2p-coverage-scan`的最新远端提交，确认
+HEAD后，在原formal100根目录做受控加法resume。脚本会验证原五组suite配置，只复用
+已经`status=pass`且文件完整的旧子目录；不会覆盖旧sample shard，也不会重跑旧五组。
+新增D5写入此前不存在的`recall_first_top5/`，然后重建根汇总：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+CAP_ROOT=outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+V3_ROOT=outputs/noah_pt_full_training_v1/simulated_hotword_eval_v3_multi_nested
+OFFLINE100_ROOT="$V3_ROOT/prompt_multi_nested_formal100_top5_v1"
+SUITE_FORMAL_ROOT="$CAP_ROOT/streaming_gate_suite_4k_formal100_v1"
+
+test -d "$SUITE_FORMAL_ROOT"
+test ! -e "$SUITE_FORMAL_ROOT/recall_first_top5"
+
+CUDA_VISIBLE_DEVICES=2 python scripts/run_streaming_gate_profile_suite.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest outputs/noah_pt_full_training_v1/full_ctc_validation.jsonl \
+  --vocab configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json \
+  --hotwords "$ASSET_4K_ROOT/representative/size_4000/hotwords.jsonl" \
+  --cases "$ASSET_4K_ROOT/representative/size_4000/cases.jsonl" \
+  --hotword-families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --ctc-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --offline-rag-dir "$OFFLINE100_ROOT" \
+  --ctc-checkpoint outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt \
+  --output-dir "$SUITE_FORMAL_ROOT" \
+  --language Portuguese \
+  --gpu-memory-utilization 0.15 \
+  --resume
+```
+
+若物理GPU 2不可用，只替换`CUDA_VISIBLE_DEVICES`的物理卡号；程序内设备仍保持默认
+逻辑`cuda:0`，其他参数不得改变。进程中断后原命令原样重跑即可，已完成profile和sample
+shard由`--resume`复用。完成后先执行：
+
+```bash
+(cd "$SUITE_FORMAL_ROOT" && sha256sum -c sha256.txt)
+(cd "$SUITE_FORMAL_ROOT/recall_first_top5" && sha256sum -c sha256.txt)
+
+jq . "$SUITE_FORMAL_ROOT/topk_isolation_summary.json"
+wc -l "$SUITE_FORMAL_ROOT/topk_isolation_cases.jsonl"
+```
+
+脚本会自动生成两个专用小产物：`topk_isolation_summary.json`只保留两组门控、核心质量、
+完整分阶段时延及Top-5减Top-7差值；`topk_isolation_cases.jsonl`只包含注入候选或最终
+文本发生变化的case。请回传以下文件，不需要回传模型、checkpoint、Posterior tensor、
+完整`sample_results.jsonl`或`chunk_timeline.jsonl`：
+
+```text
+streaming_gate_suite_4k_formal100_v1/
+  suite_config.json
+  suite_summary.json
+  topk_isolation_summary.json
+  topk_isolation_cases.jsonl
+  sha256.txt
+  recall_first_top5/
+    run_config.json
+    summary.json
+    latency_summary.json
+    failure_cases.jsonl
+    sha256.txt
+```
+
+收到这些文件后，下一次本地工作固定为：先核验两级SHA256和`run_config.json`中的Git、
+模型、checkpoint、输入资产及门控身份，再补0.57两张表的D5实测值，分析Top-K对Recall、
+Precision、错误落字和P95的净影响，最后单独提交并推送结果记录。
+
+本地验证：流式suite/RAG定向pytest 9项通过，全量pytest 213项通过；本轮相关文件
+Ruff和严格Mypy通过，CLI help与`git diff --check`通过。全仓Ruff仍只有接管时已存在的
+`scripts/scan_g2p_coverage.py`三项E501，本轮未修改该文件。未加载完整模型、未读取test。
+
 ## 0.57 2026-08-26 formal100 Prompt因果指标结果
 
-现有formal100分片经`--resume`完成纯重汇总，C、D5、D7-balanced、D7-recall和E使用同一
-批100条（80正/20负），没有重跑模型或改变推理结果。
+现有formal100分片经`--resume`完成纯重汇总，C、D5 conservative、D7-balanced、
+D7-recall和E使用同一批100条（80正/20负），没有重跑模型或改变推理结果。0.58新增的
+D5 recall-first使用相同选择，只改变D7 recall-first的Top-K，结果待工作区实测。
 
-五组共同使用官方流式语义`chunk_size_sec=2.0`、`unfixed_chunk_num=2`、
+六组共同使用官方流式语义`chunk_size_sec=2.0`、`unfixed_chunk_num=2`、
 `unfixed_token_num=5`；正常RAG组共同使用4k热词库、`anchor_guided`检索、shortlist 64、
 start radius 2、音素2/3/4-gram、每词24个anchor、offset tolerance 1、
 `maximum_edit_ratio=0.35`、`posterior_weight=0.25`和`minimum_top1_margin=0`。推理使用
@@ -17,18 +116,20 @@ Portuguese、bfloat16、物理GPU 2映射为逻辑`cuda:0`、`gpu_memory_utiliza
 | C no-RAG | 不注入热词 | 不适用 | 不适用 | 不适用 |
 | D5 conservative | CTC + Anchor operating gate | 0.86 | 0.0 | 5 |
 | D7 balanced | CTC + Anchor operating gate | 0.82 | 0.5 | 7 |
+| D5 recall-first | CTC + Anchor operating gate | 0.75 | 0.5 | 5 |
 | D7 recall-first | CTC + Anchor operating gate | 0.75 | 0.5 | 7 |
 | E Oracle | 只注入样本expected热词，不运行CTC检索门控 | 不适用 | 不适用 | expected数量 |
 
 核心质量指标：
 
-| 组 | 正确Prompt采用率 | 错误Prompt过滤率 | 错误落字率 | 最终Recall | 最终Precision | WER / CER |
+| 组 | Prompt热词召回率 | 正确Prompt采用率 | 错误Prompt落字率 | 最终Recall | 最终Precision | WER / CER |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| C no-RAG | 不适用 | 不适用 | 不适用 | 89.53% | 不适用 | 8.30% / 3.39% |
-| D5 conservative | 136/145 = 93.79% | 84/121 = 69.42% | 37/121 = 30.58% | 91.28% | 80.93% | 8.84% / 3.78% |
-| D7 balanced | 141/152 = 92.76% | 190/227 = 83.70% | 37/227 = 16.30% | 91.28% | 80.93% | 8.84% / 3.89% |
-| D7 recall-first | 151/161 = 93.79% | 518/558 = 92.83% | 40/558 = 7.17% | 93.02% | 80.00% | 8.50% / 3.92% |
-| E Oracle | 161/172 = 93.60% | 不适用 | 0 | 93.60% | 100% | 8.10% / 3.36% |
+| C no-RAG | 0/172 = 0% | 不适用 | 不适用 | 89.53% | 不适用 | 8.30% / 3.39% |
+| D5 conservative | 145/172 = 84.30% | 136/145 = 93.79% | 37/121 = 30.58% | 91.28% | 80.93% | 8.84% / 3.78% |
+| D7 balanced | 152/172 = 88.37% | 141/152 = 92.76% | 37/227 = 16.30% | 91.28% | 80.93% | 8.84% / 3.89% |
+| D5 recall-first | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 |
+| D7 recall-first | 161/172 = 93.60% | 151/161 = 93.79% | 40/558 = 7.17% | 93.02% | 80.00% | 8.50% / 3.92% |
+| E Oracle | 172/172 = 100% | 161/172 = 93.60% | 0个错误注入（不适用） | 93.60% | 100% | 8.10% / 3.36% |
 
 formal100时延如下；纯检索列为322个流式step上的CTC greedy decode + Anchor query +
 shortlist重排，不含CTC Encoder/Head，这一列才对应`P95 < 50 ms`目标。Detector列包含
@@ -40,6 +141,7 @@ Processor、CTC Encoder/Head、decode和检索；step列再包含Prompt刷新与
 | C no-RAG | 不适用 | 不适用 | 175.60 ms | 291.88 ms | 0.039 / 0.093 |
 | D5 conservative | 26.56 / 39.10 / 42.86 / 49.66 ms | 94.70 ms | 290.24 ms | 576.83 ms | 0.085 / 0.144 |
 | D7 balanced | 25.06 / 36.35 / 41.36 / 47.50 ms | 99.98 ms | 302.73 ms | 585.73 ms | 0.082 / 0.150 |
+| D5 recall-first | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 |
 | D7 recall-first | 25.32 / 38.23 / 40.43 / 43.90 ms | 93.70 ms | 306.27 ms | 538.22 ms | 0.081 / 0.142 |
 | E Oracle | 不适用 | 不适用 | 78.27 ms | 149.18 ms | 0.025 / 0.045 |
 
@@ -48,8 +150,9 @@ C组完整step的P99/max为274.16/4171.32 ms；三个D组Detector max分别为
 这些冷启动长尾不能计入50 ms纯检索验收，也不能静默删除。E组绕过Detector且与C组存在
 同进程运行顺序和预热差异，因此E比C快不能解释成Oracle Prompt本身具有加速作用。
 
-正确Prompt一旦进入候选，三个D组的最终采用率都约93%，与Oracle的93.60%接近。说明
-Qwen能够稳定利用正确Prompt；Recall-first最终Recall只比Oracle低1/172，即0.58个百分点。
+正确Prompt一旦进入候选，已完成的三个D组最终采用率都约93%，与Oracle的93.60%接近。
+说明Qwen能够稳定利用正确Prompt；D7 Recall-first最终Recall只比Oracle低1/172，即
+0.58个百分点。新增D5 recall-first将直接判断这项收益中有多少来自Top-7的第6至7名。
 
 Qwen也能过滤大部分错误Prompt，但过滤比例不能脱离候选基数解释。Recall-first虽然过滤
 92.83%，却注入558个错误sample-hotword对，剩余40个落字；D5只过滤69.42%，但错误候选
@@ -80,6 +183,7 @@ formal100已按同一选择完成C、D5 conservative、D7 balanced、D7 recall-f
 误读为错误候选过滤率。现已在不改变推理结果的前提下补齐以下显式指标：
 
 - `correct_prompt_adoption_rate`：曾注入的正确sample-hotword对中，最终文本出现该词的比例；
+- `prompt_hotword_recall`：曾注入的正确sample-hotword对 / expected sample-hotword总数；
 - `wrong_prompt_filter_rate`：曾注入的错误sample-hotword对中，最终文本未出现该词的比例；
 - `wrong_prompt_landing_rate`：曾注入的错误sample-hotword对中，最终真正落字的比例；
 - `final_hotword_recall`：最终正确的expected热词数 / expected热词总数；
@@ -109,11 +213,11 @@ jq '{
     gate,
     quality: (.quality | {
       correct_prompt_injected_hotwords,
+      expected_hotwords,
+      prompt_hotword_recall,
       correct_prompt_adopted_hotwords,
       correct_prompt_adoption_rate,
       wrong_injected_hotwords,
-      wrong_prompt_filtered_hotwords,
-      wrong_prompt_filter_rate,
       wrong_prompt_written_hotwords,
       wrong_prompt_landing_rate,
       final_hotword_recall,

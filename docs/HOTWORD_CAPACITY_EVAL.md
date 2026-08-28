@@ -718,7 +718,8 @@ Qwen Encoder、Temporal 2x CTC Head、greedy decode、Anchor Top-64和局部重�
 同一step刷新Prompt并调用官方Qwen流式解码。组间只改Operating门控，不改
 checkpoint、Prompt、chunk或rollback窗口。
 
-五组套件记录两类精确率：检索Operating Precision由Step 5门控扫描给出；
+六组套件记录两类精确率：检索Operating Precision由Step 5门控扫描给出；新增
+`0.75 / posterior min 0.5 / Top-5`与原Top-7 recall-first隔离Top-K影响；
 `final_prompted_hotword_precision`是经Qwen过滤后最终真正写入转写的Prompt热词
 Precision。`wrong_injected_write_through_rate`用来防止“最终Precision高只是因为所有热词
 都没被利用”的误判；必须同时看热词Recall、WER/CER、负例幻觉和write-through。

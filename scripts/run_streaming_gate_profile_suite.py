@@ -12,13 +12,15 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from qwen_hotword.inference.streaming_gate_suite import (
     STREAMING_GATE_PROFILES,
+    completed_profile_run,
+    suite_resume_config_matches,
     write_streaming_gate_suite_report,
 )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the sealed five-profile 4k streaming prompt-filter suite."
+        description="Run the sealed six-profile 4k streaming prompt-filter suite."
     )
     parser.add_argument("--model", required=True)
     parser.add_argument("--validation-manifest", required=True)
@@ -88,11 +90,12 @@ def main() -> int:
         if config_path.is_file()
         else None
     )
-    if args.resume and previous is not None:
-        comparable_previous = dict(previous)
-        comparable_previous["status"] = "running"
-        if comparable_previous != config:
-            parser.error("resume suite configuration differs from the existing run")
+    if (
+        args.resume
+        and previous is not None
+        and not suite_resume_config_matches(previous, config)
+    ):
+        parser.error("resume suite configuration differs from the existing run")
     config_path.write_text(
         json.dumps(config, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -100,11 +103,25 @@ def main() -> int:
 
     run_specs = (
         ("baseline_oracle", "C,E", 0.86, 5, 0.0),
-        ("conservative", "D", 0.86, 5, 0.0),
-        ("balanced", "D", 0.82, 7, 0.5),
-        ("recall_first", "D", 0.75, 7, 0.5),
+        *(
+            (
+                profile.output_subdir,
+                profile.group,
+                profile.threshold,
+                profile.top_k,
+                profile.minimum_posterior_confidence,
+            )
+            for profile in STREAMING_GATE_PROFILES
+            if profile.group == "D"
+        ),
     )
     for subdir, groups, threshold, top_k, minimum_posterior in run_specs:
+        run_dir = output / subdir
+        expected_groups = tuple(group.strip() for group in groups.split(","))
+        if args.resume and completed_profile_run(run_dir, expected_groups):
+            if not args.quiet_progress:
+                print(f"reusing completed suite profile: {subdir}", flush=True)
+            continue
         command = [
             sys.executable,
             str(REPO_ROOT / "scripts/run_streaming_rag_evaluation.py"),
@@ -131,7 +148,7 @@ def main() -> int:
             "--ctc-checkpoint",
             args.ctc_checkpoint,
             "--output-dir",
-            str(output / subdir),
+            str(run_dir),
             "--groups",
             groups,
             "--chunk-size-sec",

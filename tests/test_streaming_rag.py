@@ -151,6 +151,8 @@ def test_summary_and_latency_keep_missing_timestamps_explicit() -> None:
     assert quality["final_prompted_hotword_precision"] == 1.0
     assert quality["wrong_injected_write_through_rate"] == 0.0
     assert quality["correct_prompt_injected_hotwords"] == 1
+    assert quality["expected_hotwords"] == 1
+    assert quality["prompt_hotword_recall"] == 1.0
     assert quality["correct_prompt_adopted_hotwords"] == 1
     assert quality["correct_prompt_adoption_rate"] == 1.0
     assert quality["wrong_injected_hotwords"] == 1
@@ -161,6 +163,7 @@ def test_summary_and_latency_keep_missing_timestamps_explicit() -> None:
     assert quality["final_hotword_recall"] == 1.0
     assert quality["final_hotword_precision"] == 1.0
     assert quality["prompt_causal_metrics"]["correct_prompt_adoption_rate"] == 1.0
+    assert quality["prompt_causal_metrics"]["prompt_hotword_recall"] == 1.0
     timeline = [
         {
             "case_id": "case-1",
@@ -220,6 +223,8 @@ def test_prompt_causal_metrics_separate_adoption_filtering_and_landing() -> None
     ]
     quality = _build_summary(rows)["groups"]["D"]
     assert quality["correct_prompt_injected_hotwords"] == 2
+    assert quality["expected_hotwords"] == 2
+    assert quality["prompt_hotword_recall"] == 1.0
     assert quality["correct_prompt_adopted_hotwords"] == 1
     assert quality["correct_prompt_adoption_rate"] == 0.5
     assert quality["wrong_injected_hotwords"] == 1

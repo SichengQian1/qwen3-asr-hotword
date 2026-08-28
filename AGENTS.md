@@ -621,6 +621,31 @@ is fixed.
 - Use `PYTHONPATH=src` or the project packaging setup when running scripts
   directly in the work zone.
 
+## Git Delivery And Work-Zone Handoff
+
+For changes intended to run in the H200 work zone, a local implementation is
+not a complete delivery. Unless the user explicitly asks to keep work local or
+to avoid Git operations, the agent must complete all of the following:
+
+1. run the relevant local lint, typing, unit-test, and whitespace checks;
+2. update `docs/HANDOFF.md` with the exact branch, pull command, work-zone run
+   command, resume behavior, output directory policy, verification commands,
+   and the small result files that the user should return;
+3. commit the scoped source, test, and documentation changes on the active
+   delivery branch and push that branch to `origin`;
+4. report the pushed remote commit SHA so the work zone can verify the exact
+   code identity before running;
+5. after the user returns work-zone outputs, verify their recorded identities
+   and metrics, then add the measured result to `docs/HANDOFF.md` in a separate
+   result commit when requested.
+
+Never claim an H200 result from local mock tests. Preserve existing ignored
+outputs: use a new output directory for a new experiment, or use `--resume`
+only when the code explicitly validates an identical or narrowly documented
+additive configuration. Prefer automatic compact JSON/JSONL summaries for
+return instead of asking the user to copy model weights, feature tensors,
+complete caches, or other large artifacts.
+
 ## Current Priority, Excluding Evaluation Tooling
 
 The next major project steps are:
