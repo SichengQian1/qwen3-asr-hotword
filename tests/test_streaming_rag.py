@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,10 @@ from qwen_hotword.inference.streaming_rag import (
     _build_summary,
     _collect_shards,
     _file_identity,
+    _git_commit,
     _prepare_output,
     _validate_offline_control,
+    _write_hashes,
     _write_shard,
 )
 
@@ -34,6 +37,25 @@ def _sample() -> StreamingSample:
         expected_surfaces=("hot word",),
         active_hotword_ids=("hot",),
         audio_path="/ignored/audio.wav",
+    )
+
+
+def test_git_commit_is_resolved_from_repository_root() -> None:
+    commit = _git_commit()
+    assert len(commit) == 40
+    assert all(character in "0123456789abcdef" for character in commit)
+
+
+def test_output_hash_manifest_uses_portable_basenames(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    output.mkdir()
+    content = b'{"status":"pass"}\n'
+    (output / "summary.json").write_bytes(content)
+
+    _write_hashes(output)
+
+    assert (output / "sha256.txt").read_text(encoding="utf-8") == (
+        f"{sha256(content).hexdigest()}  summary.json\n"
     )
 
 

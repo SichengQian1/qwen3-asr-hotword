@@ -1355,8 +1355,10 @@ def _file_identity(path: Path) -> dict[str, object]:
 
 
 def _git_commit() -> str:
+    repo_root = Path(__file__).resolve().parents[3]
     result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+        ["git", "-c", f"safe.directory={repo_root}", "rev-parse", "HEAD"],
+        cwd=repo_root,
         check=False,
         capture_output=True,
         text=True,
@@ -1403,7 +1405,7 @@ def _write_hashes(destination: Path) -> None:
             continue
         path = destination / name
         if path.is_file():
-            lines.append(f"{_file_identity(path)['sha256']}  {path}\n")
+            lines.append(f"{_file_identity(path)['sha256']}  {name}\n")
     (destination / "sha256.txt").write_text("".join(lines), encoding="utf-8")
 
 

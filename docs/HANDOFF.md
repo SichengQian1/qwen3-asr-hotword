@@ -1,5 +1,75 @@
 # 工作交接记录
 
+## 0.59 2026-08-28 D5 Recall-first Top-K隔离实测结果
+
+新增`recall_first_top5`已在4k formal100完成：100条validation工程校准样本、172个
+expected sample-hotword对、322个流式step，`status=pass`、`test_set_used=false`。
+两级SHA256全部通过；根汇总和D5子运行关键文件身份如下：
+
+```text
+suite_config.json:                    0d62a45101e226e0823591942d5a6f2d360a5a7d041309f8e0f5ed8af85e1619
+suite_summary.json:                   9622e8b7db304878a56cf1cc321e9c83e5278791cd0b7fcdbf178201c8f2a6ca
+topk_isolation_summary.json:          4ac5f93be48bdaef31ffe9f4c46d2887273b02e5af54e364a35121d42c39f524
+topk_isolation_cases.jsonl:           695a3def22bb048161dd15ef4339af66412a2281b71e43fa7b304bbc6fafcb9b
+recall_first_top5/run_config.json:     7dcce3bd710597a1edc009382d36c1fdccec89c0b67f0cf5e1295a2bb6bf3cc5
+recall_first_top5/summary.json:        6929784921009de5fc7504fc5a9130244a98f5b4f35e9e87794cbece126a8b75
+recall_first_top5/latency_summary.json: fd1d934a740d01dda8ae8598f0104749a32eeb8e68e0b0f16e81e03797214d43
+```
+
+D5运行身份为Qwen3-ASR-1.7B、qwen-asr 0.0.6、Portuguese、bfloat16、逻辑
+`cuda:0`、`gpu_memory_utilization=0.20`、2 s / 2 chunks / 5 tokenizer tokens，4k
+Anchor Top-64、radius 2、2/3/4-gram、每词24 anchors、offset tolerance 1；门控只有
+`threshold=0.75`、posterior weight 0.25、minimum posterior 0.5、margin 0、Top-5。
+validation、词表、checkpoint、4k hotwords/cases、模型config/tokenizer config及离线
+formal100选择均在`run_config.json`记录SHA256，和0.58要求的输入一致。
+
+本次返回证据有两项身份限制，必须显式保留：D5 `run_config.json`中的`git_commit`为
+`unknown`，没有嵌入实际HEAD；成功运行所用物理GPU编号也没有随返回日志记录。运行行为
+包含仅在交付提交`1a1e74c`引入的六profile和专用Top-K汇总，可支持该代码来源的工程
+判断，但不能把产物内Git字段写成已验证SHA。物理GPU未知不影响质量计数，但D5和旧D7
+的跨进程时延差异只能作为实测分布，不能解释为Top-K本身的确定性加速或减速。
+
+D5核心质量结果：
+
+```text
+Prompt热词召回:       157/172 = 91.28%
+正确Prompt采用:       145/157 = 92.36%
+错误Prompt落字:        37/461 = 8.03%
+最终热词Recall:       157/172 = 91.28%
+最终热词Precision:    157/(157+37) = 80.93%
+样本热词命中率:        82.50%
+负样本最终热词幻觉率:   0%
+WER / CER:             8.37% / 3.70%
+```
+
+相对完全同门控的D7 recall-first，Top-5少注入4个正确热词，Prompt召回下降
+2.33个百分点；最终少识别3个expected热词，Recall下降1.74个百分点。同时Top-5少注入
+97个错误候选、少落字3个错误热词，最终Precision提高0.93个百分点，WER/CER分别改善
+0.13/0.22个百分点。正确Prompt采用率下降1.43个百分点；58条case的注入候选或最终文本
+在Top-5/Top-7之间发生变化。
+
+纯检索P50/P95/P99/max为24.46/39.16/48.63/61.54 ms，P95继续满足50 ms目标；
+3/322个step超过50 ms，不能因P95通过而隐藏。Detector P95为97.94 ms，完整step P95
+为316.85 ms，样本推理均值556.19 ms，样本RTF中位数/P95为0.077/0.151。D5本轮纯
+检索P95比旧D7高0.94 ms且出现3个deadline miss，再次说明不同进程的微小时延差不能
+直接归因于Top-K。
+
+Top-K隔离结论：第6至7名候选确实带来3/172个最终热词Recall，但也带来97个错误Prompt
+候选和3个错误落字。D7 recall-first仍是4k召回上限点；D5 recall-first以1.74个百分点
+最终Recall换取0.93个百分点Precision，仍只有80.93%，没有达到85%目标。它与D5
+conservative最终Recall/Precision恰好相同，但比conservative多340个错误注入且最终仍
+落字37个，因此不能替代conservative作为低噪声配置。后续仍应优先做family-aware同族/
+嵌套冲突消解，而不是仅靠缩小Top-K或继续放宽全局threshold。
+
+本轮还暴露两个产物可追溯性问题：`_git_commit()`在容器的Git safe-directory场景会
+静默写入`unknown`；子运行`sha256.txt`写仓库根相对路径，导致进入子目录执行
+`sha256sum -c`时错误重复拼接路径。后续代码修复这两点；当前已完成产物不得为修复格式
+而重跑或改写，其子SHA应从仓库根目录验证。
+
+本地验证：流式RAG/suite定向pytest 11项通过，全量pytest 215项通过；本轮相关文件
+Ruff和严格Mypy通过，`git diff --check`通过。全仓Ruff仍只有接管时已存在的
+`scripts/scan_g2p_coverage.py`三项E501，本轮未修改该文件。未加载完整模型、未读取test。
+
 ## 0.58 2026-08-28 D5 Recall-first Top-K隔离组与Prompt召回口径
 
 4k formal100套件新增`recall_first_top5`组：`threshold=0.75`、
@@ -20,8 +90,7 @@ D5 recall-first、D7 recall-first和E Oracle。对原五组formal100目录使用
 汇总直接复用，新`recall_first_top5/`子目录只运行新增D5组。根`suite_summary.json`
 从既有`sample_results.jsonl`补算Prompt热词召回，不要求旧子运行跨Git提交resume。
 不能改变其他输入、运行参数或SHA身份。
-新增D5结果尚未在H200运行，0.57表格先保留明确的“待工作区实测”，不得由D7截断
-结果推测。
+新增D5结果已在0.59完成实测；0.57两张表已补入实际结果，没有用D7截断结果推测。
 
 本次不是只交付本地实现。工作区应拉取`codex/g2p-coverage-scan`的最新远端提交，确认
 HEAD后，在原formal100根目录做受控加法resume。脚本会验证原五组suite配置，只复用
@@ -64,7 +133,7 @@ shard由`--resume`复用。完成后先执行：
 
 ```bash
 (cd "$SUITE_FORMAL_ROOT" && sha256sum -c sha256.txt)
-(cd "$SUITE_FORMAL_ROOT/recall_first_top5" && sha256sum -c sha256.txt)
+sha256sum -c "$SUITE_FORMAL_ROOT/recall_first_top5/sha256.txt"
 
 jq . "$SUITE_FORMAL_ROOT/topk_isolation_summary.json"
 wc -l "$SUITE_FORMAL_ROOT/topk_isolation_cases.jsonl"
@@ -102,13 +171,15 @@ Ruff和严格Mypy通过，CLI help与`git diff --check`通过。全仓Ruff仍只
 
 现有formal100分片经`--resume`完成纯重汇总，C、D5 conservative、D7-balanced、
 D7-recall和E使用同一批100条（80正/20负），没有重跑模型或改变推理结果。0.58新增的
-D5 recall-first使用相同选择，只改变D7 recall-first的Top-K，结果待工作区实测。
+D5 recall-first使用相同选择，只改变D7 recall-first的Top-K；实测结果记录于0.59。
 
 六组共同使用官方流式语义`chunk_size_sec=2.0`、`unfixed_chunk_num=2`、
 `unfixed_token_num=5`；正常RAG组共同使用4k热词库、`anchor_guided`检索、shortlist 64、
 start radius 2、音素2/3/4-gram、每词24个anchor、offset tolerance 1、
 `maximum_edit_ratio=0.35`、`posterior_weight=0.25`和`minimum_top1_margin=0`。推理使用
-Portuguese、bfloat16、物理GPU 2映射为逻辑`cuda:0`、`gpu_memory_utilization=0.15`。
+Portuguese和bfloat16。原五组使用物理GPU 2映射为逻辑`cuda:0`、
+`gpu_memory_utilization=0.15`；新增D5在另一进程使用逻辑`cuda:0`和0.20，成功运行的
+物理GPU编号未随返回日志记录，因此跨组时延差只作实测分布，不作Top-K因果解释。
 各组差异参数如下：
 
 | 组 | RAG/候选来源 | threshold | minimum posterior | Top-K |
@@ -127,7 +198,7 @@ Portuguese、bfloat16、物理GPU 2映射为逻辑`cuda:0`、`gpu_memory_utiliza
 | C no-RAG | 0/172 = 0% | 不适用 | 不适用 | 89.53% | 不适用 | 8.30% / 3.39% |
 | D5 conservative | 145/172 = 84.30% | 136/145 = 93.79% | 37/121 = 30.58% | 91.28% | 80.93% | 8.84% / 3.78% |
 | D7 balanced | 152/172 = 88.37% | 141/152 = 92.76% | 37/227 = 16.30% | 91.28% | 80.93% | 8.84% / 3.89% |
-| D5 recall-first | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 |
+| D5 recall-first | 157/172 = 91.28% | 145/157 = 92.36% | 37/461 = 8.03% | 91.28% | 80.93% | 8.37% / 3.70% |
 | D7 recall-first | 161/172 = 93.60% | 151/161 = 93.79% | 40/558 = 7.17% | 93.02% | 80.00% | 8.50% / 3.92% |
 | E Oracle | 172/172 = 100% | 161/172 = 93.60% | 0个错误注入（不适用） | 93.60% | 100% | 8.10% / 3.36% |
 
@@ -141,7 +212,7 @@ Processor、CTC Encoder/Head、decode和检索；step列再包含Prompt刷新与
 | C no-RAG | 不适用 | 不适用 | 175.60 ms | 291.88 ms | 0.039 / 0.093 |
 | D5 conservative | 26.56 / 39.10 / 42.86 / 49.66 ms | 94.70 ms | 290.24 ms | 576.83 ms | 0.085 / 0.144 |
 | D7 balanced | 25.06 / 36.35 / 41.36 / 47.50 ms | 99.98 ms | 302.73 ms | 585.73 ms | 0.082 / 0.150 |
-| D5 recall-first | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 | 待工作区实测 |
+| D5 recall-first | 24.46 / 39.16 / 48.63 / 61.54 ms | 97.94 ms | 316.85 ms | 556.19 ms | 0.077 / 0.151 |
 | D7 recall-first | 25.32 / 38.23 / 40.43 / 43.90 ms | 93.70 ms | 306.27 ms | 538.22 ms | 0.081 / 0.142 |
 | E Oracle | 不适用 | 不适用 | 78.27 ms | 149.18 ms | 0.025 / 0.045 |
 
@@ -150,9 +221,10 @@ C组完整step的P99/max为274.16/4171.32 ms；三个D组Detector max分别为
 这些冷启动长尾不能计入50 ms纯检索验收，也不能静默删除。E组绕过Detector且与C组存在
 同进程运行顺序和预热差异，因此E比C快不能解释成Oracle Prompt本身具有加速作用。
 
-正确Prompt一旦进入候选，已完成的三个D组最终采用率都约93%，与Oracle的93.60%接近。
+正确Prompt一旦进入候选，四个D组最终采用率都约92%至94%，与Oracle的93.60%接近。
 说明Qwen能够稳定利用正确Prompt；D7 Recall-first最终Recall只比Oracle低1/172，即
-0.58个百分点。新增D5 recall-first将直接判断这项收益中有多少来自Top-7的第6至7名。
+0.58个百分点。Top-K隔离确认第6至7名带来3个最终正确热词，同时带来97个额外错误
+候选和3个额外错误落字。
 
 Qwen也能过滤大部分错误Prompt，但过滤比例不能脱离候选基数解释。Recall-first虽然过滤
 92.83%，却注入558个错误sample-hotword对，剩余40个落字；D5只过滤69.42%，但错误候选
@@ -164,15 +236,16 @@ Qwen也能过滤大部分错误Prompt，但过滤比例不能脱离候选基数�
 正样本：Recall-first的40个错误落字全部集中在`nested_family_plus_two`的25个和
 `nested_long_present`的15个。同族/嵌套冲突是下一步Precision优化的明确目标。
 
-通用文本变化：C组WER/CER为8.30%/3.39%；D5为8.84%/3.78%，balanced为8.84%/3.89%，
-recall-first为8.50%/3.92%，Oracle为8.10%/3.36%。Recall-first提供最高D组Recall且WER
-仅比C高0.20个百分点，但CER高0.53个百分点；D5的Recall较低1.74个百分点，但错误候选
-更少且CER更好。balanced相对D5没有Recall或最终Precision收益，错误候选更多、CER更差，
-暂时淘汰。
+通用文本变化：C组WER/CER为8.30%/3.39%；D5 conservative为8.84%/3.78%，balanced为
+8.84%/3.89%，D5 recall-first为8.37%/3.70%，D7 recall-first为8.50%/3.92%，Oracle
+为8.10%/3.36%。D7 recall-first提供最高D组Recall；D5 recall-first相对D7的WER/CER
+更好，但最终Recall低1.74个百分点，Precision只高0.93个百分点。balanced相对
+conservative没有Recall或最终Precision收益，错误候选更多、CER更差，暂时淘汰。
 
 正式结论：Qwen可以过滤错误Prompt，尤其能完全保护这20个纯负样本，但不能可靠消解
-正样本中的同族/嵌套近邻。若Precision 85%暂不作为硬门槛，Recall-first作为容量上限
-测试配置，D5作为保守对照；当前4k结果仍不是达到85% Precision的最终产品配置。后续
+正样本中的同族/嵌套近邻。若Precision 85%暂不作为硬门槛，D7 recall-first作为容量
+上限测试配置，D5 conservative作为保守对照；D5 recall-first只作为Top-K隔离证据，
+不替代两者。当前4k结果仍不是达到85% Precision的最终产品配置。后续
 容量测试可以先用纯离线Anchor向5k以上推进，同时单独导出40个错误落字做family-aware
 冲突消解，避免继续通过全局降低threshold增加候选噪声。
 
