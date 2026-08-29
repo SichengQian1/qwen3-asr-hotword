@@ -1,5 +1,32 @@
 # 工作交接记录
 
+## 0.60 2026-08-29 eSpeak-ng/MFA三语新热词G2P选型入口
+
+新增完全独立的 eSpeak-ng/MFA 对比工具，用于判断新热词 G2P 是否可由 eSpeak-ng
+替代 MFA。本轮不设硬性通过阈值，只收集英、西、葡各500词的转换成功、90类CTC词表
+OOV、规范化音素序列一致度和系统性差异；不修改4k热词任务或三语增训代码，不训练
+CTC、不加载Qwen、不读取validation/test，也不覆盖任何现有产物。
+
+独立实现为`src/qwen_hotword/phonemes/espeak_mfa_comparison.py`、
+`scripts/compare_espeak_mfa_g2p.py`和`tests/test_espeak_mfa_comparison.py`。完整设计、输入
+身份、运行命令、输出说明和后续结果统一维护在`docs/ESPEAK_NG选型.md`。工具固定使用
+`en-us`/`es-419`/`pt-br`，从三语150小时平衡train Manifest统计词频，只选具有唯一
+且可映射MFA发音的候选；每语言按特殊拼写、长词、低/中/高频五层确定性选500词。
+
+工作区拉取`codex/g2p-coverage-scan`最新远端提交并核对HEAD后，严格按
+`docs/ESPEAK_NG选型.md`第4节运行。输出固定为新目录
+`outputs/espeak_mfa_selection_v1`；目录已存在时拒绝覆盖，不支持resume。运行前确认
+`phonemizer`和系统`espeak-ng`版本，不能换用其他后端。完成后在输出目录执行
+`sha256sum -c sha256.txt`，并回传该目录九个小型文本文件；其中两个JSONL各1500行。
+后续本地先核验Git、输入和输出SHA，再分析逐词混淆及人工复核样本，并把实测结论只补入
+`docs/ESPEAK_NG选型.md`，不写入前两个任务的实现代码或产物。
+
+本地验证：新增文件Ruff、严格Mypy、3项定向pytest、CLI help和`git diff --check`
+通过；全量pytest为195 passed、23 skipped。全仓Ruff仍只有接管时已存在的
+`scripts/scan_g2p_coverage.py`三项E501；`MYPYPATH=src mypy`仍只有三个既有训练模块的
+unused-ignore，本轮新增模块为0项。由于本机未安装`phonemizer`和系统`espeak-ng`，没有
+生成或宣称真实G2P质量结果；mock只验证分层、语言voice、指标、输出和防覆盖契约。
+
 ## 0.59 2026-08-28 D5 Recall-first Top-K隔离实测结果
 
 新增`recall_first_top5`已在4k formal100完成：100条validation工程校准样本、172个
