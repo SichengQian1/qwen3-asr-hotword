@@ -1,5 +1,60 @@
 # 工作交接记录
 
+## 0.70 2026-09-03 三语词典导出入口修正
+
+0.69首次工区执行在英语第一行正确中止：
+
+```text
+missing word_pronunciations at .../full_ctc_train_en.jsonl:1
+```
+
+原因是早期formal split和Temporal 2×派生Manifest为训练效率只保留了整句
+`phoneme_token_ids`，没有保留full-manifest中的逐词`word_pronunciations`。整句音素
+没有词边界，不能安全反推单词发音。失败发生在创建`dictionary_en`之前，
+所以不存在需要删除的半成品；用户已创建的空`TRI_E2E_ROOT`应保留。
+
+修正后的词典导出器直接读取原始full-manifest `build_config.json`所绑定的
+MFA词典：英语1份、西语3份、葡语1份。它会对输入词典重新计算SHA256，
+跨西语来源同词多发音时按“在源词典中出现次数最多，平局用字典序”生成
+唯一评测发音，同时把全部分歧写入`ambiguous_words.tsv`。这一步不运行MFA/
+eSpeak G2P，不修改任何训练Manifest或旧词典，不读test。
+
+工区拉取修正提交后，保留当前shell里已设置的变量和空总目录，直接
+执行下面三条：
+
+```bash
+python scripts/export_manifest_mfa_dictionary.py \
+  --build-config outputs/en_us_swift_full_manifest_v1/build_config.json \
+  --language en \
+  --output-dir "$TRI_E2E_ROOT/dictionary_en"
+
+python scripts/export_manifest_mfa_dictionary.py \
+  --build-config outputs/es_ar_full_manifests_v1/slr61/build_config.json \
+  --build-config outputs/es_ar_full_manifests_v1/common_voice_rioplatense_v26/build_config.json \
+  --build-config outputs/es_latam_cv_auxiliary_170h_full_manifest_v1/build_config.json \
+  --language es \
+  --output-dir "$TRI_E2E_ROOT/dictionary_es"
+
+python scripts/export_manifest_mfa_dictionary.py \
+  --build-config outputs/noah_pt_full_500h/build_config.json \
+  --language pt \
+  --output-dir "$TRI_E2E_ROOT/dictionary_pt"
+
+for CODE in en es pt; do
+  (cd "$TRI_E2E_ROOT/dictionary_$CODE" && sha256sum -c sha256.txt) || break
+done
+
+jq -s 'map({status, language, source_dictionary_count,
+  source_dictionary_pronunciations, unique_words, ambiguous_words,
+  dictionary_sha256, test_set_used})' \
+  "$TRI_E2E_ROOT"/dictionary_*/summary.json
+```
+
+三组都是`status=pass`、`test_set_used=false`且SHA通过后，不用先回传，直接
+继续0.69第二步起的assets/CTC/offline/4k/streaming/summary流程。任一
+`build_config.json`缺失、内部`dictionary.path`不存在或导出失败时停止，
+只回传报错和该config的`jq '{dictionary}'`；不要手工猜词典或删目录。
+
 ## 0.69 2026-09-03 英西葡4k formal100三语端到端C/D5/E入口
 
 0.68已将葡语门控收口为D5 `threshold=0.86 / posterior=0 / Top-5`；
@@ -87,16 +142,26 @@ declare -A PROMPT=(
 )
 ```
 
-第一步只从已有MFA Manifest标注导出三份评测词典，无需GPU：
+第一步只从原始full-manifest绑定的MFA词典导出三份评测词典，
+无需GPU：
 
 ```bash
-for CODE in en es pt; do
-  python scripts/export_manifest_mfa_dictionary.py \
-    --manifest "${TRAIN[$CODE]}" \
-    --manifest "${VALIDATION[$CODE]}" \
-    --language "$CODE" \
-    --output-dir "$TRI_E2E_ROOT/dictionary_$CODE" || break
-done
+python scripts/export_manifest_mfa_dictionary.py \
+  --build-config outputs/en_us_swift_full_manifest_v1/build_config.json \
+  --language en \
+  --output-dir "$TRI_E2E_ROOT/dictionary_en"
+
+python scripts/export_manifest_mfa_dictionary.py \
+  --build-config outputs/es_ar_full_manifests_v1/slr61/build_config.json \
+  --build-config outputs/es_ar_full_manifests_v1/common_voice_rioplatense_v26/build_config.json \
+  --build-config outputs/es_latam_cv_auxiliary_170h_full_manifest_v1/build_config.json \
+  --language es \
+  --output-dir "$TRI_E2E_ROOT/dictionary_es"
+
+python scripts/export_manifest_mfa_dictionary.py \
+  --build-config outputs/noah_pt_full_500h/build_config.json \
+  --language pt \
+  --output-dir "$TRI_E2E_ROOT/dictionary_pt"
 
 for CODE in en es pt; do
   (cd "$TRI_E2E_ROOT/dictionary_$CODE" && sha256sum -c sha256.txt) || break
@@ -299,7 +364,8 @@ jq '{
   aggregate
 }' "$TRI_E2E_ROOT/summary/multilingual_e2e_summary.json"
 
-jq -s 'map({language, rows, unique_words, ambiguous_words, dictionary_sha256})' \
+jq -s 'map({language, source_dictionary_count, unique_words,
+  ambiguous_words, dictionary_sha256})' \
   "$TRI_E2E_ROOT"/dictionary_*/summary.json
 ```
 

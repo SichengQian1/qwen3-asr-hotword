@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from qwen_hotword.phonemes.manifest_dictionary import export_manifest_mfa_dictionary
+from qwen_hotword.phonemes.manifest_dictionary import (
+    export_manifest_mfa_dictionary,
+    export_source_mfa_dictionary,
+)
 
 
 def _row(sample_id: str, split: str, pronunciation: str) -> dict[str, object]:
@@ -63,3 +66,30 @@ def test_export_manifest_dictionary_rejects_test_rows(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="only train/validation"):
         export_manifest_mfa_dictionary([manifest], tmp_path / "output", language="es")
+
+
+def test_export_source_dictionary_reuses_full_manifest_build_configs(tmp_path: Path) -> None:
+    first = tmp_path / "first.dict"
+    second = tmp_path / "second.dict"
+    first.write_text("hola\to l a\nmundo\tm u n d o\n", encoding="utf-8")
+    second.write_text("hola\to l a\nmundo\tm u n d ɔ\n", encoding="utf-8")
+    first_config = tmp_path / "first.json"
+    second_config = tmp_path / "second.json"
+    first_config.write_text(json.dumps({"dictionary": {"path": str(first)}}))
+    second_config.write_text(json.dumps({"dictionary": {"path": str(second)}}))
+
+    output = tmp_path / "source-output"
+    summary = export_source_mfa_dictionary([], [first_config, second_config], output, language="es")
+
+    assert summary["status"] == "pass"
+    assert summary["source_dictionary_count"] == 2
+    assert summary["unique_words"] == 2
+    assert summary["ambiguous_words"] == 1
+    assert (output / "manifest_mfa_dictionary.dict").read_text(encoding="utf-8") == (
+        "hola\to l a\nmundo\tm u n d o\n"
+    )
+    config = json.loads((output / "run_config.json").read_text(encoding="utf-8"))
+    assert [item["path"] for item in config["dictionary_inputs"]] == [
+        str(first.resolve()),
+        str(second.resolve()),
+    ]

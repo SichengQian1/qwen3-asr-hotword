@@ -7,6 +7,8 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from qwen_hotword.training.mfa_audit import load_mfa_dictionary
+
 
 def export_manifest_mfa_dictionary(
     manifest_paths: Sequence[str | Path],
@@ -110,6 +112,119 @@ def export_manifest_mfa_dictionary(
     _write_json(destination / "run_config.json", config)
     _write_hashes(destination)
     return summary
+
+
+def export_source_mfa_dictionary(
+    dictionary_paths: Sequence[str | Path],
+    build_config_paths: Sequence[str | Path],
+    output_dir: str | Path,
+    *,
+    language: str,
+) -> dict[str, object]:
+    dictionaries = [Path(path).expanduser() for path in dictionary_paths]
+    configs = [Path(path).expanduser() for path in build_config_paths]
+    if not dictionaries and not configs:
+        raise ValueError("at least one dictionary or full-manifest build config is required")
+    for config_path in configs:
+        if not config_path.is_file():
+            raise FileNotFoundError(f"full-manifest build config does not exist: {config_path}")
+        value = json.loads(config_path.read_text(encoding="utf-8"))
+        dictionary = value.get("dictionary") if isinstance(value, Mapping) else None
+        raw_path = dictionary.get("path") if isinstance(dictionary, Mapping) else None
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError(f"build config has no dictionary.path: {config_path}")
+        dictionaries.append(Path(raw_path).expanduser())
+    if len({path.resolve() for path in dictionaries}) != len(dictionaries):
+        raise ValueError("source MFA dictionaries must be unique")
+    for dictionary in dictionaries:
+        if not dictionary.is_file():
+            raise FileNotFoundError(f"source MFA dictionary does not exist: {dictionary}")
+
+    destination = Path(output_dir).expanduser()
+    if destination.exists():
+        raise FileExistsError(f"manifest dictionary output already exists: {destination}")
+    expected_language = _normalize_language(language)
+    pronunciations: dict[str, Counter[str]] = defaultdict(Counter)
+    source_pronunciations = 0
+    for dictionary in dictionaries:
+        for word, values in load_mfa_dictionary(dictionary).items():
+            for pronunciation in values:
+                pronunciations[word][pronunciation] += 1
+                source_pronunciations += 1
+    selected = _select_pronunciations(pronunciations)
+    ambiguous = _ambiguous_pronunciations(pronunciations)
+    config = {
+        "schema_version": 1,
+        "language": expected_language,
+        "input_mode": "source_mfa_dictionaries_from_full_manifest_build_configs",
+        "dictionary_inputs": [_file_identity(path) for path in dictionaries],
+        "build_config_inputs": [_file_identity(path) for path in configs],
+        "test_set_used": False,
+    }
+    summary: dict[str, object] = {
+        "schema_version": 1,
+        "status": "pass",
+        "language": expected_language,
+        "source_dictionary_count": len(dictionaries),
+        "source_dictionary_pronunciations": source_pronunciations,
+        "unique_words": len(selected),
+        "ambiguous_words": len(ambiguous),
+        "selection_policy": "most_frequent_across_source_dictionaries_then_lexicographic",
+        "test_set_used": False,
+    }
+    _write_outputs(destination, selected, ambiguous, config, summary)
+    return summary
+
+
+def _select_pronunciations(
+    pronunciations: Mapping[str, Counter[str]],
+) -> dict[str, str]:
+    return {
+        word: sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        for word, counts in pronunciations.items()
+    }
+
+
+def _ambiguous_pronunciations(
+    pronunciations: Mapping[str, Counter[str]],
+) -> dict[str, Counter[str]]:
+    return {word: counts for word, counts in pronunciations.items() if len(counts) > 1}
+
+
+def _write_outputs(
+    destination: Path,
+    selected: Mapping[str, str],
+    ambiguous: Mapping[str, Counter[str]],
+    config: Mapping[str, object],
+    summary: dict[str, object],
+) -> None:
+    destination.mkdir(parents=True)
+    dictionary_path = destination / "manifest_mfa_dictionary.dict"
+    dictionary_path.write_text(
+        "".join(f"{word}\t{selected[word]}\n" for word in sorted(selected)),
+        encoding="utf-8",
+    )
+    ambiguity_path = destination / "ambiguous_words.tsv"
+    with ambiguity_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t")
+        writer.writerow(("word", "selected_pronunciation", "pronunciation_counts"))
+        for word in sorted(ambiguous):
+            writer.writerow(
+                (
+                    word,
+                    selected[word],
+                    json.dumps(dict(sorted(ambiguous[word].items())), ensure_ascii=False),
+                )
+            )
+    summary.update(
+        {
+            "dictionary_file": dictionary_path.name,
+            "dictionary_sha256": _sha256(dictionary_path),
+        }
+    )
+    _write_json(destination / "summary.json", summary)
+    _write_json(destination / "run_config.json", config)
+    _write_hashes(destination)
 
 
 def _normalize_language(value: str) -> str:
