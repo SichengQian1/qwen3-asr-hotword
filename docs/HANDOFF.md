@@ -1,5 +1,145 @@
 # 工作交接记录
 
+## 0.67 2026-09-03 三语CTC Head葡语4k formal100标定候选D-only端到端入口
+
+0.66的完整排名标定已经把下一步缩小为两个精确D7候选。本轮新增独立套件，
+不修改0.57/0.61的六组formal100套件，不重跑C no-RAG或E Oracle，不改算法、
+checkpoint、样本或既有outputs：
+
+- D5基线：直接读取既有三语Head套件的`conservative`，`0.86 / posterior 0 / Top-5`；
+- Top-K隔离候选：`0.86 / posterior 0 / Top-7`，只改Top-K；
+- Recall候选：`0.83 / posterior 0 / Top-7`，同时改threshold和Top-K。
+
+新脚本`scripts/run_streaming_calibrated_gate_suite.py`在加载模型前必须通过以下预检：
+既有D5 suite及子目录SHA256有效，标定必须是完整排名、0个非精确点且两个
+recommended candidate与上述参数精确一致，标定、当前完整排名CTC报告、新运行
+和既有D5必须绑定同一个三语checkpoint。运行后还会验证子运行除gate、Git和GPU
+分配外的配置相同，共用同一offline selection report和完全相同的formal100 D样本。
+完整排名扩展会改变CTC report文件SHA，但不改checkpoint；套件单独记录新report SHA
+和checkpoint绑定，不把这个已知的证据扩展误判为模型更换。
+
+在工区拉取`codex/g2p-coverage-scan`的本轮提交并确认HEAD：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+使用新目录顺序跑两个D profile。工具一次只起一个子进程，前一个正常退出后才
+起下一个；`--resume`只复用配置完全相同且已完成的profile/sample shard：
+
+```bash
+GPU_ID=3
+MODEL=/glusterfs_103/models/Qwen3-ASR-1.7B
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+PT_ROOT=outputs/noah_pt_full_training_v1
+CAP_ROOT="$PT_ROOT/hotword_capacity_eval_v1"
+V3_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested"
+V3_FULL_RANK_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_full_rank_v1"
+V3_FULL_CALIBRATION_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_calibration_full_rank_v1"
+
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE100_ROOT="$V3_ROOT/prompt_multi_nested_formal100_top5_v1"
+BASELINE_SUITE_ROOT="$CAP_ROOT/streaming_gate_suite_4k_formal100_multilingual_ctc_v1"
+CALIBRATED_SUITE_ROOT="$CAP_ROOT/streaming_calibrated_gate_suite_4k_formal100_multilingual_ctc_v1"
+CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+
+test -f "$BASELINE_SUITE_ROOT/suite_summary.json"
+test -f "$V3_FULL_RANK_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+test -f "$V3_FULL_CALIBRATION_ROOT/candidate_summary.json"
+test -f "$CTC_CHECKPOINT"
+test ! -e "$CALIBRATED_SUITE_ROOT"
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_streaming_calibrated_gate_suite.py \
+  --model "$MODEL" \
+  --validation-manifest "$PT_ROOT/full_ctc_validation.jsonl" \
+  --vocab "$VOCAB" \
+  --hotwords "$ASSET_4K_ROOT/representative/size_4000/hotwords.jsonl" \
+  --cases "$ASSET_4K_ROOT/representative/size_4000/cases.jsonl" \
+  --hotword-families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --ctc-report "$V3_FULL_RANK_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --offline-rag-dir "$OFFLINE100_ROOT" \
+  --ctc-checkpoint "$CTC_CHECKPOINT" \
+  --baseline-suite "$BASELINE_SUITE_ROOT" \
+  --calibration-summary "$V3_FULL_CALIBRATION_ROOT/candidate_summary.json" \
+  --output-dir "$CALIBRATED_SUITE_ROOT" \
+  --language Portuguese \
+  --gpu-memory-utilization 0.18 \
+  --resume
+```
+
+若两个profile都未开始，首次也可保留`--resume`；新目录不存在时它不会改变运行
+语义。若因显存不足失败，先释放同一张卡的其他进程后用原命令resume；不要改
+`gpu-memory-utilization`后强行复用原目录，也不要删除已完成的sample shards。
+
+运行完不需要打包或传文件。只运行以下命令并粘贴精简输出：
+
+```bash
+(cd "$CALIBRATED_SUITE_ROOT" && sha256sum -c sha256.txt)
+(cd "$CALIBRATED_SUITE_ROOT/precision_guarded_top7" && sha256sum -c sha256.txt)
+(cd "$CALIBRATED_SUITE_ROOT/f1_with_fpr_guard_top7" && sha256sum -c sha256.txt)
+
+jq '{
+  status,
+  sample_count,
+  identity_checks,
+  baseline: {
+    gate: .baseline.gate,
+    quality: (.baseline.quality | {
+      expected_hotwords,
+      correct_prompt_injected_hotwords,
+      prompt_hotword_recall,
+      correct_prompt_adopted_hotwords,
+      correct_prompt_adoption_rate,
+      wrong_prompt_written_hotwords,
+      wrong_prompt_landing_rate,
+      final_hotword_recall,
+      final_hotword_precision,
+      negative_hotword_hallucination_rate,
+      wer,
+      cer
+    })
+  },
+  candidates: (.candidates | with_entries(.value |= {
+    gate,
+    quality: (.quality | {
+      expected_hotwords,
+      correct_prompt_injected_hotwords,
+      prompt_hotword_recall,
+      correct_prompt_adopted_hotwords,
+      correct_prompt_adoption_rate,
+      wrong_prompt_written_hotwords,
+      wrong_prompt_landing_rate,
+      final_hotword_recall,
+      final_hotword_precision,
+      negative_hotword_hallucination_rate,
+      wer,
+      cer
+    }),
+    delta_from_d5_baseline
+  })),
+  comparisons,
+  case_comparison
+}' "$CALIBRATED_SUITE_ROOT/calibrated_gate_summary.json"
+
+wc -l "$CALIBRATED_SUITE_ROOT/calibrated_gate_cases.jsonl"
+```
+
+这次不设预定通过线。结果回来后只判断两件事：0.86/Top-7的纯CTC小幅改善
+是否能转化为Prompt/最终文本改善且不引入Precision或幻觉回退；0.83/Top-7新增的22个
+纯CTC真词有多少进入Prompt并被Qwen正确写出，以及为此付出多少错词落地和最终
+Precision代价。根据这两个端到端结果再决定保留D5、换成哪个D7，或转入
+family-aware冲突消解；不因纯CTC F1自动选择0.83。
+
+本轮本地验证：新增预检、身份比较、指标汇总、case差异和resume共3项单测
+通过，联合既有gate suite、checkpoint regression和v3标定共12项定向测试通过；
+全量pytest收集231项并通过（平台可选项按既有标记skip）。本轮3个新文件Ruff、
+format、compileall和新核心模块strict Mypy通过，`git diff --check`通过。全仓
+Ruff仍只有3个旧G2P长行和2个用户未跟踪PPT临时脚本长行；`MYPYPATH=src mypy`
+仍只有3个未修改训练模块的旧`unused-ignore`。本机未加载Qwen/CTC模型、未生成
+真实评测产物，也未修改或纳入用户的PPT文件。
+
 ## 0.66 2026-09-03 葡语v3完整100名无截断标定结果
 
 工作区已按0.65完成一次CTC-only完整排名导出和CPU标定。评分目录3个文件、标定目录5个
