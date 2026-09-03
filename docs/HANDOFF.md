@@ -1,5 +1,63 @@
 # 工作交接记录
 
+## 0.66 2026-09-03 葡语v3完整100名无截断标定结果
+
+工作区已按0.65完成一次CTC-only完整排名导出和CPU标定。评分目录3个文件、标定目录5个
+文件均通过`sha256sum -c`。本次回传未包含报告内的checkpoint SHA和各artifact SHA字符串，
+但标定源点逐项复算与0.62三语Head结果完全一致；后续端到端入口仍必须由程序验证CTC报告
+与checkpoint绑定，不能仅凭这一致性替代身份检查。
+
+每条210个validation case均保存100个active hotword完整排名。Top-1/3/5/7、21个threshold
+和4个posterior门槛共336点全部`replay_exact=true`，0个非精确点，Pareto前沿26点。完整
+排名证明0.64的4个截断不确定点没有隐藏一个更好的D5配置，但Top-7出现一个严格改善点。
+
+三语Head源点保持：`0.86 / posterior 0 / Top-5`，321/410真词、336个选择，Recall
+78.2927%、Precision 95.5357%、F1 86.0590%、positive-case hit 92.7778%、负例FPR 0%。
+
+precision-guarded推荐为`0.86 / posterior 0 / Top-7`：
+
+```text
+selected / true positive:      337 / 322
+Recall / Precision / F1:       78.5366% / 95.5490% / 86.2115%
+positive-case hit rate:        92.7778%
+negative-case FPR:             0%
+
+相对新Head Top-5源点:
+  selected / true positive:    +1 / +1
+  Recall:                      +0.2439 pp
+  Precision:                   +0.0132 pp
+  F1:                          +0.1525 pp
+```
+
+这不是大幅召回恢复，但它是在完整证据下仅改变Top-K并同时不损失Precision/FPR的严格改善，
+可作为端到端安全对照。
+
+FPR-guarded F1最佳点为`0.83 / posterior 0 / Top-7`：
+
+```text
+selected / true positive:      364 / 343
+Recall / Precision / F1:       83.6585% / 94.2308% / 88.6305%
+positive-case hit rate:        95.5556%
+negative-case FPR:             0%
+
+相对新Head 0.86/Top-5:
+  selected / true positive:    +28 / +22
+  Recall:                      +5.3659 pp
+  Precision:                   -1.3049 pp
+  F1:                          +2.5715 pp
+
+相对旧葡语Head 0.86/Top-5:
+  selected / true positive:    +9 / +2
+  Recall:                      +0.4878 pp
+  Precision:                   -1.8256 pp
+  F1:                          -0.5198 pp
+```
+
+下一轮只跑这两个D7候选：0.86用于隔离Top-K的微小安全收益，0.83用于判断22个纯CTC新增
+真词是否能转化为Prompt Recall和最终热词Recall。两者共享posterior weight 0.25、minimum
+posterior 0、maximum edit ratio 0.35、margin 0和全部4k Anchor/流式/Qwen设置。不重跑C/E，
+也不把不同H200进程的细小时延差解释为门控因果。
+
 ## 0.65 2026-09-03 葡语v3完整100名shortlist与无截断标定入口
 
 0.64的截断Top-5标定已经证明：现有证据下没有同时保持新Head 95.54% Precision和0%
