@@ -1,5 +1,118 @@
 # 工作交接记录
 
+## 0.63 2026-09-03 三语CTC Head葡语v3 Operating离线标定
+
+0.62已经确认三语Head的葡语Forced Ranking Recall@5仍为389/410（94.88%），但沿用
+旧葡语Head的`threshold=0.86 / posterior=0 / Top-5`时，Operating Recall只有
+321/410（78.29%）。本轮只标定新Head的门控，不训练、不加载Qwen、不读取sealed test、
+不改4k Anchor、三语训练、热词评分或Prompt算法，也不覆盖0.61/0.62已有产物。
+
+新增独立CPU-only工具：
+
+- `src/qwen_hotword/hotwords/v3_operating_calibration.py`
+- `scripts/calibrate_v3_operating_points.py`
+- `tests/test_v3_operating_calibration.py`
+
+它读取新三语Head已经生成的葡语v3 `hotword_case_scores_v3.jsonl`，固定原排名的
+`posterior_weight=0.25`、`maximum_edit_ratio=0.35`和`minimum_top1_margin=0`，只扫描
+threshold、minimum posterior和Top-K。默认网格为Top-1/3/5、threshold
+0.70至0.90（步长0.01）的21个点、posterior 0/0.25/0.5/0.75，共252点。没有预先规定必须
+达到的质量阈值；输出Pareto前沿，并按“Precision不低于新Head 0.86基线且负例FPR不升高”
+选择precision-guarded点，再补一个相同FPR约束下的F1最佳点，最多返回两个不同候选。
+
+必须注意原v3保存契约的限制：`ranking_top5`只保留门控前五名，而原Operating实际从
+100个激活热词完整排名中过门控后再截Top-5。因此Top-5文件不是天然完整的gate replay
+shortlist，Top-7更完全没有证据。标定器会逐case证明每个点是否精确：只有已保存候选已
+填满该点Top-K，或第五名分数已经低于新threshold，才能证明未保存名次不会改变选择。
+原0.86源点直接用文件中保存的真实`operating_matches`复核。任何不能证明完整的点都会
+标记`replay_exact=false`，只作诊断，不进入Pareto或候选推荐；请求Top-K大于5会直接失败。
+如果现有Top-5没有可恢复Recall的精确点，结论应是先补一次CTC-only完整shortlist导出，
+而不是拿截断估计去重跑完整端到端。
+
+工作区拉取与运行命令如下。本次只读已有小文件并做CPU计算，不需要GPU，也不支持resume；
+输出目录必须全新，存在时不得删除或覆盖：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+PT_ROOT=outputs/noah_pt_full_training_v1
+V3_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested"
+V3_MULTILINGUAL_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_v1"
+V3_CALIBRATION_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_calibration_v1"
+
+test -f "$V3_ROOT/multi_nested_hotwords_v3.jsonl"
+test -f "$V3_ROOT/hotword_families_v3.jsonl"
+test -f "$V3_ROOT/multi_nested_cases_v3.jsonl"
+test -f "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+test -f "$V3_MULTILINGUAL_ROOT/hotword_case_scores_v3.jsonl"
+test -f "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+test ! -e "$V3_CALIBRATION_ROOT"
+
+python scripts/calibrate_v3_operating_points.py \
+  --vocab "$VOCAB" \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --case-scores "$V3_MULTILINGUAL_ROOT/hotword_case_scores_v3.jsonl" \
+  --candidate-report "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --reference-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --output-dir "$V3_CALIBRATION_ROOT"
+```
+
+输入校验包括：candidate/reference均未读取test、checkpoint SHA格式有效、vocab/hotword/
+families/cases SHA与实际文件一致，以及candidate报告的Operating计数和指标可由case scores
+逐项复算。输出记录所有输入文件的SHA256、候选与参考checkpoint SHA、网格和“不执行CTC/
+Qwen推理”标志。验收与回传：
+
+```bash
+(cd "$V3_CALIBRATION_ROOT" && sha256sum -c sha256.txt)
+
+jq '{
+  status,
+  case_count,
+  hotword_count,
+  sweep_point_count,
+  exact_point_count,
+  non_exact_point_count,
+  pareto_point_count,
+  guarded_recall_gain_candidate_available,
+  candidate_baseline,
+  reference_baseline,
+  recommended_candidates,
+  replay_limitation,
+  next_action
+}' "$V3_CALIBRATION_ROOT/candidate_summary.json"
+
+wc -l \
+  "$V3_CALIBRATION_ROOT/operating_point_sweep.jsonl" \
+  "$V3_CALIBRATION_ROOT/exact_pareto_frontier.jsonl"
+```
+
+请回传以下小文件，不需要重新打包checkpoint、feature cache、音频、旧v3目录或4k suite：
+
+```text
+simulated_hotword_eval_v3_multi_nested_multilingual_ctc_calibration_v1/
+  calibration_config.json
+  candidate_summary.json
+  exact_pareto_frontier.jsonl
+  operating_point_sweep.jsonl
+  sha256.txt
+```
+
+收到后先核验SHA和checkpoint身份。如果存在precision/FPR受保护且Recall提高的精确候选，
+只选1至2个进入下一轮葡语D组端到端；如果状态为
+`exact_sweep_complete_no_guarded_recall_gain`或`full_shortlist_required`，先补完整shortlist
+证据，不重跑C/E，也不立即重训三语Head。
+
+本轮本地验证：新增标定器3项测试通过，连同v3评估和既有Anchor sweep共10项定向测试
+通过；全量pytest 225项通过；新增模块strict Mypy、相关文件Ruff、CLI help、Ruff format和
+`git diff --check`通过。全仓Ruff仍只有3个`scan_g2p_coverage.py`既有长行和2个未跟踪PPT
+临时脚本长行；全包Mypy仍为6个未修改旧模块的11项既有错误。本机没有读取工作区v3产物，
+没有生成真实候选，也没有加载CTC/Qwen模型。
+
 ## 0.62 2026-09-03 三语CTC Head葡语4k formal100替换回归结果
 
 工作区已按0.61完成checkpoint审计、三语validation诊断、葡语v3 CTC评分、
