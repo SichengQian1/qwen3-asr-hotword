@@ -1,5 +1,60 @@
 # 工作交接记录
 
+## 0.64 2026-09-03 三语CTC Head葡语v3截断Top-5标定结果
+
+工作区已使用0.63提交的CPU-only标定器完成252个组合。输出目录五个文件均通过
+`sha256sum -c sha256.txt`；本次回传的是终端摘要和校验结果，未传文件本体及每个
+artifact的SHA字符串。运行确认210条v3 validation case、500个热词，未执行CTC推理、
+Qwen推理或读取sealed test。
+
+252个点中248个可以由保存的`ranking_top5`证明为精确重放，4个点因Top-5截断无法证明；
+精确Pareto点18个。原三语Head源点再次复算一致：
+
+```text
+threshold / posterior / Top-K: 0.86 / 0 / 5
+selected / true positive:      336 / 321
+Recall / Precision / F1:       78.2927% / 95.5357% / 86.0590%
+positive-case hit rate:        92.7778%
+negative-case FPR:             0%
+```
+
+在“Precision不得低于新Head 0.86源点且负例FPR不得升高”的约束下，没有任何精确点提高
+Recall；因此precision-guarded推荐仍是原0.86点，状态为
+`exact_sweep_complete_no_guarded_recall_gain`。这说明单纯放宽threshold不能无损恢复新Head
+相对旧葡语Head的约20个Operating真词缺口。
+
+FPR保持0时的F1最佳点为`threshold=0.83 / posterior=0 / Top-5`：
+
+```text
+selected / true positive:      363 / 342
+Recall / Precision / F1:       83.4146% / 94.2149% / 88.4864%
+positive-case hit rate:        95.5556%
+negative-case FPR:             0%
+
+相对新Head 0.86:
+  true positive:               +21
+  Recall:                      +5.1220 pp
+  Precision:                   -1.3208 pp
+  F1:                          +2.4274 pp
+
+相对旧葡语Head 0.86:
+  true positive:               +1（342 vs 341）
+  Recall:                      +0.2439 pp
+  Precision:                   -1.8415 pp
+  F1:                          -0.6639 pp
+```
+
+0.83点改善了各多词组Recall：nested-family-plus-two为85.0%、three-independent为80.0%、
+two-independent为83.33%；nested short-only为95.0%，long-present long为81.67%，且
+short-only误触发long仍为0%。但single-hotword Precision降到87.10%，是整体Precision代价
+最明显的分组。该点适合作为有明确取舍的候选，不是“无损替代”结论。
+
+本轮不直接重跑葡语formal100端到端。下一步先在新目录做一次CTC-only v3评分，把每条
+case的完整100名排序保存下来，再用同一网格做完全无截断标定。若完整证据仍证明不存在
+Precision/FPR受保护的Recall增益，则保留0.86作为保守点，并由用户明确决定是否愿意用
+约1.32个百分点Precision换取0.83点的约5.12个百分点Recall；不应继续用阈值微调掩盖
+三语Head的葡语校准差异。
+
 ## 0.63 2026-09-03 三语CTC Head葡语v3 Operating离线标定
 
 0.62已经确认三语Head的葡语Forced Ranking Recall@5仍为389/410（94.88%），但沿用
