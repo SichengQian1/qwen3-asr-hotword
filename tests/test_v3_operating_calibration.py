@@ -66,9 +66,10 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _fixture(tmp_path: Path) -> dict[str, Path]:
+def _fixture(tmp_path: Path, *, full_ranking: bool = False) -> dict[str, Path]:
     vocab = tmp_path / "vocab.json"
-    _write_json(vocab, {"tokens": ["<blank>", "<unk>", "a", "b", "c", "d", "e"]})
+    phones = tuple(f"p{index}" for index in range(10))
+    _write_json(vocab, {"tokens": ["<blank>", "<unk>", *phones]})
     entries = [
         HotwordEntry(
             hotword_id=f"h{index}",
@@ -76,13 +77,13 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
             surface=f"termo{index}",
             normalized=f"termo{index}",
             words=(f"termo{index}",),
-            pronunciation=token,
-            phoneme_tokens=(token,),
-            token_ids=(index + 2,),
+            pronunciation=f"{phones[index // 10]} {phones[index % 10]}",
+            phoneme_tokens=(phones[index // 10], phones[index % 10]),
+            token_ids=(index // 10 + 2, index % 10 + 2),
             source="test",
             validation_occurrences=1,
         )
-        for index, token in enumerate(("a", "b", "c", "d", "e"))
+        for index in range(100)
     ]
     hotwords = tmp_path / "hotwords.jsonl"
     hotwords.write_text(
@@ -109,24 +110,41 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
         "".join(json.dumps(case.to_dict(), sort_keys=True) + "\n" for case in cases_value),
         encoding="utf-8",
     )
-    scores_value = tuple(
-        CaseScore(
-            case_id=case.case_id,
-            sample_id=case.sample_id,
-            primary_group=case.primary_group,
-            ranked_matches=(
-                _match("h1", 0.90 if case.primary_group != "negative" else 0.84),
-                _match("h2", 0.85 if case.primary_group != "negative" else 0.80),
-                _match("h3", 0.80 if case.primary_group != "negative" else 0.76),
-                _match("h4", 0.75 if case.primary_group != "negative" else 0.72),
-                _match("h0", 0.70 if case.primary_group != "negative" else 0.68),
-            ),
-            operating_matches=((_match("h1", 0.90),) if case.primary_group != "negative" else ()),
-            effective_time_steps=10,
-            decoded_token_count=4,
+    scores_value = []
+    for case in cases_value:
+        positive = case.primary_group != "negative"
+        leading_scores = (
+            (0.90, 0.85, 0.80, 0.75, 0.70)
+            if positive
+            else (
+                0.84,
+                0.80,
+                0.76,
+                0.72,
+                0.68,
+            )
         )
-        for case in cases_value
-    )
+        ranked = [
+            _match(hotword_id, score)
+            for hotword_id, score in zip(
+                ("h1", "h2", "h3", "h4", "h0"), leading_scores, strict=True
+            )
+        ]
+        ranked.extend(
+            _match(f"h{index}", max(0.0, 0.68 - position * 0.006))
+            for position, index in enumerate(range(5, 100), start=1)
+        )
+        scores_value.append(
+            CaseScore(
+                case_id=case.case_id,
+                sample_id=case.sample_id,
+                primary_group=case.primary_group,
+                ranked_matches=tuple(ranked if full_ranking else ranked[:5]),
+                operating_matches=((_match("h1", 0.90),) if positive else ()),
+                effective_time_steps=10,
+                decoded_token_count=4,
+            )
+        )
     scores = tmp_path / "scores.jsonl"
     scores.write_text(
         "".join(
@@ -137,7 +155,17 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
                     "primary_group": score.primary_group,
                     "effective_time_steps": score.effective_time_steps,
                     "decoded_token_count": score.decoded_token_count,
-                    "ranking_top5": [item.to_dict() for item in score.ranked_matches],
+                    "ranking_top5": [item.to_dict() for item in score.ranked_matches[:5]],
+                    **(
+                        {
+                            "ranked_matches": [item.to_dict() for item in score.ranked_matches],
+                            "ranked_matches_available": len(score.ranked_matches),
+                            "ranked_matches_complete": True,
+                            "active_hotword_count": 100,
+                        }
+                        if full_ranking
+                        else {}
+                    ),
                     "operating_matches": [item.to_dict() for item in score.operating_matches],
                 },
                 sort_keys=True,
@@ -148,7 +176,18 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
         encoding="utf-8",
     )
     report = tmp_path / "candidate.json"
-    metrics = evaluate_multi_nested_case_scores(cases_value, entries, (), scores_value)
+    scores_tuple = tuple(scores_value)
+    metrics = evaluate_multi_nested_case_scores(cases_value, entries, (), scores_tuple)
+    scoring_config = {
+        "top_k": 5,
+        "threshold": 0.86,
+        "maximum_edit_ratio": 0.35,
+        "posterior_weight": 0.25,
+        "minimum_posterior_confidence": 0.0,
+        "minimum_top1_margin": 0.0,
+    }
+    if full_ranking:
+        scoring_config.update({"saved_ranked_matches": 100, "ranked_matches_complete": True})
     _write_json(
         report,
         {
@@ -158,14 +197,8 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
             "hotword_table_sha256": _sha256(hotwords),
             "families_sha256": _sha256(families),
             "cases_sha256": _sha256(cases),
-            "scoring_config": {
-                "top_k": 5,
-                "threshold": 0.86,
-                "maximum_edit_ratio": 0.35,
-                "posterior_weight": 0.25,
-                "minimum_posterior_confidence": 0.0,
-                "minimum_top1_margin": 0.0,
-            },
+            "case_scores_sha256": _sha256(scores),
+            "scoring_config": scoring_config,
             "metrics": metrics,
         },
     )
@@ -219,7 +252,7 @@ def test_v3_calibration_writes_exact_candidates_and_marks_truncated_points(
 def test_v3_calibration_rejects_top_k_above_saved_rank_depth(tmp_path: Path) -> None:
     paths = _fixture(tmp_path)
 
-    with pytest.raises(ValueError, match="ranking_top5"):
+    with pytest.raises(ValueError, match="rank depth"):
         calibrate_v3_operating_points(
             vocab_path=paths["vocab"],
             hotword_path=paths["hotwords"],
@@ -230,6 +263,27 @@ def test_v3_calibration_rejects_top_k_above_saved_rank_depth(tmp_path: Path) -> 
             output_dir=tmp_path / "output",
             top_ks=(5, 7),
         )
+
+
+def test_v3_calibration_accepts_top7_with_complete_ranking(tmp_path: Path) -> None:
+    paths = _fixture(tmp_path, full_ranking=True)
+
+    summary = calibrate_v3_operating_points(
+        vocab_path=paths["vocab"],
+        hotword_path=paths["hotwords"],
+        families_path=paths["families"],
+        cases_path=paths["cases"],
+        case_scores_path=paths["scores"],
+        candidate_report_path=paths["report"],
+        output_dir=tmp_path / "full-output",
+        top_ks=(5, 7),
+        thresholds=(0.83, 0.86),
+        minimum_posterior_confidences=(0.0,),
+    )
+
+    assert summary["sweep_point_count"] == 4
+    assert summary["exact_point_count"] == 4
+    assert summary["non_exact_point_count"] == 0
 
 
 def test_replay_completeness_requires_filled_cap_or_score_cutoff() -> None:

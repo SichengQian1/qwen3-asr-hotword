@@ -9,6 +9,7 @@ from typing import Any
 
 from qwen_hotword.hotwords.multi_nested import (
     CaseScore,
+    MultiNestedCase,
     evaluate_multi_nested_case_scores,
     load_hotword_families,
     load_multi_nested_case_scores,
@@ -61,9 +62,6 @@ def calibrate_v3_operating_points(
         minimum_posterior_confidences,
         name="minimum_posterior_confidences",
     )
-    if max(resolved_top_ks) > 5:
-        raise ValueError("saved v3 ranking_top5 cannot replay top_k greater than 5")
-
     paths = {
         "vocab": Path(vocab_path).expanduser(),
         "hotwords": Path(hotword_path).expanduser(),
@@ -95,11 +93,22 @@ def calibrate_v3_operating_points(
     families = load_hotword_families(paths["families"])
     cases = load_multi_nested_cases(paths["cases"])
     source_scores = load_multi_nested_case_scores(paths["case_scores"])
-    _validate_saved_scores(source_scores)
+    saved_rank_depth = _validate_saved_scores(source_scores, cases=cases)
 
     source_metrics = evaluate_multi_nested_case_scores(cases, hotwords, families, source_scores)
     _validate_report_metrics(candidate_report, source_metrics)
     scoring_config = _mapping(candidate_report, "scoring_config")
+    configured_rank_depth = int(scoring_config.get("saved_ranked_matches", saved_rank_depth))
+    if configured_rank_depth != saved_rank_depth:
+        raise ValueError("candidate report saved rank depth does not match case scores")
+    ranking_complete_raw = scoring_config.get("ranked_matches_complete", False)
+    if not isinstance(ranking_complete_raw, bool):
+        raise ValueError("candidate report ranked_matches_complete must be boolean")
+    ranking_complete = ranking_complete_raw
+    if ranking_complete and saved_rank_depth != 100:
+        raise ValueError("complete v3 ranking must contain all 100 active hotwords")
+    if max(resolved_top_ks) > saved_rank_depth:
+        raise ValueError(f"saved v3 rank depth {saved_rank_depth} cannot replay requested Top-K")
     maximum_edit_ratio = float(scoring_config["maximum_edit_ratio"])
     minimum_top1_margin = float(scoring_config["minimum_top1_margin"])
     if minimum_top1_margin != 0.0:
@@ -136,6 +145,7 @@ def calibrate_v3_operating_points(
             threshold=threshold,
             maximum_edit_ratio=maximum_edit_ratio,
             minimum_posterior_confidence=posterior,
+            ranking_complete=ranking_complete,
         )
         is_source = config == source_config
         if is_source:
@@ -175,10 +185,10 @@ def calibrate_v3_operating_points(
         for candidate in candidates
     )
     limitation = (
-        "all requested points were exactly replayable from ranking_top5"
+        "all requested points were exactly replayable from the saved ranking"
         if len(exact_points) == len(points)
         else (
-            "ranking_top5 is truncated before Operating guards; non-exact points are "
+            "the saved ranking is truncated before Operating guards; non-exact points are "
             "diagnostic only and excluded from recommendations"
         )
     )
@@ -203,7 +213,8 @@ def calibrate_v3_operating_points(
             "posterior_weight": float(scoring_config["posterior_weight"]),
             "maximum_edit_ratio": maximum_edit_ratio,
             "minimum_top1_margin": minimum_top1_margin,
-            "saved_rank_depth": 5,
+            "saved_rank_depth": saved_rank_depth,
+            "ranked_matches_complete": ranking_complete,
         },
         "grid": {
             "top_ks": list(resolved_top_ks),
@@ -219,6 +230,8 @@ def calibrate_v3_operating_points(
         "status": status,
         "case_count": len(cases),
         "hotword_count": len(hotwords),
+        "saved_rank_depth": saved_rank_depth,
+        "ranked_matches_complete": ranking_complete,
         "sweep_point_count": len(points),
         "exact_point_count": len(exact_points),
         "non_exact_point_count": len(points) - len(exact_points),
@@ -272,6 +285,7 @@ def _replay_scores(
     threshold: float,
     maximum_edit_ratio: float,
     minimum_posterior_confidence: float,
+    ranking_complete: bool = False,
 ) -> tuple[tuple[CaseScore, ...], tuple[str, ...]]:
     replayed: list[CaseScore] = []
     incomplete: list[str] = []
@@ -285,7 +299,7 @@ def _replay_scores(
         )
         selected = eligible[:top_k]
         last_saved_score = score.ranked_matches[-1].score
-        complete = len(selected) == top_k or last_saved_score < threshold
+        complete = ranking_complete or len(selected) == top_k or last_saved_score < threshold
         if not complete:
             incomplete.append(score.case_id)
         replayed.append(
@@ -302,16 +316,29 @@ def _replay_scores(
     return tuple(replayed), tuple(incomplete)
 
 
-def _validate_saved_scores(scores: Sequence[CaseScore]) -> None:
+def _validate_saved_scores(scores: Sequence[CaseScore], *, cases: Sequence[MultiNestedCase]) -> int:
+    depths = {len(score.ranked_matches) for score in scores}
+    if len(depths) != 1:
+        raise ValueError("v3 cases do not share one saved ranked-match depth")
+    depth = next(iter(depths))
+    if depth < 5:
+        raise ValueError("v3 case scores must preserve at least ranking_top5")
+    active_by_case = {str(case.case_id): set(case.active_hotword_ids) for case in cases}
     for score in scores:
-        if len(score.ranked_matches) != 5:
-            raise ValueError(f"case {score.case_id} must contain exactly five saved ranked matches")
         ids = [match.hotword_id for match in score.ranked_matches]
         if len(ids) != len(set(ids)):
             raise ValueError(f"case {score.case_id} contains duplicate ranked hotwords")
+        active_ids = active_by_case.get(score.case_id)
+        if active_ids is None or not set(ids).issubset(active_ids):
+            raise ValueError(f"case {score.case_id} ranking contains inactive hotwords")
+        if depth == len(active_ids) and set(ids) != active_ids:
+            raise ValueError(
+                f"case {score.case_id} complete ranking does not cover active hotwords"
+            )
         values = [match.score for match in score.ranked_matches]
         if any(left < right for left, right in zip(values, values[1:], strict=False)):
             raise ValueError(f"case {score.case_id} ranked matches are not score-sorted")
+    return depth
 
 
 def _validate_report(report: Mapping[str, Any], *, paths: Mapping[str, Path], label: str) -> None:
@@ -330,6 +357,13 @@ def _validate_report(report: Mapping[str, Any], *, paths: Mapping[str, Path], la
         actual = _sha256(paths[path_key])
         if expected != actual:
             raise ValueError(f"{label} report {report_key} does not match {path_key}")
+    case_scores_sha = report.get("case_scores_sha256")
+    if (
+        label == "candidate"
+        and case_scores_sha is not None
+        and case_scores_sha != _sha256(paths["case_scores"])
+    ):
+        raise ValueError("candidate report case_scores_sha256 does not match case scores")
 
 
 def _validate_report_metrics(report: Mapping[str, Any], recomputed: Mapping[str, Any]) -> None:
@@ -589,7 +623,7 @@ def _write_readme(path: Path, summary: Mapping[str, Any]) -> None:
         f"Status: `{summary['status']}`.\n\n"
         "This directory replays threshold, posterior-confidence, and Top-K gates "
         "without loading the CTC Head or Qwen. Recommendations include only points "
-        "whose result is provably complete from the saved `ranking_top5`. Non-exact "
+        "whose result is provably complete from the saved ranked shortlist. Non-exact "
         "rows remain diagnostics and must not be used as deployment settings.\n",
         encoding="utf-8",
     )

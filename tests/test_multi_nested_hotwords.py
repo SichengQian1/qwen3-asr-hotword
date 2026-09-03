@@ -9,6 +9,7 @@ from qwen_hotword.hotwords.multi_nested import (
     CaseScore,
     HotwordFamily,
     MultiNestedCase,
+    _score_row,
     build_multi_nested_assets,
     evaluate_multi_nested_case_scores,
     load_multi_nested_case_scores,
@@ -220,6 +221,50 @@ def test_v3_case_score_loader_round_trip(tmp_path: Path) -> None:
         "h4",
         "h5",
     ]
+
+
+def test_v3_case_score_loader_prefers_complete_ranking_and_checks_top5(
+    tmp_path: Path,
+) -> None:
+    case = _case("full-score", "single_hotword", ("h1",))
+    score = _score(case, tuple(f"h{index}" for index in range(10)))
+    ranked = [match.to_dict() for match in score.ranked_matches]
+    row = {
+        "case_id": score.case_id,
+        "sample_id": score.sample_id,
+        "primary_group": score.primary_group,
+        "effective_time_steps": 42,
+        "decoded_token_count": 7,
+        "ranking_top5": ranked[:5],
+        "ranked_matches": ranked,
+        "ranked_matches_available": 10,
+        "ranked_matches_complete": True,
+        "active_hotword_count": 10,
+        "operating_matches": [],
+    }
+    path = tmp_path / "full-scores.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    loaded = load_multi_nested_case_scores(path)
+
+    assert len(loaded[0].ranked_matches) == 10
+    row["ranking_top5"] = ranked[1:6]
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="does not preserve ranking_top5"):
+        load_multi_nested_case_scores(path)
+
+
+def test_v3_score_row_keeps_legacy_top5_and_full_ranking() -> None:
+    case = _case("serialized", "single_hotword", ("h1",))
+    score = _score(case, tuple(f"h{index}" for index in range(10)))
+
+    row = _score_row(case, score, {})
+
+    assert len(row["ranking_top5"]) == 5
+    assert len(row["ranked_matches"]) == 10
+    assert row["ranked_matches_available"] == 10
+    assert row["ranked_matches_complete"] is False
+    assert row["active_hotword_count"] == 100
 
 
 def _alpha_name(index: int) -> str:

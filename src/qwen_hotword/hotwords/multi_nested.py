@@ -495,10 +495,44 @@ def load_multi_nested_case_scores(path: str | Path) -> tuple[CaseScore, ...]:
             sample_id = _required_string(raw, "sample_id", line_number)
             if case_id in seen_cases or sample_id in seen_samples:
                 raise ValueError("v3 scores must have unique case and sample IDs")
-            ranking_raw = raw.get("ranking_top5")
+            ranking_top5_raw = raw.get("ranking_top5")
+            full_ranking_raw = raw.get("ranked_matches")
+            ranking_raw = full_ranking_raw if full_ranking_raw is not None else ranking_top5_raw
             operating_raw = raw.get("operating_matches")
             if not isinstance(ranking_raw, list) or not isinstance(operating_raw, list):
                 raise ValueError(f"v3 score row {line_number} has invalid match lists")
+            if full_ranking_raw is not None and (
+                not isinstance(ranking_top5_raw, list) or full_ranking_raw[:5] != ranking_top5_raw
+            ):
+                raise ValueError(
+                    f"v3 score row {line_number} full ranking does not preserve ranking_top5"
+                )
+            available = raw.get("ranked_matches_available", len(ranking_raw))
+            ranked_metadata_present = (
+                full_ranking_raw is not None or "ranked_matches_available" in raw
+            )
+            if (
+                not isinstance(available, int)
+                or isinstance(available, bool)
+                or available != len(ranking_raw)
+                or (ranked_metadata_present and available < 5)
+            ):
+                raise ValueError(
+                    f"v3 score row {line_number} has inconsistent ranked-match metadata"
+                )
+            complete = raw.get("ranked_matches_complete", False)
+            active_count = raw.get("active_hotword_count")
+            if not isinstance(complete, bool) or (
+                complete
+                and (
+                    not isinstance(active_count, int)
+                    or isinstance(active_count, bool)
+                    or active_count != available
+                )
+            ):
+                raise ValueError(
+                    f"v3 score row {line_number} has invalid ranking completeness metadata"
+                )
             rows.append(
                 CaseScore(
                     case_id=case_id,
@@ -738,6 +772,7 @@ def score_multi_nested_cases(
     posterior_weight: float = 0.25,
     minimum_posterior_confidence: float = 0.0,
     minimum_top1_margin: float = 0.0,
+    saved_ranked_matches: int = 5,
 ) -> dict[str, object]:
     import torch
     from torch.nn.utils.rnn import pad_sequence
@@ -764,6 +799,12 @@ def score_multi_nested_cases(
         or minimum_top1_margin != 0.0
     ):
         raise ValueError("v3 scoring parameters are fixed and cannot be tuned in this run")
+    if (
+        not isinstance(saved_ranked_matches, int)
+        or isinstance(saved_ranked_matches, bool)
+        or not top_k <= saved_ranked_matches <= 100
+    ):
+        raise ValueError("saved_ranked_matches must be between Top-K and 100")
     destination = Path(output_dir).expanduser()
     destination.mkdir(parents=True, exist_ok=True)
     incompatible = {
@@ -839,7 +880,12 @@ def score_multi_nested_cases(
                         blank_id=0,
                     )
                     all_ranked = result.ranked_matches
-                    ranked = all_ranked[:top_k]
+                    if len(all_ranked) < saved_ranked_matches:
+                        raise RuntimeError(
+                            f"case {case.case_id} produced {len(all_ranked)} ranked matches, "
+                            f"cannot save {saved_ranked_matches}"
+                        )
+                    ranked = all_ranked[:saved_ranked_matches]
                     operating = tuple(
                         match
                         for match in all_ranked
@@ -921,9 +967,14 @@ def score_multi_nested_cases(
             "minimum_posterior_confidence": minimum_posterior_confidence,
             "minimum_phonemes": minimum_phonemes,
             "minimum_top1_margin": minimum_top1_margin,
+            "saved_ranked_matches": saved_ranked_matches,
+            "ranked_matches_complete": saved_ranked_matches == 100,
             "time_axis": "temporal_upsample_2x_only",
         },
-        "ranking_definition": "forced Top-5 without score threshold; not a deployment trigger",
+        "ranking_definition": "metrics use forced Top-5 without score threshold",
+        "saved_ranking_definition": (
+            f"top {saved_ranked_matches} pre-Operating matches saved per 100-hotword case"
+        ),
         "operating_definition": "threshold=0.86 plus edit/posterior guards, capped at Top-5",
         "ground_truth_definitions": {
             "containment": "all naturally spoken complete nested members count as expected",
@@ -961,10 +1012,11 @@ def score_multi_nested_cases(
         },
         "metrics": metrics,
         "case_scores_path": str(score_path),
+        "case_scores_sha256": _sha256_file(score_path),
         "scoring_seconds": time.monotonic() - started,
         "limitations": [
             "natural validation only; no speaker-disjoint claim",
-            "ranking Top-5 forces candidates even for negative audio",
+            "ranking metrics force Top-5 candidates even for negative audio",
             "no production longest-match suppression is applied",
         ],
         "execution_status": "pass",
@@ -1498,7 +1550,7 @@ def _score_row(
     score: CaseScore,
     family_by_id: Mapping[str, HotwordFamily],
 ) -> dict[str, object]:
-    ranking_ids = [match.hotword_id for match in score.ranked_matches]
+    ranking_ids = [match.hotword_id for match in score.ranked_matches[:5]]
     operating_ids = [match.hotword_id for match in score.operating_matches]
     family_ids = {
         item
@@ -1516,7 +1568,11 @@ def _score_row(
         "primary_group": case.primary_group,
         "effective_time_steps": score.effective_time_steps,
         "decoded_token_count": score.decoded_token_count,
-        "ranking_top5": [match.to_dict() for match in score.ranked_matches],
+        "ranking_top5": [match.to_dict() for match in score.ranked_matches[:5]],
+        "ranked_matches": [match.to_dict() for match in score.ranked_matches],
+        "ranked_matches_available": len(score.ranked_matches),
+        "ranked_matches_complete": len(score.ranked_matches) == len(case.active_hotword_ids),
+        "active_hotword_count": len(case.active_hotword_ids),
         "operating_matches": [match.to_dict() for match in score.operating_matches],
         "ranking_containment_hits": [
             item for item in ranking_ids if item in case.containment_expected_ids

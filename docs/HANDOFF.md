@@ -1,5 +1,147 @@
 # 工作交接记录
 
+## 0.65 2026-09-03 葡语v3完整100名shortlist与无截断标定入口
+
+0.64的截断Top-5标定已经证明：现有证据下没有同时保持新Head 95.54% Precision和0%
+负例FPR的Recall增益；0.83点只能以约1.32个百分点Precision换取约5.12个百分点Recall。
+为排除4个非精确点以及Top-5门控后补位不可见的问题，本轮只扩展v3评分产物的可审计
+保存深度，不改变声学模型、CTC解码、热词打分、门控、指标或Prompt算法。
+
+`scripts/evaluate_multi_nested_hotwords.py`新增`--saved-ranked-matches`，默认仍为5；只有本轮
+新目录显式传100。每条case仍保留兼容字段`ranking_top5`，同时新增`ranked_matches`、
+`ranked_matches_available`、`ranked_matches_complete`和`active_hotword_count`。评分器会要求
+每条100词case实际产生100个候选，否则失败，不把不完整文件标成complete。报告新增保存
+深度、complete标志和case-scores SHA256。旧Top-5 JSONL仍可原样读取；新加载器会验证完整
+排名的前五项与`ranking_top5`严格一致、available数量一致以及complete/active数量一致。
+
+0.63标定器同步改为动态识别保存深度。旧Top-5文件仍按逐点充分条件判断是否精确，完整
+100名文件则所有门控点直接具备精确证据；Top-K上限由实际保存深度决定。本轮完整标定显式
+加入Top-7，以对应formal100的D5/D7差异，但仍不预设必须达到的目标。
+
+先拉取本轮提交并确认HEAD，然后在全新目录做一次CTC-only评分。只加载三语best CTC Head
+和已有葡语validation feature cache，不加载Qwen3-ASR完整模型、不提取Encoder特征、不训练、
+不读test，也不覆盖0.61的Top-5分数：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+GPU_ID=3
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+PT_ROOT=outputs/noah_pt_full_training_v1
+PT_VALIDATION_CACHE="$PT_ROOT/features_ln_post_bf16/validation"
+PT_VALIDATION_MANIFEST="$PT_ROOT/full_ctc_validation.jsonl"
+PT_DICTIONARY=outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict
+
+V3_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested"
+V3_MULTILINGUAL_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_v1"
+CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+
+V3_FULL_RANK_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_full_rank_v1"
+V3_FULL_CALIBRATION_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_calibration_full_rank_v1"
+
+test -f "$CTC_CHECKPOINT"
+test -f "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+test ! -e "$V3_FULL_RANK_ROOT"
+test ! -e "$V3_FULL_CALIBRATION_ROOT"
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/evaluate_multi_nested_hotwords.py \
+  --validation-cache "$PT_VALIDATION_CACHE" \
+  --validation-manifest "$PT_VALIDATION_MANIFEST" \
+  --dictionary "$PT_DICTIONARY" \
+  --vocab "$VOCAB" \
+  --checkpoint "$CTC_CHECKPOINT" \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --asset-summary "$V3_ROOT/asset_summary_v3.json" \
+  --output-dir "$V3_FULL_RANK_ROOT" \
+  --device cuda:0 \
+  --batch-size 128 \
+  --saved-ranked-matches 100
+
+python scripts/rebuild_multi_nested_hotword_report.py \
+  --vocab "$VOCAB" \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --case-scores "$V3_FULL_RANK_ROOT/hotword_case_scores_v3.jsonl" \
+  --base-report "$V3_FULL_RANK_ROOT/multi_nested_evaluation_report_v3.json" \
+  --output "$V3_FULL_RANK_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+
+(cd "$V3_FULL_RANK_ROOT" && sha256sum \
+  hotword_case_scores_v3.jsonl \
+  multi_nested_evaluation_report_v3.json \
+  multi_nested_evaluation_report_v3_corrected.json > sha256.txt)
+```
+
+随后CPU-only做完整排名标定。加入Top-7后为4 × 21 × 4 = 336点：
+
+```bash
+python scripts/calibrate_v3_operating_points.py \
+  --vocab "$VOCAB" \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --case-scores "$V3_FULL_RANK_ROOT/hotword_case_scores_v3.jsonl" \
+  --candidate-report "$V3_FULL_RANK_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --reference-report "$V3_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --top-ks 1,3,5,7 \
+  --output-dir "$V3_FULL_CALIBRATION_ROOT"
+```
+
+两个工具都拒绝覆盖已有结果且没有resume。若CTC评分中断，不要删除目录或猜测续跑；先把
+错误和目录文件名回传。本轮无需发送任何文件，只运行以下精简命令并粘贴输出：
+
+```bash
+(cd "$V3_FULL_RANK_ROOT" && sha256sum -c sha256.txt)
+(cd "$V3_FULL_CALIBRATION_ROOT" && sha256sum -c sha256.txt)
+
+jq '{
+  checkpoint_sha256,
+  case_scores_sha256,
+  scoring_config,
+  overall: .metrics.overall.operating
+}' "$V3_FULL_RANK_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+
+jq '{
+  status,
+  case_count,
+  hotword_count,
+  saved_rank_depth,
+  ranked_matches_complete,
+  sweep_point_count,
+  exact_point_count,
+  non_exact_point_count,
+  pareto_point_count,
+  guarded_recall_gain_candidate_available,
+  candidate_baseline: .candidate_baseline.overall,
+  reference_baseline: .reference_baseline.overall,
+  recommended_candidates: [
+    .recommended_candidates[] | {
+      role,
+      config,
+      overall: .metrics.overall,
+      delta_from_candidate_baseline,
+      delta_from_reference_baseline
+    }
+  ],
+  replay_limitation,
+  next_action
+}' "$V3_FULL_CALIBRATION_ROOT/candidate_summary.json"
+```
+
+预期身份是三语best checkpoint
+`bd9df8072b7efe7fafa599e958bbd7ca8405b289d0a353913d865340764d01a0`，评分配置必须显示
+`saved_ranked_matches=100`和`ranked_matches_complete=true`；标定应有336/336精确点、0个
+非精确点。收到精简输出后再决定是否选0.83、其他D5/D7点或保持0.86；仍不自动重跑C/E。
+
+本轮本地验证：完整排名加载/兼容、序列化、Top-7标定和既有formal Prompt共14项定向测试
+通过；全量pytest 228项通过；两个相关核心模块strict Mypy、相关文件Ruff与format、两个CLI
+help和`git diff --check`通过。全仓既有3个G2P长行、2个用户未跟踪PPT临时脚本长行及6个
+旧模块的11项Mypy问题未在本轮修改。没有在本机加载模型或伪造完整排名结果。
+
 ## 0.64 2026-09-03 三语CTC Head葡语v3截断Top-5标定结果
 
 工作区已使用0.63提交的CPU-only标定器完成252个组合。输出目录五个文件均通过

@@ -40,6 +40,15 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument(
+        "--saved-ranked-matches",
+        type=int,
+        default=5,
+        help=(
+            "Number of pre-Operating ranked matches saved per case. Use 100 in a new "
+            "output directory for exact offline gate calibration."
+        ),
+    )
     parser.add_argument("--skip-cache-sha256-verification", action="store_true")
     args = parser.parse_args()
     try:
@@ -75,6 +84,7 @@ def main() -> int:
             cases_path=args.cases,
             asset_summary_path=args.asset_summary,
             batch_size=args.batch_size,
+            saved_ranked_matches=args.saved_ranked_matches,
         )
     except (
         FileExistsError,
