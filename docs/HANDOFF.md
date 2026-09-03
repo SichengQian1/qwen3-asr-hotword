@@ -1,5 +1,93 @@
 # 工作交接记录
 
+## 0.62 2026-09-03 三语CTC Head葡语4k formal100替换回归结果
+
+工作区已按0.61完成checkpoint审计、三语validation诊断、葡语v3 CTC评分、
+4k formal100六组端到端回归和最后的CPU对比。对比器首次运行因将子目录
+`README.md`错解为仓库根文件而产生假SHA mismatch；这是只读校验器路径解析问题，
+不是工作区产物损坏。修复提交
+`e1c658f5ff6de73da0ffba7b3b42db1e3c8dea79`后只重跑CPU汇总即通过，
+没有重跑模型或覆盖旧suite。
+
+三语最终best checkpoint为epoch 24，SHA256为
+`bd9df8072b7efe7fafa599e958bbd7ca8405b289d0a353913d865340764d01a0`，文件大小
+3,360,421 bytes。训练从epoch 5 resume，请求35 epoch，在epoch 26早停；final比best的
+Macro PER只高0.0083个百分点，可认为已进入平台。与0.47的5 epoch pilot相比：
+
+| 指标 | 5 epoch pilot | 最终best epoch 24 | 改善 |
+| --- | ---: | ---: | ---: |
+| Mixed validation PER | 7.417% | 6.616% | -0.801 pp |
+| Macro PER | 6.894% | 6.103% | -0.791 pp |
+| English PER | 5.652% | 4.736% | -0.916 pp |
+| Spanish PER | 4.275% | 3.910% | -0.365 pp |
+| Portuguese PER | 10.755% | 9.662% | -1.093 pp |
+
+最终诊断完整消费8,101条validation和370,931个参考音素，总错误24,539：
+substitution/deletion/insertion分别11,013/9,500/4,026。葡语占参考音素约44.03%，
+但产生15,780个错误，占总错误约64.31%，仍是明显最差组。葡语预测/参考长度比
+0.9728，比0.46时的0.9412有改善，但删除仍有6,867个。CTC压力分桶PER为：
+低压力5.647%、中压力11.068%、高压力24.473%（高压力仅15条）。
+
+葡语v3纯CTC使用原自然validation的210条case、500词和0.86/Top-5固定口径，
+新报告checkpoint SHA与三语best一致。与0.11旧葡语Head相比：
+
+| 纯CTC v3指标 | 旧葡语Head | 新三语Head | 变化 |
+| --- | ---: | ---: | ---: |
+| Forced Ranking Recall@5 | 95.37% | 94.88% (389/410) | 约-0.49 pp |
+| Operating Recall | 83.17% | 78.29% (321/410) | 约-4.88 pp |
+| Operating Precision | 96.06% | 95.54% (321/336) | 约-0.52 pp |
+| Positive-case hit rate | 未单独记录 | 92.78% | — |
+| Negative-case FPR | 0% | 0% | 0 pp |
+| All-3-Hit@5 | 80% | 80% | 0 pp |
+| Slot crowding loss | 0% | 1.67% | +1.67 pp |
+
+新Head的Forced Top-5只少找回2/410个真词，但固定0.86 Operating gate少通过约20个
+真词；Precision和负例FPR几乎不变。这证明葡语回退主要是新Head的分数/置信度
+标定与旧门槛不再匹配，不是Top-5排序能力崩坏，也不支持直接重训的结论。
+
+4k formal100对比完整通过以下身份验证：两套checkpoint不同，两份CTC报告分别绑定
+对应checkpoint，root/child配置除checkpoint、派生报告、Git和显存分配外一致，六组
+样本选择完全一致，源SHA全部验证通过。C no-RAG和E Oracle质量逐字段相同，
+因此D组差值可作为checkpoint替换结论。候选注入或预测变化的profile-case行共207条。
+
+| 配置 | Prompt Recall 旧→新 | 最终Recall 旧→新 | 最终Precision 旧→新 | 新Head负样本幻觉率 |
+| --- | ---: | ---: | ---: | ---: |
+| D5 conservative | 84.30% → 80.23% | 91.28% → 91.86% | 80.93% → 82.72% | 0% |
+| D7 balanced | 88.37% → 84.88% | 91.28% → 90.12% | 80.93% → 82.01% | 0% |
+| D5 recall-first | 91.28% → 87.21% | 91.28% → 90.12% | 80.93% → 81.15% | 0% |
+| D7 recall-first | 93.60% → 88.37% | 93.02% → 91.86% | 80.00% → 80.20% | 5% |
+
+新Head四个D组的正确Prompt注入分别比旧Head少7/6/7/9个，与纯CTC Operating Recall
+回退一致。最终文本因base ASR和Qwen Prompt采用而部分遮蔽了检索损失；D5 conservative
+甚至最终Recall增加0.58 pp、Precision增加1.79 pp。但最高召回口径D7 recall-first仍从
+160/172降到158/172，且出现1/20级别的纯负样本最终幻觉；它不再比D5 conservative
+提供更高最终Recall，却只有80.20% Precision。
+
+新suite四个D组纯检索P95均继续满足`<50 ms`：conservative 37.32 ms、balanced
+38.00 ms、D5 recall-first 35.15 ms、D7 recall-first 37.57 ms。balanced和D7 recall-first的
+P99分别约50.52/51.85 ms，但当前验收目标始终是P95，不将P99偷换成失败。两次
+独立H200运行的latency不用于声称Head性能因果改善或退化。
+
+本轮正式结论：
+
+- 三语Macro训练成功收敛，英/西/葡PER全部比5 epoch继续下降；
+- 新三语Head目前不能在不加限定的情况下宣称替代葡语专用Head，因为葡语Prompt
+  Recall明确下降；
+- 若必须直接部署当前统一三语Head，葡语暂选D5 conservative，而不是D7
+  recall-first；
+- 下一个最小任务应优先复用已有v3 case scores做新Head的葡语threshold/posterior/Top-K
+  离线标定，目标是恢复Operating Recall且不牺牲Precision/FPR；
+- 标定选出1至2个候选点后再决定是否重跑少量葡语D组端到端；不盲目重跑C/E或
+  完整六组；
+- 英语和西语目前只有validation PER，还没有与葡语formal100等价的端到端资产，
+  不得从本次葡语结果外推两语端到端质量。
+
+本轮结果汇总目录为
+`outputs/noah_pt_full_training_v1/hotword_capacity_eval_v1/streaming_checkpoint_regression_multilingual_ctc_v1`，
+`checkpoint_regression_summary.json`、`checkpoint_regression_cases.jsonl`和`README.md`的SHA256已全部通过。
+这些outputs继续只保留在H200工作区，不提交Git。本地只记录用户回传的经身份验证
+汇总，没有伪造或重生成工作区结果。在用户确认下一任务前，不开始新的标定或英/西语实验。
+
 ## 0.61 2026-09-03 三语CTC Head定稿审计与葡语4k formal100替换回归
 
 本轮启动已完成英/西/葡混合训练Head的端到端验证，但工作区30 epoch resume后的
