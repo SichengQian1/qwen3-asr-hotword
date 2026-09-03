@@ -1,5 +1,66 @@
 # 工作交接记录
 
+## 0.74 2026-09-03 英西葡4k formal100三语端到端结果
+
+0.69三语C/D5/E端到端流程在0.70--0.73入口修正后完成。最终轻量汇总为：
+
+```text
+outputs/en_es_pt_streaming_e2e_4k_formal100_v1/
+  summary/multilingual_e2e_summary.json
+```
+
+汇总`status=pass`、`test_set_used=false`；英/西/葡各100条、合计300条，
+C/D/E在各语种内使用相同样本，跨语种sample ID overlap为0。三语共用CTC
+checkpoint SHA256：
+
+```text
+bd9df8072b7efe7fafa599e958bbd7ca8405b289d0a353913d865340764d01a0
+```
+
+D固定为`threshold=0.86 / posterior=0 / Top-5`，其余门控参数为
+`maximum_edit_ratio=0.35 / posterior_weight=0.25 / margin=0`。三语运行的
+SHA256 manifest均已由汇总器验证。
+
+三语micro热词计数和语言等权macro文本指标：
+
+| 组 | Prompt Recall | 正确Prompt采用率 | 错误Prompt落地率 | 最终热词Recall | 最终热词Precision | 样本命中率macro | WER macro | CER macro | 纯负样本幻觉率macro |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C no-RAG | 0/516 = 0% | N/A | N/A | 480/516 = 93.02% | N/A | 86.67% | 5.47% | 2.06% | 0% |
+| D D5 | 439/516 = 85.08% | 430/439 = 97.95% | 102/416 = 24.52% | 489/516 = 94.77% | 489/(489+102) = 82.74% | 90.00% | 5.04% | 1.92% | 0% |
+| E Oracle | 516/516 = 100% | 497/516 = 96.32% | N/A | 497/516 = 96.32% | 100% | 92.92% | 4.80% | 1.87% | 0% |
+
+D相对C增加9个最终热词命中，Recall绝对提升1.744个百分点；C到Oracle共有
+17个可见增益，因此D恢复9/17约52.9%，距Oracle仍差8个命中、1.550个百分点。
+D相对C的WER macro下降0.422个百分点，CER macro下降0.146个百分点。
+
+分语种D5关键结果：
+
+| 语种 | C/D/E最终命中 | D Prompt Recall | D正确Prompt采用率 | D错误Prompt落地率 | D最终Recall | D最终Precision | D WER | D CER |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| English | 165/167/171 | 151/172 = 87.79% | 149/151 = 98.68% | 33/84 = 39.29% | 97.09% | 83.50% | 2.57% | 1.03% |
+| Spanish | 165/170/171 | 156/172 = 90.70% | 156/156 = 100% | 33/180 = 18.33% | 98.84% | 83.74% | 2.65% | 0.78% |
+| Portuguese | 150/152/155 | 132/172 = 76.74% | 125/132 = 94.70% | 36/152 = 23.68% | 88.37% | 80.85% | 9.92% | 3.94% |
+
+结论：
+
+- D5在三个语种都提高最终热词Recall，且纯负样本幻觉率保持0；
+- Spanish最接近Oracle；Portuguese是当前三语短板，Prompt Recall、最终Recall、
+  Precision和WER均最弱，且D相对C仅增加2个命中；
+- 正确热词一旦进Prompt，三语micro采用率为97.95%，主要缺口首先是检索未注入
+  `77/516`个期望热词；
+- 同时416个错误注入中有102个写入最终文本。0%纯负样本幻觉与24.52%错误
+  Prompt落地并不矛盾：后者主要发生在有正确热词的正样本，继续支持同族、嵌套、
+  近邻冲突是Precision主因的判断；
+- D与C的`mean_inference_seconds`差约68 ms/sample，但它是整条样本推理均值，
+  不能替代或重新定义纯检索P95<50 ms口径。
+
+本轮与旧葡语formal100使用不同的三语validation子集、单语资产和共享三语CTC
+checkpoint，不能把葡语88.37%直接与旧葡语91.86%作同测试集回归结论。
+
+下一步优先做只读case归因：按语种把D相对C新增命中、D仍缺失而E命中的8项、
+77项Prompt未覆盖，以及102项错误落地按family/nested/near-neighbor分类。先从
+Portuguese未覆盖和English高错误落地率入手；归因前不再扫描门控参数或重跑模型。
+
 ## 0.73 2026-09-03 三语streaming汇总字段兼容修正
 
 英、西、葡三套C/D/E streaming运行完成后，最终轻量汇总在读取单语
