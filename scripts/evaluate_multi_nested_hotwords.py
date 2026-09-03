@@ -30,6 +30,14 @@ def main() -> int:
     )
     parser.add_argument("--validation-cache", required=True)
     parser.add_argument("--validation-manifest", required=True)
+    parser.add_argument(
+        "--cache-source-manifest",
+        help=(
+            "Manifest used to build the validation cache. Defaults to "
+            "--validation-manifest; set this when scoring a single-language subset "
+            "from a combined multilingual cache."
+        ),
+    )
     parser.add_argument("--dictionary", required=True)
     parser.add_argument("--vocab", default=str(DEFAULT_VOCAB))
     parser.add_argument("--checkpoint", required=True)
@@ -63,7 +71,7 @@ def main() -> int:
         cache = load_disk_feature_cache(
             args.validation_cache,
             expected_split="validation",
-            source_manifest_path=args.validation_manifest,
+            source_manifest_path=args.cache_source_manifest or args.validation_manifest,
             vocab_path=args.vocab,
             verify_sha256=not args.skip_cache_sha256_verification,
         )

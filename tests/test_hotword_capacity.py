@@ -656,8 +656,7 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     assert quality["representative"]["100"]["operating_precision_at_5"] == 1.0
     assert quality["representative"]["101"]["raw_recall_at_5"] == 1.0
     query_rows = [
-        json.loads(line)
-        for line in (benchmark / "query_results.jsonl").read_text().splitlines()
+        json.loads(line) for line in (benchmark / "query_results.jsonl").read_text().splitlines()
     ]
     assert all("raw_top7_ids" in row for row in query_rows)
     assert all("raw_top10_ids" in row for row in query_rows)
@@ -697,15 +696,51 @@ def test_capacity_assets_are_nested_train_only_and_replay_benchmark_is_determini
     assert exact_quality["representative"]["101"]["exact_precision_at_5"] == 1.0
     assert exact_quality["representative"]["101"]["exact_precision_at_7"] == 1.0
     assert exact_quality["representative"]["101"]["exact_precision_at_10"] == 1.0
-    exact_performance = json.loads(
-        (exact_benchmark / "performance_summary.json").read_text()
-    )
+    exact_performance = json.loads((exact_benchmark / "performance_summary.json").read_text())
     assert exact_performance["representative"]["101"]["index"]["patterns"] >= 101
-    assert exact_performance["representative"]["101"]["performance"][
-        "retrieval_seconds"
-    ]["count"] == 2
+    assert (
+        exact_performance["representative"]["101"]["performance"]["retrieval_seconds"]["count"] == 2
+    )
     assert (exact_benchmark / "query_results.jsonl").is_file()
     assert (exact_benchmark / "sha256.txt").is_file()
+
+
+def test_capacity_assets_support_english_without_changing_portuguese_default(
+    tmp_path: Path,
+) -> None:
+    paths = _capacity_inputs(tmp_path)
+    base_rows = [
+        {**json.loads(line), "language": "English"}
+        for line in paths["base_cases"].read_text(encoding="utf-8").splitlines()
+    ]
+    _write_jsonl(paths["base_cases"], base_rows)
+    vocab = load_phoneme_vocab(paths["vocab"])
+    base_entries = load_hotword_table(paths["base_hotwords"], vocab=vocab)
+    write_hotword_table(
+        paths["base_hotwords"],
+        [HotwordEntry(**{**entry.__dict__, "language": "English"}) for entry in base_entries],
+    )
+
+    output = tmp_path / "english-assets"
+    build_hotword_capacity_assets(
+        training_manifest_path=paths["train"],
+        dictionary_path=paths["dictionary"],
+        vocab_path=paths["vocab"],
+        base_hotwords_path=paths["base_hotwords"],
+        base_cases_path=paths["base_cases"],
+        output_dir=output,
+        sizes=(100, 101),
+        candidate_pool_multiplier=2,
+        print_progress=False,
+        language="English",
+    )
+
+    config = json.loads((output / "run_config.json").read_text(encoding="utf-8"))
+    assert config["language"] == "English"
+    entries = load_hotword_table(output / "representative/size_101/hotwords.jsonl", vocab=vocab)
+    added = [entry for entry in entries if entry.source == "capacity_v1_train_only_real_ngram"]
+    assert added and all(entry.language == "English" for entry in added)
+    assert all(entry.hotword_id.startswith("capacity_english_") for entry in added)
 
 
 def test_capacity_asset_builder_rejects_sealed_test_manifest(tmp_path: Path) -> None:

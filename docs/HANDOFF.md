@@ -1,5 +1,315 @@
 # 工作交接记录
 
+## 0.69 2026-09-03 英西葡4k formal100三语端到端C/D5/E入口
+
+0.68已将葡语门控收口为D5 `threshold=0.86 / posterior=0 / Top-5`；
+两个D7均不保留。本轮不再扫描葡语threshold、posterior或Top-K，不训练，
+不读sealed test，不改检索/提示词算法。目标是用三语平衡validation给英、西、
+葡各构造一套独立formal100/4k资产，在完全相同的三语CTC Head和D5参数下
+只跑：
+
+```text
+C: streaming no-RAG
+D: streaming 4k Anchor RAG, 0.86 / posterior 0 / Top-5
+E: streaming Oracle prompt
+```
+
+每语种固定100条（formal100的肯定/否定样本选择规则不变），最终同时保留
+分语种指标和三语汇总。热词数、Prompt Recall和最终Recall/Precision用三语
+micro计数；WER/CER用三个语种等权macro，避免文本长度不同让某一语种主导。
+
+新增实现：
+
+- `scripts/export_manifest_mfa_dictionary.py`从已有train/validation Manifest的
+  `word_pronunciations` 导出MFA格式词典；它不运行G2P，不读test，并记录
+  跨来源发音分歧。同词多发音时只为评测资产确定性选择Manifest中频次最高者，
+  并用字典序打破平局；不回写训练Manifest。
+- `build_hotword_capacity_assets` 现显式支持English/Spanish/Portuguese，
+  保持原葡语默认调用兼容。
+- `scripts/evaluate_multi_nested_hotwords.py` 增加可选
+  `--cache-source-manifest`，允许从由三语合并Manifest建立的validation cache中评分
+  单语种子集；单语种Manifest仍作为case/report身份。
+- `scripts/summarize_multilingual_streaming_e2e.py` 会校验三个子运行的
+  `sha256.txt`、样本一致性、C/D/E组、D5参数和共享checkpoint SHA，然后输出
+  `multilingual_e2e_summary.json`。
+
+工区先拉取并确认最终提交SHA：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+以下目录全部是新产物，不覆盖任何旧outputs。首次开始时执行初始检查；
+中断后不要重新执行`test ! -e "$TRI_E2E_ROOT"`，只从尚未生成的子阶段继续。
+已完成的普通子阶段不重跑；最后streaming阶段使用`--resume`粒度续跑，
+不删除sample shards。
+
+```bash
+GPU_ID=3
+MODEL=/glusterfs_103/models/Qwen3-ASR-1.7B
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+BALANCED_TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+TRI_E2E_ROOT=outputs/en_es_pt_streaming_e2e_4k_formal100_v1
+
+test -f "$MODEL/config.json"
+test -f "$CTC_CHECKPOINT"
+test -f "$BALANCED_TRAIN_ROOT/full_ctc_train_en.jsonl"
+test -f "$BALANCED_TRAIN_ROOT/full_ctc_train_es.jsonl"
+test -f "$BALANCED_TRAIN_ROOT/full_ctc_train_pt.jsonl"
+test -f "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl"
+test -f "$BALANCED_VALIDATION_ROOT/full_ctc_validation_en.jsonl"
+test -f "$BALANCED_VALIDATION_ROOT/full_ctc_validation_es.jsonl"
+test -f "$BALANCED_VALIDATION_ROOT/full_ctc_validation_pt.jsonl"
+test -f "$FEATURE_CACHE_ROOT/validation/cache_summary.json"
+test ! -e "$TRI_E2E_ROOT"
+mkdir -p "$TRI_E2E_ROOT"
+
+declare -A LANGUAGE=( [en]=English [es]=Spanish [pt]=Portuguese )
+declare -A TRAIN=(
+  [en]="$BALANCED_TRAIN_ROOT/full_ctc_train_en.jsonl"
+  [es]="$BALANCED_TRAIN_ROOT/full_ctc_train_es.jsonl"
+  [pt]="$BALANCED_TRAIN_ROOT/full_ctc_train_pt.jsonl"
+)
+declare -A VALIDATION=(
+  [en]="$BALANCED_VALIDATION_ROOT/full_ctc_validation_en.jsonl"
+  [es]="$BALANCED_VALIDATION_ROOT/full_ctc_validation_es.jsonl"
+  [pt]="$BALANCED_VALIDATION_ROOT/full_ctc_validation_pt.jsonl"
+)
+declare -A PROMPT=(
+  [en]='The following words may appear in the audio and are spelling references only. Use them only if they are actually spoken; do not force them into the transcription: {hotwords}'
+  [es]='Las siguientes palabras pueden aparecer en el audio y solo sirven como referencia ortográfica. Úsalas únicamente si realmente se pronuncian; no las incluyas a la fuerza en la transcripción: {hotwords}'
+  [pt]='As palavras a seguir podem aparecer no áudio e servem apenas como referência de grafia. Use-as somente se forem realmente faladas; não as inclua à força na transcrição: {hotwords}'
+)
+```
+
+第一步只从已有MFA Manifest标注导出三份评测词典，无需GPU：
+
+```bash
+for CODE in en es pt; do
+  python scripts/export_manifest_mfa_dictionary.py \
+    --manifest "${TRAIN[$CODE]}" \
+    --manifest "${VALIDATION[$CODE]}" \
+    --language "$CODE" \
+    --output-dir "$TRI_E2E_ROOT/dictionary_$CODE" || break
+done
+
+for CODE in en es pt; do
+  (cd "$TRI_E2E_ROOT/dictionary_$CODE" && sha256sum -c sha256.txt) || break
+done
+```
+
+第二步构建三套单语种v3自然validation资产，无需GPU。任一语种
+`status != pass`或nested critical group少于10时停止，不降低formal口径：
+
+```bash
+for CODE in en es pt; do
+  python scripts/build_multi_nested_hotword_eval.py \
+    --validation-manifest "${VALIDATION[$CODE]}" \
+    --dictionary "$TRI_E2E_ROOT/dictionary_$CODE/manifest_mfa_dictionary.dict" \
+    --vocab "$VOCAB" \
+    --output-dir "$TRI_E2E_ROOT/assets_$CODE" \
+    --seed 20260804 || break
+done
+
+jq -s 'map({status, validation_records, candidate_hotwords, selected_hotwords,
+  nested_families, total_cases, actual_case_counts, conclusion_scope})' \
+  "$TRI_E2E_ROOT"/assets_*/asset_summary_v3.json
+```
+
+第三步在现有三语validation feature cache上只跑共享CTC Head，不加载完整
+Qwen；三个单语种Manifest只是合并cache的子集：
+
+```bash
+for CODE in en es pt; do
+  CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/evaluate_multi_nested_hotwords.py \
+    --validation-cache "$FEATURE_CACHE_ROOT/validation" \
+    --cache-source-manifest "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl" \
+    --validation-manifest "${VALIDATION[$CODE]}" \
+    --dictionary "$TRI_E2E_ROOT/dictionary_$CODE/manifest_mfa_dictionary.dict" \
+    --vocab "$VOCAB" \
+    --checkpoint "$CTC_CHECKPOINT" \
+    --hotwords "$TRI_E2E_ROOT/assets_$CODE/multi_nested_hotwords_v3.jsonl" \
+    --families "$TRI_E2E_ROOT/assets_$CODE/hotword_families_v3.jsonl" \
+    --cases "$TRI_E2E_ROOT/assets_$CODE/multi_nested_cases_v3.jsonl" \
+    --asset-summary "$TRI_E2E_ROOT/assets_$CODE/asset_summary_v3.json" \
+    --output-dir "$TRI_E2E_ROOT/ctc_$CODE" \
+    --device cuda:0 \
+    --batch-size 128 || break
+
+  python scripts/rebuild_multi_nested_hotword_report.py \
+    --vocab "$VOCAB" \
+    --hotwords "$TRI_E2E_ROOT/assets_$CODE/multi_nested_hotwords_v3.jsonl" \
+    --families "$TRI_E2E_ROOT/assets_$CODE/hotword_families_v3.jsonl" \
+    --cases "$TRI_E2E_ROOT/assets_$CODE/multi_nested_cases_v3.jsonl" \
+    --case-scores "$TRI_E2E_ROOT/ctc_$CODE/hotword_case_scores_v3.jsonl" \
+    --base-report "$TRI_E2E_ROOT/ctc_$CODE/multi_nested_evaluation_report_v3.json" \
+    --output "$TRI_E2E_ROOT/ctc_$CODE/multi_nested_evaluation_report_v3_corrected.json" || break
+
+  (cd "$TRI_E2E_ROOT/ctc_$CODE" && sha256sum \
+    hotword_case_scores_v3.jsonl \
+    multi_nested_evaluation_report_v3.json \
+    multi_nested_evaluation_report_v3_corrected.json > sha256.txt) || break
+done
+```
+
+第四步为每语种只生成同一formal100选择及A/B/E离线控制报告，后面的
+streaming只借用它的样本选择和Oracle定义。这一步会按语种顺序各加载一次
+Qwen3-ASR-1.7B：
+
+```bash
+for CODE in en es pt; do
+  CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_multi_nested_prompt_eval.py \
+    --model "$MODEL" \
+    --validation-manifest "${VALIDATION[$CODE]}" \
+    --vocab "$VOCAB" \
+    --hotwords "$TRI_E2E_ROOT/assets_$CODE/multi_nested_hotwords_v3.jsonl" \
+    --families "$TRI_E2E_ROOT/assets_$CODE/hotword_families_v3.jsonl" \
+    --cases "$TRI_E2E_ROOT/assets_$CODE/multi_nested_cases_v3.jsonl" \
+    --ctc-case-scores "$TRI_E2E_ROOT/ctc_$CODE/hotword_case_scores_v3.jsonl" \
+    --ctc-report "$TRI_E2E_ROOT/ctc_$CODE/multi_nested_evaluation_report_v3_corrected.json" \
+    --output-dir "$TRI_E2E_ROOT/offline_$CODE" \
+    --selection-profile formal100 \
+    --retrieval-mode operating \
+    --language "${LANGUAGE[$CODE]}" \
+    --prompt-template "${PROMPT[$CODE]}" \
+    --dtype bfloat16 \
+    --device cuda:0 || break
+done
+```
+
+第五步只构建100/4k两档单语种容量资产，不再生成500/1k/2k/5k/10k，
+无需GPU：
+
+```bash
+for CODE in en es pt; do
+  python scripts/build_hotword_capacity_assets.py \
+    --training-manifest "${TRAIN[$CODE]}" \
+    --dictionary "$TRI_E2E_ROOT/dictionary_$CODE/manifest_mfa_dictionary.dict" \
+    --language "${LANGUAGE[$CODE]}" \
+    --vocab "$VOCAB" \
+    --base-hotwords "$TRI_E2E_ROOT/assets_$CODE/multi_nested_hotwords_v3.jsonl" \
+    --base-cases "$TRI_E2E_ROOT/assets_$CODE/multi_nested_cases_v3.jsonl" \
+    --selection "$TRI_E2E_ROOT/offline_$CODE/sample_selection.json" \
+    --sizes 100,4000 \
+    --output-dir "$TRI_E2E_ROOT/capacity_$CODE" || break
+done
+```
+
+第六步是最终三语端到端，只跑C/D/E。每语种是一个100条×3组的独立
+streaming运行，`--resume`只复用配置完全相同的sample shard。若显存不足，
+先释放同卡其他进程或换`GPU_ID`，不改`gpu-memory-utilization`后强行复用原目录：
+
+```bash
+for CODE in en es pt; do
+  CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_streaming_rag_evaluation.py \
+    --model "$MODEL" \
+    --validation-manifest "${VALIDATION[$CODE]}" \
+    --vocab "$VOCAB" \
+    --hotwords "$TRI_E2E_ROOT/capacity_$CODE/representative/size_4000/hotwords.jsonl" \
+    --cases "$TRI_E2E_ROOT/capacity_$CODE/representative/size_4000/cases.jsonl" \
+    --hotword-families "$TRI_E2E_ROOT/assets_$CODE/hotword_families_v3.jsonl" \
+    --ctc-report "$TRI_E2E_ROOT/ctc_$CODE/multi_nested_evaluation_report_v3_corrected.json" \
+    --offline-rag-dir "$TRI_E2E_ROOT/offline_$CODE" \
+    --offline-format multi_nested_v3 \
+    --offline-control-mode selection_only \
+    --ctc-checkpoint "$CTC_CHECKPOINT" \
+    --output-dir "$TRI_E2E_ROOT/streaming_$CODE" \
+    --groups C,D,E \
+    --chunk-size-sec 2.0 \
+    --unfixed-chunk-num 2 \
+    --unfixed-token-num 5 \
+    --retrieval-mode operating \
+    --retrieval-backend anchor_guided \
+    --anchor-shortlist-size 64 \
+    --anchor-start-radius 2 \
+    --anchor-ngram-sizes 2,3,4 \
+    --anchors-per-entry 24 \
+    --anchor-offset-tolerance 1 \
+    --threshold 0.86 \
+    --top-k 5 \
+    --maximum-edit-ratio 0.35 \
+    --posterior-weight 0.25 \
+    --minimum-posterior-confidence 0 \
+    --minimum-top1-margin 0 \
+    --language "${LANGUAGE[$CODE]}" \
+    --prompt-template "${PROMPT[$CODE]}" \
+    --dtype bfloat16 \
+    --device cuda:0 \
+    --gpu-memory-utilization 0.18 \
+    --resume || break
+done
+```
+
+全部三语streaming通过后做CPU汇总：
+
+```bash
+python scripts/summarize_multilingual_streaming_e2e.py \
+  --language-run en="$TRI_E2E_ROOT/streaming_en" \
+  --language-run es="$TRI_E2E_ROOT/streaming_es" \
+  --language-run pt="$TRI_E2E_ROOT/streaming_pt" \
+  --output-dir "$TRI_E2E_ROOT/summary"
+```
+
+不需要打包或上传任何文件。只需运行下列校验和一个精简查询，将终端
+输出粘贴回来：
+
+```bash
+for CODE in en es pt; do
+  (cd "$TRI_E2E_ROOT/dictionary_$CODE" && sha256sum -c sha256.txt) || break
+  (cd "$TRI_E2E_ROOT/ctc_$CODE" && sha256sum -c sha256.txt) || break
+  (cd "$TRI_E2E_ROOT/offline_$CODE" && sha256sum -c sha256.txt) || break
+  (cd "$TRI_E2E_ROOT/capacity_$CODE" && sha256sum -c sha256.txt) || break
+  (cd "$TRI_E2E_ROOT/streaming_$CODE" && sha256sum -c sha256.txt) || break
+done
+(cd "$TRI_E2E_ROOT/summary" && sha256sum -c sha256.txt)
+
+jq '{
+  status,
+  ctc_checkpoint_sha256,
+  total_sample_count,
+  identity_checks,
+  per_language: (.per_language | with_entries(.value |= {
+    sample_count,
+    C: (.groups.C | {expected_hotwords, final_hotword_recall, wer, cer}),
+    D: (.groups.D | {
+      expected_hotwords,
+      correct_prompt_injected_hotwords,
+      prompt_hotword_recall,
+      correct_prompt_adopted_hotwords,
+      correct_prompt_adoption_rate,
+      wrong_prompt_injected_hotwords,
+      wrong_prompt_written_hotwords,
+      wrong_prompt_landing_rate,
+      final_hotword_recall,
+      final_hotword_precision,
+      negative_hotword_hallucination_rate,
+      wer,
+      cer
+    }),
+    E: (.groups.E | {expected_hotwords, final_hotword_recall,
+      final_hotword_precision, wer, cer}),
+    d_minus_c,
+    e_minus_d
+  })),
+  aggregate
+}' "$TRI_E2E_ROOT/summary/multilingual_e2e_summary.json"
+
+jq -s 'map({language, rows, unique_words, ambiguous_words, dictionary_sha256})' \
+  "$TRI_E2E_ROOT"/dictionary_*/summary.json
+```
+
+返回后只分析三类核心问题：各语种D5的Prompt Recall和最终Recall/Precision；
+D相对C是否改善热词且未显著伤害WER/CER；E与D的差距是检索瓶颈还是
+Qwen采用瓶颈。不追加D7、threshold sweep、容量阶梯或新训练试验。
+
+本地没有加载Qwen/CTC模型，没有生成真实数据或评测outputs，没有修改旧算法、
+训练代码或用户PPT文件。
+
 ## 0.68 2026-09-03 三语CTC Head葡语4k D-only标定候选端到端结果
 
 工区已完成0.67的两个D7候选，`status=pass`、100条formal样本，全部内部身份

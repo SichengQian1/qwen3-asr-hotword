@@ -83,6 +83,7 @@ def build_hotword_capacity_assets(
     candidate_pool_multiplier: int = 3,
     word_count_weights: Mapping[int, float] = DEFAULT_WORD_COUNT_WEIGHTS,
     print_progress: bool = True,
+    language: str = "pt-BR",
 ) -> dict[str, object]:
     resolved_sizes = parse_capacity_sizes(sizes)
     if maximum_ngram_words != 4:
@@ -90,6 +91,7 @@ def build_hotword_capacity_assets(
     if candidate_pool_multiplier < 2:
         raise ValueError("candidate_pool_multiplier must be at least two")
     weights = _validate_weights(word_count_weights)
+    normalized_language = _normalize_language(language)
     paths = {
         "training_manifest": Path(training_manifest_path).expanduser(),
         "dictionary": Path(dictionary_path).expanduser(),
@@ -113,7 +115,8 @@ def build_hotword_capacity_assets(
     if "selection" in paths:
         cases = _select_capacity_cases(cases, paths["selection"])
     base_by_id = {entry.hotword_id: entry for entry in base_entries}
-    _validate_base_contract(cases, base_by_id)
+    _validate_base_contract(cases, base_by_id, language=normalized_language)
+    language_tag = cases[0].language
 
     maximum_size = resolved_sizes[-1]
     reservoir_limits = _word_count_quotas(
@@ -126,6 +129,7 @@ def build_hotword_capacity_assets(
         maximum_ngram_words=maximum_ngram_words,
         seed=seed,
         print_progress=print_progress,
+        language=language_tag,
     )
     occurrence_counts = _count_selected_train_ngrams(
         paths["training_manifest"],
@@ -141,6 +145,7 @@ def build_hotword_capacity_assets(
         vocab=vocab,
         base_entries=base_entries,
         seed=seed,
+        language=language_tag,
     )
     representative_order = _representative_order(candidates, weights=weights, seed=seed)
     if len(representative_order) < maximum_size:
@@ -210,7 +215,9 @@ def build_hotword_capacity_assets(
     config_path = destination / "run_config.json"
     config = {
         "schema_version": 1,
-        "purpose": "portuguese_hotword_capacity_assets",
+        "purpose": "language_specific_hotword_capacity_assets",
+        "language": normalized_language,
+        "language_tag": language_tag,
         "sizes": list(resolved_sizes),
         "profiles": list(PROFILE_NAMES),
         "seed": seed,
@@ -344,6 +351,8 @@ def _select_capacity_cases(
 def _validate_base_contract(
     cases: Sequence[CapacityCase],
     entries: Mapping[str, HotwordEntry],
+    *,
+    language: str,
 ) -> None:
     for case in cases:
         if len(case.active_hotword_ids) != 100 or len(set(case.active_hotword_ids)) != 100:
@@ -353,8 +362,11 @@ def _validate_base_contract(
             raise ValueError(f"base case {case.case_id} has unknown hotwords: {sorted(missing)}")
         if not set(case.expected_hotword_ids).issubset(case.active_hotword_ids):
             raise ValueError(f"base case {case.case_id} expects inactive hotwords")
-        if case.language.lower().replace("_", "-") not in {"pt", "pt-br"}:
-            raise ValueError(f"capacity v1 accepts Portuguese cases only: {case.case_id}")
+        if _normalize_language(case.language) != language:
+            raise ValueError(
+                f"capacity case {case.case_id} language {case.language!r} "
+                f"does not match requested {language!r}"
+            )
 
 
 def _sample_train_ngrams(
@@ -364,10 +376,11 @@ def _sample_train_ngrams(
     maximum_ngram_words: int,
     seed: int,
     print_progress: bool,
+    language: str,
 ) -> dict[str, tuple[str, ...]]:
     heaps: dict[int, list[tuple[int, str]]] = defaultdict(list)
     selected: dict[int, dict[str, tuple[str, ...]]] = defaultdict(dict)
-    stopwords = stopwords_for_language("pt-BR")
+    stopwords = stopwords_for_language(language)
     records = 0
     for records, raw in enumerate(_iter_train_rows(path), start=1):
         words = tuple(tokenize_words(_required_string(raw, "text", records)))
@@ -431,6 +444,7 @@ def _materialize_train_candidates(
     vocab: PhonemeVocab,
     base_entries: Sequence[HotwordEntry],
     seed: int,
+    language: str,
 ) -> tuple[tuple[TrainCandidate, ...], Counter[str]]:
     rejected: Counter[str] = Counter()
     seen_pronunciations = {(entry.language, entry.token_ids) for entry in base_entries}
@@ -468,7 +482,7 @@ def _materialize_train_candidates(
         if len(token_ids) < 4:
             rejected["fewer_than_four_phonemes"] += 1
             continue
-        key = ("pt-BR", tuple(token_ids))
+        key = (language, tuple(token_ids))
         if key in seen_pronunciations:
             rejected["duplicate_pronunciation"] += 1
             continue
@@ -477,10 +491,11 @@ def _materialize_train_candidates(
         if occurrences <= 0:
             rejected["missing_train_occurrence"] += 1
             continue
-        digest = hashlib.sha256(f"pt-BR\0{surface}".encode()).hexdigest()[:16]
+        digest = hashlib.sha256(f"{language}\0{surface}".encode()).hexdigest()[:16]
+        language_id = "".join(character for character in language.lower() if character.isalnum())
         entry = HotwordEntry(
-            hotword_id=f"capacity_ptbr_{digest}",
-            language="pt-BR",
+            hotword_id=f"capacity_{language_id}_{digest}",
+            language=language,
             surface=surface,
             normalized=surface,
             words=words,
@@ -501,6 +516,25 @@ def _materialize_train_candidates(
             )
         )
     return tuple(candidates), rejected
+
+
+def _normalize_language(value: str) -> str:
+    normalized = value.strip().replace("_", "-").lower()
+    aliases = {
+        "en": "English",
+        "en-us": "English",
+        "english": "English",
+        "es": "Spanish",
+        "es-419": "Spanish",
+        "spanish": "Spanish",
+        "pt": "Portuguese",
+        "pt-br": "Portuguese",
+        "portuguese": "Portuguese",
+    }
+    resolved = aliases.get(normalized)
+    if resolved is None:
+        raise ValueError(f"unsupported capacity language: {value!r}")
+    return resolved
 
 
 def _representative_order(

@@ -28,12 +28,17 @@ def _sizes(value: str) -> tuple[int, ...]:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Build deterministic nested 100-to-10k Portuguese hotword capacity "
+            "Build deterministic nested 100-to-10k language-specific hotword capacity "
             "assets from train-only real 1-4 word n-grams."
         )
     )
     parser.add_argument("--training-manifest", required=True)
     parser.add_argument("--dictionary", required=True)
+    parser.add_argument(
+        "--language",
+        choices=("English", "Spanish", "Portuguese"),
+        default="Portuguese",
+    )
     parser.add_argument("--vocab", default=str(DEFAULT_VOCAB))
     parser.add_argument("--base-hotwords", required=True)
     parser.add_argument("--base-cases", required=True)
@@ -65,6 +70,7 @@ def main() -> int:
             seed=args.seed,
             candidate_pool_multiplier=args.candidate_pool_multiplier,
             print_progress=not args.quiet_progress,
+            language=args.language,
         )
     except (FileExistsError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
