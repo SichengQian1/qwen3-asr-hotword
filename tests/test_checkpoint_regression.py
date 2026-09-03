@@ -93,6 +93,9 @@ def _write_suite(path: Path, checkpoint_name: str, checkpoint_sha: str, d_value:
     for subdir, grouped_profiles in grouped_subdirs.items():
         run = path / subdir
         run.mkdir()
+        (run / "README.md").write_text(
+            f"# Child report for {checkpoint_name}\n", encoding="utf-8"
+        )
         run_config = {
             "schema_version": 2,
             "git_commit": "commit-" + checkpoint_name,
@@ -133,7 +136,13 @@ def _write_suite(path: Path, checkpoint_name: str, checkpoint_sha: str, d_value:
         (run / "latency_summary.json").write_text("{}\n", encoding="utf-8")
         _write_hashes(
             run,
-            ["run_config.json", "sample_results.jsonl", "summary.json", "latency_summary.json"],
+            [
+                "run_config.json",
+                "sample_results.jsonl",
+                "summary.json",
+                "latency_summary.json",
+                "README.md",
+            ],
         )
     _write_hashes(path, ["suite_config.json", "suite_summary.json", "ctc_report.json"])
 

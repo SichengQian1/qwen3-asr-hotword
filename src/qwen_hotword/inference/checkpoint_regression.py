@@ -453,12 +453,19 @@ def _verify_sha256_manifest(path: Path) -> None:
         digest, separator, raw_name = line.partition("  ")
         if not separator or len(digest) != 64 or not raw_name:
             raise ValueError(f"invalid SHA256 manifest row: {path}:{line_number}")
-        candidate = Path(raw_name).expanduser()
-        target = candidate if candidate.is_file() else path.parent / raw_name
+        manifest_relative = path.parent / raw_name
+        repository_relative = Path(raw_name).expanduser()
+        target = (
+            manifest_relative
+            if manifest_relative.is_file()
+            else repository_relative
+        )
         if not target.is_file():
-            raise FileNotFoundError(f"SHA256 target does not exist: {raw_name}")
+            raise FileNotFoundError(
+                f"SHA256 target does not exist for {path}: {raw_name}"
+            )
         if _sha256(target) != digest:
-            raise ValueError(f"SHA256 mismatch for {target}")
+            raise ValueError(f"SHA256 mismatch for {target} listed by {path}")
         entries += 1
     if entries == 0:
         raise ValueError(f"SHA256 manifest is empty: {path}")
