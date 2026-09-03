@@ -1,5 +1,214 @@
 # 工作交接记录
 
+## 0.61 2026-09-03 三语CTC Head定稿审计与葡语4k formal100替换回归
+
+本轮启动已完成英/西/葡混合训练Head的端到端验证，但工作区30 epoch resume后的
+最终结果尚未回传，因此本地不预设best epoch、Macro PER或分语种PER。新增的
+`audit_multilingual_ctc_checkpoint.py`会只读检查`report.json`/`metrics.jsonl`的训练完成状态、
+test未使用、cache SHA已验证、en/es/pt分组、Macro PER选择口径、best epoch数值一致性以及
+Temporal-2x h512-k5/90类Head契约，然后把最佳checkpoint和训练状态的SHA256冻结到新目录。
+
+葡语回归不能直接把新Head与旧
+`multi_nested_evaluation_report_v3_corrected.json`混用：旧报告绑定旧葡语checkpoint SHA，
+流式评测器会正确拒绝这种身份错配。因此固定验证顺序是：
+
+1. 审计并冻结三语训练best checkpoint身份；
+2. 在三语4小时validation cache上重做一次mixed + en/es/pt详细PER诊断；
+3. 在旧葡语validation cache上复用原v3的210条cases/500词/family，仅替换Head，生成与
+   新checkpoint绑定的CTC报告；
+4. 复用原formal100的100条选择、4k热词资产、Anchor参数、2秒流式语义和六组门控，
+   在新目录运行C/D5-conservative/D7-balanced/D5-recall/D7-recall/E；
+5. 用新增`compare_streaming_checkpoint_suites.py`验证两套SHA、样本选择和运行契约，
+   输出新Head减旧Head的核心质量差值及变化case。
+
+对比器仅允许checkpoint、由checkpoint派生的CTC报告、Git提交身份和
+`gpu_memory_utilization`不同；其他配置或样本变化会直接失败。历史D5 recall-first曾使用
+0.20，其他组使用0.15，所以新工具不把两次独立H200运行的latency解释为Head因果差异；
+纯检索P95仍在新suite内独立验收。C no-RAG和E Oracle不使用CTC检索，对比器会将
+它们作为重跑稳定性控制；若C/E质量漂移，D组差值必须带限制解释。
+
+工作区执行命令如下。所有新产物都使用新目录；首次运行前的`test ! -e`不得删除或
+改成覆盖。`GPU_ID`可换成当时空闲物理卡，程序内仍为逻辑`cuda:0`：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+GPU_ID=3
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+BALANCED_TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+BALANCED_VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+FEATURE_CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+FORMAL_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1
+CTC_CHECKPOINT="$FORMAL_ROOT/ctc_head_best.pt"
+CHECKPOINT_AUDIT_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_checkpoint_audit_v1
+MIXED_DIAG_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_final_diagnostics_v1
+
+PT_ROOT=outputs/noah_pt_full_training_v1
+PT_VALIDATION_CACHE="$PT_ROOT/features_ln_post_bf16/validation"
+PT_VALIDATION_MANIFEST="$PT_ROOT/full_ctc_validation.jsonl"
+PT_DICTIONARY=outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict
+V3_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested"
+V3_MULTILINGUAL_ROOT="$PT_ROOT/simulated_hotword_eval_v3_multi_nested_multilingual_ctc_v1"
+
+CAP_ROOT="$PT_ROOT/hotword_capacity_eval_v1"
+ASSET_4K_ROOT="$CAP_ROOT/assets_with_4000_v2"
+OFFLINE100_ROOT="$V3_ROOT/prompt_multi_nested_formal100_top5_v1"
+BASELINE_SUITE_ROOT="$CAP_ROOT/streaming_gate_suite_4k_formal100_v1"
+CANDIDATE_SUITE_ROOT="$CAP_ROOT/streaming_gate_suite_4k_formal100_multilingual_ctc_v1"
+REGRESSION_ROOT="$CAP_ROOT/streaming_checkpoint_regression_multilingual_ctc_v1"
+
+test -f "$FORMAL_ROOT/report.json"
+test -f "$FORMAL_ROOT/metrics.jsonl"
+test -f "$CTC_CHECKPOINT"
+test -d "$BASELINE_SUITE_ROOT"
+test ! -e "$CHECKPOINT_AUDIT_ROOT"
+test ! -e "$MIXED_DIAG_ROOT"
+test ! -e "$V3_MULTILINGUAL_ROOT"
+test ! -e "$CANDIDATE_SUITE_ROOT"
+test ! -e "$REGRESSION_ROOT"
+```
+
+先做CPU-only的训练产物审计：
+
+```bash
+python scripts/audit_multilingual_ctc_checkpoint.py \
+  --training-dir "$FORMAL_ROOT" \
+  --output-dir "$CHECKPOINT_AUDIT_ROOT" \
+  --expected-groups en,es,pt
+```
+
+再在已有三语validation feature cache上做详细分组诊断，这一步只加载CTC Head和已缓存特征，
+不加载完整Qwen：
+
+```bash
+mkdir -p "$MIXED_DIAG_ROOT"
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/diagnose_frozen_ctc.py \
+  --validation-cache "$FEATURE_CACHE_ROOT/validation" \
+  --validation-manifest "$BALANCED_VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab "$VOCAB" \
+  --checkpoint "$CTC_CHECKPOINT" \
+  --output "$MIXED_DIAG_ROOT/grouped_validation_diagnostics.json" \
+  --device cuda:0 \
+  --batch-size 256 \
+  --group-column balanced_language_bucket \
+  --expected-groups en,es,pt
+(cd "$MIXED_DIAG_ROOT" && \
+  sha256sum grouped_validation_diagnostics.json > sha256.txt)
+```
+
+然后使用原葡语v3自然validation cases生成新checkpoint绑定的CTC中间报告。本步不重建
+cases或热词，不读sealed test，不加载完整Qwen：
+
+```bash
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/evaluate_multi_nested_hotwords.py \
+  --validation-cache "$PT_VALIDATION_CACHE" \
+  --validation-manifest "$PT_VALIDATION_MANIFEST" \
+  --dictionary "$PT_DICTIONARY" \
+  --vocab "$VOCAB" \
+  --checkpoint "$CTC_CHECKPOINT" \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --asset-summary "$V3_ROOT/asset_summary_v3.json" \
+  --output-dir "$V3_MULTILINGUAL_ROOT" \
+  --device cuda:0 \
+  --batch-size 128
+
+python scripts/rebuild_multi_nested_hotword_report.py \
+  --vocab "$VOCAB" \
+  --hotwords "$V3_ROOT/multi_nested_hotwords_v3.jsonl" \
+  --families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --cases "$V3_ROOT/multi_nested_cases_v3.jsonl" \
+  --case-scores "$V3_MULTILINGUAL_ROOT/hotword_case_scores_v3.jsonl" \
+  --base-report "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3.json" \
+  --output "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+
+(cd "$V3_MULTILINGUAL_ROOT" && sha256sum \
+  hotword_case_scores_v3.jsonl \
+  multi_nested_evaluation_report_v3.json \
+  multi_nested_evaluation_report_v3_corrected.json > sha256.txt)
+```
+
+最后在全新目录跑同资产六组formal100。`--resume`是为了中断后原命令续跑；它不会引用或
+覆盖旧suite。H200空闲显存不足时只换`GPU_ID`，不提高`gpu-memory-utilization=0.15`：
+
+```bash
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_streaming_gate_profile_suite.py \
+  --model /glusterfs_103/models/Qwen3-ASR-1.7B \
+  --validation-manifest "$PT_VALIDATION_MANIFEST" \
+  --vocab "$VOCAB" \
+  --hotwords "$ASSET_4K_ROOT/representative/size_4000/hotwords.jsonl" \
+  --cases "$ASSET_4K_ROOT/representative/size_4000/cases.jsonl" \
+  --hotword-families "$V3_ROOT/hotword_families_v3.jsonl" \
+  --ctc-report "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3_corrected.json" \
+  --offline-rag-dir "$OFFLINE100_ROOT" \
+  --ctc-checkpoint "$CTC_CHECKPOINT" \
+  --output-dir "$CANDIDATE_SUITE_ROOT" \
+  --language Portuguese \
+  --gpu-memory-utilization 0.15 \
+  --resume
+
+python scripts/compare_streaming_checkpoint_suites.py \
+  --baseline-suite "$BASELINE_SUITE_ROOT" \
+  --candidate-suite "$CANDIDATE_SUITE_ROOT" \
+  --output-dir "$REGRESSION_ROOT"
+```
+
+验收与回传命令：
+
+```bash
+(cd "$CHECKPOINT_AUDIT_ROOT" && sha256sum -c sha256.txt)
+(cd "$MIXED_DIAG_ROOT" && sha256sum -c sha256.txt)
+(cd "$V3_MULTILINGUAL_ROOT" && sha256sum -c sha256.txt)
+(cd "$CANDIDATE_SUITE_ROOT" && sha256sum -c sha256.txt)
+(cd "$REGRESSION_ROOT" && sha256sum -c sha256.txt)
+
+jq '{best_checkpoint, training_progress, head_contract, best_validation, final_validation}' \
+  "$CHECKPOINT_AUDIT_ROOT/checkpoint_audit.json"
+jq '{validation_samples, expected_groups, checkpoints}' \
+  "$MIXED_DIAG_ROOT/grouped_validation_diagnostics.json"
+jq '{checkpoint_sha256, head_config, scoring_config, metrics, status}' \
+  "$V3_MULTILINGUAL_ROOT/multi_nested_evaluation_report_v3_corrected.json"
+jq '{sample_count, profiles}' "$CANDIDATE_SUITE_ROOT/suite_summary.json"
+jq . "$REGRESSION_ROOT/checkpoint_regression_summary.json"
+wc -l "$REGRESSION_ROOT/checkpoint_regression_cases.jsonl"
+```
+
+请回传以下小文件，不需要checkpoint、feature cache、sample shard、完整timeline或模型：
+
+```text
+en_es_pt_balanced_150h_temporal2x_ctc_checkpoint_audit_v1/
+  checkpoint_audit.json
+  sha256.txt
+en_es_pt_balanced_150h_temporal2x_ctc_final_diagnostics_v1/
+  grouped_validation_diagnostics.json
+  sha256.txt
+simulated_hotword_eval_v3_multi_nested_multilingual_ctc_v1/
+  multi_nested_evaluation_report_v3.json
+  multi_nested_evaluation_report_v3_corrected.json
+  sha256.txt
+streaming_gate_suite_4k_formal100_multilingual_ctc_v1/
+  suite_config.json
+  suite_summary.json
+  topk_isolation_summary.json
+  sha256.txt
+streaming_checkpoint_regression_multilingual_ctc_v1/
+  checkpoint_regression_summary.json
+  checkpoint_regression_cases.jsonl
+  sha256.txt
+```
+
+收到后先核验SHA和两个checkpoint身份，再分别回答：三语训练是否已收敛、葡语PER是否相比
+旧单语Head退化、4k D组Prompt Recall/最终Recall/Precision如何变化，以及C/E控制是否稳定。
+本轮本地只做mock/单元验证，没有加载Qwen3-ASR-1.7B、没有读sealed test、没有修改
+训练/检索/提示词算法，也没有改动旧outputs。全量pytest 222项通过，本轮相关
+27项通过；新增两个核心模块strict Mypy和本轮文件Ruff均通过，CLI help与
+`git diff --check`通过。全仓Ruff仍有`scan_g2p_coverage.py`的3个原有E501，另有2个来自
+未跟踪PPT临时目录，本轮均未修改。本机全包Mypy在项目Python 3.10解析目标下被
+NumPy的3.12 stub语法阻断；切到3.12目标后显示的11个错误均位于6个未修改的旧模块。
+
 ## 0.60 2026-08-29 eSpeak-ng/MFA三语新热词G2P选型入口
 
 新增完全独立的 eSpeak-ng/MFA 对比工具，用于判断新热词 G2P 是否可由 eSpeak-ng
