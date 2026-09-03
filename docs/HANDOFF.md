@@ -1,5 +1,30 @@
 # 工作交接记录
 
+## 0.72 2026-09-03 Anchor索引支持跨标签同音热词
+
+0.71修正后，三语CTC步骤通过；最终streaming循环的英语、西语已完成，葡语
+在模型加载后、构建4k Anchor索引时中止：
+
+```text
+run_streaming_rag_evaluation.py: error:
+duplicate exact token sequence: sim_v3_hw_ptbr_0057
+```
+
+`pynvml`和`temperature`信息均为非阻塞警告。实际原因是葡语资产内不同语言
+标签下的热词在90类CTC词表投影后具有相同token序列。registry按
+`(language, token_ids)`允许这类同音词，但旧`IntegerAhoCorasick`和
+`PhonemeAnchorIndex`又要求token序列全局唯一，两个组件契约不一致。
+
+修正后，同一音素序列可关联多个不同hotword ID；Anchor query仍按case的
+`active_hotword_ids`筛选，并把处于活动集合内的同音项分别作为候选返回。
+重复hotword ID和空token序列仍会拒绝。本修正不改变CTC分数、门控参数、
+已有英/西sample shard、字典、assets、capacity或offline产物。
+
+拉取本节提交后，不删除任何输出，直接原样重跑0.69第六步完整
+`for CODE in en es pt`循环并保留`--resume`：英语和西语会复用已完成shard，
+葡语会从`streaming_pt`现有运行状态继续。若该目录只写入了同一配置的
+`run_config.json`而没有sample shard，也属于安全resume状态。
+
 ## 0.71 2026-09-03 英语热词表Unicode规范化兼容修正
 
 0.70修正后的三语词典导出和v3 assets均顺利完成，但第三步在循环的

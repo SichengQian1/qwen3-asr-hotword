@@ -91,16 +91,12 @@ class PhonemeAnchorIndex:
         self.config.validate()
         self._entries = tuple(entries)
         self._entry_index_by_id: dict[str, int] = {}
-        seen_sequences: set[tuple[int, ...]] = set()
         for entry_index, entry in enumerate(self._entries):
             if entry.hotword_id in self._entry_index_by_id:
                 raise ValueError(f"duplicate hotword ID: {entry.hotword_id}")
             if not entry.token_ids:
                 raise ValueError(f"hotword {entry.hotword_id} has no token IDs")
-            if entry.token_ids in seen_sequences:
-                raise ValueError(f"duplicate exact token sequence: {entry.hotword_id}")
             self._entry_index_by_id[entry.hotword_id] = entry_index
-            seen_sequences.add(entry.token_ids)
         self._all_hotword_ids = frozenset(self._entry_index_by_id)
 
         document_frequency: Counter[tuple[int, ...]] = Counter()

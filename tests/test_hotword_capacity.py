@@ -406,6 +406,39 @@ def test_integer_aho_corasick_respects_active_registry() -> None:
     assert [match.hotword_id for match in matches] == ["active"]
 
 
+def test_integer_aho_corasick_supports_homophone_hotwords() -> None:
+    def entry(hotword_id: str, language: str) -> HotwordEntry:
+        return HotwordEntry(
+            hotword_id=hotword_id,
+            language=language,
+            surface=hotword_id,
+            normalized=hotword_id,
+            words=(hotword_id,),
+            pronunciation="a b",
+            phoneme_tokens=("a", "b"),
+            token_ids=(1, 2),
+            source="test",
+            validation_occurrences=1,
+        )
+
+    matcher = IntegerAhoCorasick(
+        [entry("pt-br-label", "pt-BR"), entry("portuguese-label", "Portuguese")]
+    )
+
+    all_matches = matcher.find((1, 2), longest_only=False)
+    active_matches = matcher.find(
+        (1, 2),
+        active_hotword_ids={"portuguese-label"},
+        longest_only=False,
+    )
+
+    assert {match.hotword_id for match in all_matches} == {
+        "pt-br-label",
+        "portuguese-label",
+    }
+    assert [match.hotword_id for match in active_matches] == ["portuguese-label"]
+
+
 def test_posterior_replay_shards_round_trip_and_preserve_greedy_decode(
     tmp_path: Path,
 ) -> None:

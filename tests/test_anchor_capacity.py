@@ -80,6 +80,27 @@ def test_anchor_index_is_active_only_nested_and_deterministic() -> None:
     assert first.exact_hotword_ids == ("exact",)
 
 
+def test_anchor_index_supports_homophone_hotwords_and_active_filtering() -> None:
+    first = _entry("first", (1, 2, 3, 4))
+    second = _entry("second", (1, 2, 3, 4))
+    index = PhonemeAnchorIndex([first, second])
+
+    all_result = index.query((1, 2, 3, 4), maximum_candidates=2)
+    active_result = index.query(
+        (1, 2, 3, 4),
+        active_hotword_ids=("second",),
+        maximum_candidates=2,
+    )
+
+    assert set(all_result.exact_hotword_ids) == {"first", "second"}
+    assert {candidate.hotword_id for candidate in all_result.candidates} == {
+        "first",
+        "second",
+    }
+    assert active_result.exact_hotword_ids == ("second",)
+    assert [candidate.hotword_id for candidate in active_result.candidates] == ["second"]
+
+
 def test_crop_decoded_to_lookback_uses_ctc_steps_and_keeps_boundary_overlap() -> None:
     decoded = (
         DecodedPhoneme(token_id=1, confidence=0.9, start_step=1, end_step=3),

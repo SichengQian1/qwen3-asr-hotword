@@ -40,16 +40,12 @@ class IntegerAhoCorasick:
         self._failure: list[int] = [0]
         self._outputs: list[list[int]] = [[]]
         seen_ids: set[str] = set()
-        seen_patterns: set[tuple[int, ...]] = set()
         for entry_index, entry in enumerate(self._entries):
             if entry.hotword_id in seen_ids:
                 raise ValueError(f"duplicate hotword ID: {entry.hotword_id}")
             if not entry.token_ids:
                 raise ValueError(f"hotword {entry.hotword_id} has no token IDs")
-            if entry.token_ids in seen_patterns:
-                raise ValueError(f"duplicate exact token sequence: {entry.hotword_id}")
             seen_ids.add(entry.hotword_id)
-            seen_patterns.add(entry.token_ids)
             state = 0
             for token_id in entry.token_ids:
                 next_state = self._transitions[state].get(token_id)
@@ -174,4 +170,3 @@ def _rank_key(match: ExactHotwordMatch) -> tuple[float, int, float, int, str]:
         match.start_token,
         match.hotword_id,
     )
-
