@@ -1,5 +1,34 @@
 # 工作交接记录
 
+## 0.71 2026-09-03 英语热词表Unicode规范化兼容修正
+
+0.70修正后的三语词典导出和v3 assets均顺利完成，但第三步在循环的
+第一个语种英语、加载热词表第12行时中止：
+
+```text
+V3 CTC EVALUATION FAILED: ValueError:
+hotword row 12 phoneme tokens do not match token IDs
+```
+
+这不是GPU、feature cache、CTC Head或词典发音错误。共享v0.2词表的token 54
+是NFC形式的`ç`，英语借词中该音素经`tokenize_ipa_to_vocab`后在资产中写成
+语义完全等价的NFD `c + U+0327`。其token ID仍正确为54，但旧registry要求
+`phoneme_tokens`必须和vocab token逐字节相同，因而误拒绝。
+
+修正后：
+
+- tokenizer对外返回`vocab.tokens[token_id]`的规范字符串，后续新资产不再写出
+  NFD/NFC字符差异；
+- registry允许Unicode规范等价的旧`phoneme_tokens`，但加载后立即换成
+  vocab中的规范token；
+- 任何真正音素或token ID不匹配仍会失败，没有放宽声学/检索契约。
+
+已生成的`dictionary_en/es/pt`和`assets_en/es/pt`不需重建、不得删除或修改；
+它们的SHA256保持不变。本次失败发生在`score_multi_nested_cases`创建
+`ctc_en`输出之前。拉取修正提交后，直接原样重跑0.69第三步的
+`for CODE in en es pt` CTC循环；不要回到第一/第二步。`pynvml` FutureWarning
+仍为无关非阻塞警告。
+
 ## 0.70 2026-09-03 三语词典导出入口修正
 
 0.69首次工区执行在英语第一行正确中止：

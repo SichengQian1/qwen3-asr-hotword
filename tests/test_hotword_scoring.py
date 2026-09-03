@@ -269,3 +269,23 @@ def test_hotword_loader_rejects_out_of_range_ids_cleanly(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="out-of-range"):
         load_hotword_table(table, vocab=_vocab())
+
+
+def test_hotword_loader_accepts_canonically_equivalent_tokens(tmp_path: Path) -> None:
+    table = tmp_path / "hotwords.jsonl"
+    table.write_text(
+        '{"hotword_id":"cedilla","language":"English","surface":"façade",'
+        '"normalized":"façade","words":["façade"],"pronunciation":"ç",'
+        '"phoneme_tokens":["ç"],"token_ids":[1],"source":"test",'
+        '"validation_occurrences":1}\n',
+        encoding="utf-8",
+    )
+    vocab = PhonemeVocab(
+        tokens=("<blank>", "ç"),
+        phone_tokens=("ç",),
+        token_to_id={"<blank>": 0, "ç": 1},
+    )
+
+    entries = load_hotword_table(table, vocab=vocab)
+
+    assert entries[0].phoneme_tokens == ("ç",)

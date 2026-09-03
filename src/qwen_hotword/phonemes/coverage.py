@@ -127,8 +127,9 @@ def tokenize_ipa_to_vocab(ipa: str, vocab: PhonemeVocab) -> TokenizationResult:
             index += 1
             continue
 
-        tokens.append(matched)
-        token_ids.append(vocab.token_to_id[matched])
+        token_id = vocab.token_to_id[matched]
+        tokens.append(vocab.tokens[token_id])
+        token_ids.append(token_id)
         index += len(matched)
 
     return TokenizationResult(

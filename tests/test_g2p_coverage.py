@@ -42,6 +42,16 @@ def test_tokenize_ipa_reports_unknown_units() -> None:
     assert result.oov_units == ["q"]
 
 
+def test_tokenize_ipa_returns_vocab_canonical_unicode_tokens() -> None:
+    vocab = load_phoneme_vocab(VOCAB_PATH)
+
+    result = tokenize_ipa_to_vocab("c\u0327", vocab)
+
+    assert result.tokens == ["ç"]
+    assert result.token_ids == [54]
+    assert vocab.tokens[result.token_ids[0]] == result.tokens[0]
+
+
 def test_normalize_ipa_maps_common_espeak_diphthongs() -> None:
     assert normalize_ipa_for_vocab("aɪ aʊ eɪ oʊ ɔɪ") == "aj aw ej ow ɔj"
 

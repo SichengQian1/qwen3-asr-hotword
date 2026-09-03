@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from qwen_hotword.phonemes.coverage import PhonemeVocab
+from qwen_hotword.phonemes.coverage import PhonemeVocab, normalization_key
 
 
 @dataclass(frozen=True)
@@ -109,7 +109,9 @@ def _entry_from_dict(
     if any(token_id < 0 or token_id >= len(vocab.tokens) for token_id in token_ids):
         raise ValueError(f"hotword row {line_number} has out-of-range token_ids")
     expected_tokens = tuple(vocab.tokens[token_id] for token_id in token_ids)
-    if phoneme_tokens != expected_tokens:
+    if tuple(map(normalization_key, phoneme_tokens)) != tuple(
+        map(normalization_key, expected_tokens)
+    ):
         raise ValueError(
             f"hotword row {line_number} phoneme tokens do not match token IDs"
         )
@@ -125,7 +127,7 @@ def _entry_from_dict(
         normalized=_required_string(raw, "normalized", line_number),
         words=words,
         pronunciation=_required_string(raw, "pronunciation", line_number),
-        phoneme_tokens=phoneme_tokens,
+        phoneme_tokens=expected_tokens,
         token_ids=token_ids,
         source=_required_string(raw, "source", line_number),
         validation_occurrences=occurrences,
