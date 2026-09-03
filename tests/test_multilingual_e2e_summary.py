@@ -20,13 +20,14 @@ def _sha256(path: Path) -> str:
 
 def _quality(group: str, offset: int) -> dict[str, object]:
     matched = {"C": 1, "D": 2, "E": 2}[group]
+    wrong_injected = 1 if group == "D" else 0
     return {
         "expected_hotwords": 2,
         "correct_prompt_injected_hotwords": 2 if group == "D" else 0,
         "prompt_hotword_recall": 1.0 if group == "D" else 0.0,
         "correct_prompt_adopted_hotwords": 2 if group == "D" else 0,
         "correct_prompt_adoption_rate": 1.0 if group == "D" else 0.0,
-        "wrong_prompt_injected_hotwords": 1 if group == "D" else 0,
+        "wrong_injected_hotwords": wrong_injected,
         "wrong_prompt_written_hotwords": 0,
         "wrong_prompt_landing_rate": 0.0,
         "final_hotword_recall": matched / 2,
@@ -36,6 +37,9 @@ def _quality(group: str, offset: int) -> dict[str, object]:
         "wer": 0.1 + offset * 0.01,
         "cer": 0.05 + offset * 0.01,
         "mean_inference_seconds": 0.5,
+        "prompt_causal_metrics": {
+            "wrong_prompt_injected_hotwords": wrong_injected,
+        },
     }
 
 
@@ -97,6 +101,7 @@ def test_multilingual_summary_verifies_and_micro_aggregates(tmp_path: Path) -> N
     aggregate = report["aggregate"]["groups"]
     assert aggregate["D"]["expected_hotwords"] == 6
     assert aggregate["D"]["correct_prompt_injected_hotwords"] == 6
+    assert aggregate["D"]["wrong_prompt_injected_hotwords"] == 3
     assert aggregate["D"]["final_hotword_recall"] == 1.0
     assert aggregate["C"]["final_hotword_recall"] == 0.5
     assert aggregate["D"]["wer_macro"] == pytest.approx(0.11)

@@ -1,5 +1,25 @@
 # 工作交接记录
 
+## 0.73 2026-09-03 三语streaming汇总字段兼容修正
+
+英、西、葡三套C/D/E streaming运行完成后，最终轻量汇总在读取单语
+`summary.json`时中止：
+
+```text
+summarize_multilingual_streaming_e2e.py: error:
+quality field wrong_prompt_injected_hotwords is not an integer
+```
+
+单语结果没有损坏，也不需重新运行模型。真实streaming schema在顶层保留历史
+字段`wrong_injected_hotwords`，并在`prompt_causal_metrics`内提供口径更明确的
+`wrong_prompt_injected_hotwords`；三语汇总器的测试夹具却模拟了一个实际不存在
+的同名顶层字段，因此实跑时读到`null`。
+
+修正后的汇总器优先读取`prompt_causal_metrics.wrong_prompt_injected_hotwords`，
+并兼容顶层`wrong_injected_hotwords`。测试夹具已改为真实单语schema。拉取本节
+提交后，确认`$TRI_E2E_ROOT/summary`不存在，再只重跑0.69第七步汇总命令；
+不得重跑英/西/葡streaming，也不得修改其SHA绑定产物。
+
 ## 0.72 2026-09-03 Anchor索引支持跨标签同音热词
 
 0.71修正后，三语CTC步骤通过；最终streaming循环的英语、西语已完成，葡语

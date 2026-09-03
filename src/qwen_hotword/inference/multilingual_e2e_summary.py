@@ -238,7 +238,18 @@ def _selection(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str, str],
 
 
 def _selected_quality(value: Mapping[str, Any]) -> dict[str, object]:
-    return {name: value.get(name) for name in QUALITY_FIELDS}
+    selected = {name: value.get(name) for name in QUALITY_FIELDS}
+    if selected["wrong_prompt_injected_hotwords"] is None:
+        prompt_causal = value.get("prompt_causal_metrics")
+        if isinstance(prompt_causal, Mapping):
+            selected["wrong_prompt_injected_hotwords"] = prompt_causal.get(
+                "wrong_prompt_injected_hotwords"
+            )
+    if selected["wrong_prompt_injected_hotwords"] is None:
+        selected["wrong_prompt_injected_hotwords"] = value.get(
+            "wrong_injected_hotwords"
+        )
+    return selected
 
 
 def _metric_delta(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, float | None]:
