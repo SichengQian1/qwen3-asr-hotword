@@ -1,5 +1,176 @@
 # 工作交接记录
 
+## 0.76 2026-09-08 葡语外部FLAC测试集266词完整音频Anchor检索入口
+
+本轮为后续Context Learning新增一条完全隔离的外部测试入口，不修改既有4k容量、
+三语训练、formal100 streaming或Prompt/Qwen解码逻辑。用户已确认本轮按“完整音频离线
+检索”执行：每个FLAC文件整体经过Qwen3-ASR冻结audio encoder和三语Temporal 2x CTC
+Head，再用Anchor索引对266个MFA热词做Top-64 shortlist、音素重排和固定门控，最终为
+每个音频文件输出0至5个`word/phoneme`对象。本轮不运行Qwen LLM decoder；因此报告中的
+`final_retrieval_recall`严格指audio到最终检索列表的召回率，不冒充最终ASR文本Recall。
+
+新增文件：
+
+- `src/qwen_hotword/inference/external_keyword_retrieval.py`
+  - 读取多个`NAME=AUDIO_DIR,TRANSCRIPTS`来源，递归发现FLAC并按文件stem匹配转写。
+  - 严格拒绝缺失转写、无音频转写、源内重复stem和跨来源重复stem，避免下游JSON覆盖。
+  - 审计`pt_keyword_bias_phoneme.json`指定set中的全部词面和MFA音素，并要求100%映射到
+    当前90类CTC词表。
+  - 只使用转写做检索后的Unicode/case归一化完整连续短语真值匹配；转写不进入候选生成、
+    排序或门控。
+  - 原生读取FLAC，转为mono/16 kHz/float32；源音频只读且不做离线格式转换。
+  - 每条样本原子写入独立shard，`--resume`逐条复用；配置或输入SHA变化时拒绝resume。
+  - 保留原始Top-20、greedy CTC音素、分数/edit ratio/posterior和门控结果，后续可先做
+    case分析而不重跑Encoder。
+  - 输出下游精简JSON、逐条详情、失败case、分来源/总计Recall与Precision、分阶段时延和
+    SHA256清单。
+- `scripts/run_external_keyword_retrieval.py`：CPU预检及H200完整运行CLI。
+- `tests/test_external_keyword_retrieval.py`：词表、OOV、FLAC/transcript关联、ID冲突、
+  下游schema和指标口径测试。
+
+固定检索参数：
+
+```text
+all active hotwords:             hard_k266中的全部266词
+retrieval backend:               anchor_guided
+Anchor ngrams / per entry:       2,3,4 / 24
+offset tolerance / start radius: 1 / 2
+shortlist:                       64
+threshold / Top-K:               0.75 / 5
+posterior weight / minimum:      0.25 / 0.5
+maximum edit ratio / margin:     0.35 / 0
+saved raw rank depth:            20
+```
+
+词表本地静态审计确认附件中的`hard_k266`共有266个不同词面，266/266有MFA音素，
+266/266可映射到当前90类CTC词表，0个OOV。`lua`和`elan`分别只有3个音素；为兑现“全部
+266词参与检索”，本入口显式使用`minimum_phonemes=1`，不会沿用旧评测默认4而静默跳过
+这两个词。该选择写入`run_config.json`和最终摘要。
+
+### 容器只读挂载
+
+`/home_91`当前未挂载到运行容器，不能给已启动容器动态增加bind mount。先在宿主机确认
+现有容器启动参数和mount；重建容器时保留原GPU、共享内存、Conda和仓库mount参数，仅新增：
+
+```bash
+--mount type=bind,src=/home_91,dst=/home_91,readonly
+```
+
+进入新容器后先确认两个目录只读可见，不复制或改写源数据：
+
+```bash
+test -d /home_91/z00816262/data/2026data/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese/test/audio
+test -f /home_91/z00816262/data/2026data/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese/test/transcripts.txt
+test -d /home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/wav-total
+test -f /home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/transcripts.txt
+findmnt -T /home_91 -o TARGET,SOURCE,OPTIONS
+```
+
+### 拉取与CPU预检
+
+先拉取交付分支；最终提交SHA以本轮Git交付消息为准，工作区必须用`git rev-parse HEAD`
+逐字核对后再运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+MODEL=/glusterfs_103/models/Qwen3-ASR-1.7B
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+KEYWORDS=pt_keyword_bias_phoneme.json
+EXTERNAL_OUTPUT=outputs/pt_external_keyword_retrieval_mls_delivery_v1
+
+MLS_AUDIO=/home_91/z00816262/data/2026data/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese/test/audio
+MLS_TEXT=/home_91/z00816262/data/2026data/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese/test/transcripts.txt
+DELIVERY_AUDIO=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/wav-total
+DELIVERY_TEXT=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/transcripts.txt
+
+test -f "$MODEL/config.json"
+test -f "$CTC_CHECKPOINT"
+test -f "$VOCAB"
+test -f "$KEYWORDS"
+test ! -e "$EXTERNAL_OUTPUT"
+
+python scripts/run_external_keyword_retrieval.py \
+  --model "$MODEL" \
+  --ctc-checkpoint "$CTC_CHECKPOINT" \
+  --vocab "$VOCAB" \
+  --keyword-bias "$KEYWORDS" \
+  --keyword-set hard_k266 \
+  --source "mls_portuguese=$MLS_AUDIO,$MLS_TEXT" \
+  --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" \
+  --output-dir "$EXTERNAL_OUTPUT" \
+  --audit-only
+
+(cd "$EXTERNAL_OUTPUT" && sha256sum -c sha256.txt)
+jq '{status, sample_count, sources, external_test_set_used,
+  transcripts_used_for_candidate_generation}' "$EXTERNAL_OUTPUT/dataset_audit.json"
+jq '{status, keyword_set, keyword_count, vocabulary_size, oov_keyword_count,
+  keywords_below_four_phonemes}' "$EXTERNAL_OUTPUT/keyword_audit.json"
+```
+
+预检必须显示两个来源音频/转写逐条匹配、跨来源ID重复为0、`keyword_count=266`和
+`oov_keyword_count=0`。任一不满足时停止，把CLI错误及两个转写文件各前3行的脱敏格式
+发回；不要手工改ID、转写或源文件，也不要删除输出目录。
+
+### H200完整检索与续跑
+
+预检通过后在同一目录加`--resume`运行。下面只加载Transformers/Qwen audio encoder和
+CTC Head，不初始化vLLM、不执行Qwen文本生成：
+
+```bash
+GPU_ID=3
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_external_keyword_retrieval.py \
+  --model "$MODEL" \
+  --ctc-checkpoint "$CTC_CHECKPOINT" \
+  --vocab "$VOCAB" \
+  --keyword-bias "$KEYWORDS" \
+  --keyword-set hard_k266 \
+  --source "mls_portuguese=$MLS_AUDIO,$MLS_TEXT" \
+  --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" \
+  --output-dir "$EXTERNAL_OUTPUT" \
+  --device cuda:0 \
+  --dtype bfloat16 \
+  --resume
+```
+
+中断时原样重跑最后一条命令；不要删除`sample_shards`，也不要使用新输出目录绕过身份
+校验。完成后`retrieval_output.json`为后续要求的精简格式，所有FLAC stem均作为key，
+未召回则值为空数组。验证与紧凑回传：
+
+```bash
+(cd "$EXTERNAL_OUTPUT" && sha256sum -c sha256.txt)
+
+jq '{status, evaluation_scope, gate, retrieval_backend, overall, by_source}' \
+  "$EXTERNAL_OUTPUT/evaluation_summary.json"
+
+jq 'to_entries[:3]' "$EXTERNAL_OUTPUT/retrieval_output.json"
+wc -l \
+  "$EXTERNAL_OUTPUT/dataset_manifest.jsonl" \
+  "$EXTERNAL_OUTPUT/retrieval_details.jsonl" \
+  "$EXTERNAL_OUTPUT/failure_cases.jsonl"
+```
+
+本轮需要回传上述终端输出即可；若文件传输恢复，再附
+`evaluation_summary.json`、`dataset_audit.json`、`keyword_audit.json`、`sha256.txt`
+四个小文件。不要回传FLAC、checkpoint、完整sample shards或完整Top-20详情。
+
+结果解读固定报告：各来源和总计`raw_recall_at_5`、`final_retrieval_recall`、
+`final_retrieval_precision`、纯负样本FPR；以及纯检索、Encoder+Head检索、FLAC到结果的
+P50/P95/P99/max和整体RTF。纯检索口径仍是greedy decode + Anchor + shortlist rerank/gate，
+不含Processor/Encoder/Head，可与旧50 ms工程指标并列，但本次是整条音频而非2秒streaming
+step，不作直接因果回归。
+
+本轮本地验证：附件266词真实静态审计通过；新增8项测试和全仓249项pytest通过；新增
+3个文件Ruff、format、compileall、CLI help、核心模块strict Mypy（skip第三方imports）及
+`git diff --check`通过。全仓Ruff仍只有`scan_g2p_coverage.py`的3个既有长行和用户未跟踪
+PPT临时目录的2个长行；按项目Python 3.10目标执行全包Mypy时，当前环境安装的NumPy stub
+使用Python 3.12 `type`语句而在依赖解析阶段中止，这不是本轮模块类型错误。本机没有
+`/home_91`数据或三语checkpoint，未加载Qwen模型、未生成真实检索结果，也未修改或纳入
+用户PPT/图片文件。
+
 ## 0.75 2026-09-03 英西葡4k端到端分语种时延结果
 
 0.74三语端到端运行自带的`streaming_{en,es,pt}/latency_summary.json`已完成
