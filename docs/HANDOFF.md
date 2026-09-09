@@ -1,5 +1,88 @@
 # 工作交接记录
 
+## 0.78 2026-09-09 外部测试集Top-7精确重放及MLS/Delivery独立交付
+
+0.76--0.77的完整运行已为2,942条外部音频逐条保存Anchor原始Top-20排名。
+本轮不再加载Qwen模型、CTC Head或音频，而是在CPU上使用同一排名精确重放
+threshold=0.75 / minimum posterior=0.5 / Top-7，与原Top-5隔离对比Top-K影响。
+
+新增：
+
+- src/qwen_hotword/inference/external_keyword_topk_replay.py：校验源运行SHA、词表和门控，
+  逐条复现已存Top-5，再重放Top-7并统计总计/MLS/Delivery的raw Recall、
+  最终检索Recall、Precision和纯负样本FPR。若任一条的已存排名不足以证明精确Top-7，
+  在创建输出目录前失败，不会将截断排名冒充完整结果。
+- scripts/replay_external_keyword_top7.py：独立CPU入口，只接受已完成的固定D5源运行，
+  不覆盖现有产物。
+- tests/test_external_keyword_topk_replay.py：覆盖D5逐条复现、D7新增第6/7候选、
+  排名截断拒绝、源结果不一致拒绝和两个独立交付JSON。
+
+新输出目录包含：
+
+~~~text
+topk_comparison.json              机器可读的总计/分来源D5对D7指标及差值
+topk_comparison.md                可直接放入总结的D5/D7表格
+top7_replay_details.jsonl         逐条重放审计，共2,942行
+mls_retrieval_output.json         MLS独立Top-7交付，预期871个key
+delivery_retrieval_output.json    Delivery独立Top-7交付，预期2,071个key
+run_config.json / README.md / sha256.txt
+~~~
+
+两个交付JSON保持Context Learning要求的原schema：音频stem为key，value为0至7个
+word/phoneme对象，未召回时保留空数组。topk_comparison.md的Top-5行从已保存详情重算，
+并与逐条已存选择绑定；Top-7行只改top_k=5到7。raw口径对应各自的raw recall@5和
+raw recall@7。
+
+时延不重新测量：表格JSON保留源D5模型运行中实测的纯检索和音频到结果时延，并明确标记
+为共享的源运行观测值。CPU重放只对保存排名做常数级截断，不冒充Top-7的Encoder/Anchor
+时延重测。
+
+工区拉取本节最终交付SHA后执行：
+
+~~~bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+KEYWORDS=pt_keyword_bias_phoneme.json
+EXTERNAL_OUTPUT=outputs/pt_external_keyword_retrieval_mls_delivery_v1
+TOP7_OUTPUT=outputs/pt_external_keyword_retrieval_mls_delivery_top7_replay_v1
+
+test -f "$EXTERNAL_OUTPUT/run_config.json"
+test -f "$EXTERNAL_OUTPUT/retrieval_details.jsonl"
+test -f "$EXTERNAL_OUTPUT/evaluation_summary.json"
+test -f "$EXTERNAL_OUTPUT/sha256.txt"
+test -f "$VOCAB"
+test -f "$KEYWORDS"
+test ! -e "$TOP7_OUTPUT"
+
+python scripts/replay_external_keyword_top7.py --source-run "$EXTERNAL_OUTPUT" --vocab "$VOCAB" --keyword-bias "$KEYWORDS" --keyword-set hard_k266 --output-dir "$TOP7_OUTPUT"
+~~~
+
+此命令不需要CUDA_VISIBLE_DEVICES，不读音频文件，不会修改原D5目录。完成后校验并紧凑
+回传：
+
+~~~bash
+(cd "$TOP7_OUTPUT" && sha256sum -c sha256.txt)
+wc -l "$TOP7_OUTPUT/top7_replay_details.jsonl"
+jq 'keys | length' "$TOP7_OUTPUT/mls_retrieval_output.json"
+jq 'keys | length' "$TOP7_OUTPUT/delivery_retrieval_output.json"
+cat "$TOP7_OUTPUT/topk_comparison.md"
+~~~
+
+请回传上述终端输出。需要传给Context Learning下游的文件只是
+mls_retrieval_output.json和delivery_retrieval_output.json；不需要传逐条详情、
+原始音频、checkpoint或sample shards。收到结果后，再将实测D5/D7表格记入HANDOFF的
+独立结果提交。
+
+本轮本地验证：新增4项重放测试、相关入口12项测试以及全仓
+230 passed / 23 skipped；新增文件Ruff、format、strict Mypy（skip imports）、
+compileall、CLI help和git diff --check均通过。全仓Ruff仍只有既有
+scripts/scan_g2p_coverage.py的3个长行以及用户未跟踪PPT临时目录的2个长行；
+全包Mypy仍只有3处既有unused-ignore（ctc_overfit.py、sharded_ctc.py和
+unfrozen_encoder_ctc.py）。本轮未修改这些无关文件。
+
 ## 0.77 2026-09-09 外部测试集WAV/FLAC混合格式修正
 
 0.76首次CPU预检确认实际格式与先前口头信息不同：MLS来源是FLAC，Delivery
@@ -68,16 +151,16 @@ saved raw rank depth:            20
 266词参与检索”，本入口显式使用`minimum_phonemes=1`，不会沿用旧评测默认4而静默跳过
 这两个词。该选择写入`run_config.json`和最终摘要。
 
-### 容器只读挂载
+### 容器可写挂载
 
 `/home_91`当前未挂载到运行容器，不能给已启动容器动态增加bind mount。先在宿主机确认
 现有容器启动参数和mount；重建容器时保留原GPU、共享内存、Conda和仓库mount参数，仅新增：
 
 ```bash
---mount type=bind,src=/home_91,dst=/home_91,readonly
+--mount type=bind,src=/home_91,dst=/home_91
 ```
 
-进入新容器后先确认两个目录只读可见，不复制或改写源数据：
+进入新容器后先确认两个目录可见且保留宿主权限；本评测流程本身仍不改写源数据：
 
 ```bash
 test -d /home_91/z00816262/data/2026data/27A/data/MLS_MultiLingual_LibriSpeech/mls_portuguese/test/audio
