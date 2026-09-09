@@ -33,6 +33,7 @@ FINAL_FILES = (
     "failure_cases.jsonl",
     "README.md",
 )
+SUPPORTED_AUDIO_SUFFIXES = (".flac", ".wav")
 
 
 @dataclass(frozen=True)
@@ -190,15 +191,20 @@ def build_external_dataset(
             raise FileNotFoundError(f"transcript file does not exist: {source.transcript_path}")
         transcripts = _read_transcripts(source.transcript_path)
         audio_by_id: dict[str, Path] = {}
+        audio_format_counts = {suffix.removeprefix("."): 0 for suffix in SUPPORTED_AUDIO_SUFFIXES}
         for path in sorted(source.audio_dir.rglob("*")):
-            if not path.is_file() or path.suffix.casefold() != ".flac":
+            suffix = path.suffix.casefold()
+            if not path.is_file() or suffix not in SUPPORTED_AUDIO_SUFFIXES:
                 continue
             sample_id = path.stem
             if sample_id in audio_by_id:
-                raise ValueError(f"duplicate FLAC stem in {source.name}: {sample_id!r}")
+                raise ValueError(f"duplicate audio stem in {source.name}: {sample_id!r}")
             audio_by_id[sample_id] = path
+            audio_format_counts[suffix.removeprefix(".")] += 1
         if not audio_by_id:
-            raise ValueError(f"source contains no FLAC files: {source.audio_dir}")
+            raise ValueError(
+                f"source contains no supported .flac or .wav files: {source.audio_dir}"
+            )
         missing_transcripts = sorted(set(audio_by_id) - set(transcripts))
         missing_audio = sorted(set(transcripts) - set(audio_by_id))
         if missing_transcripts or missing_audio:
@@ -227,7 +233,8 @@ def build_external_dataset(
                 "name": source.name,
                 "audio_dir": str(source.audio_dir),
                 "transcript_path": str(source.transcript_path),
-                "flac_files": len(audio_by_id),
+                "audio_files": len(audio_by_id),
+                "audio_format_counts": audio_format_counts,
                 "transcripts": len(transcripts),
                 "matched_records": len(audio_by_id),
                 "missing_transcripts": 0,
@@ -237,7 +244,7 @@ def build_external_dataset(
     return tuple(records), {
         "status": "pass",
         "language": "pt-BR",
-        "audio_format": "FLAC",
+        "supported_audio_formats": ["FLAC", "WAV"],
         "sample_count": len(records),
         "unique_sample_ids": len(global_ids),
         "cross_source_duplicate_sample_ids": 0,
@@ -328,7 +335,7 @@ def run_external_keyword_retrieval(
         if shard.is_file():
             _validate_shard(_read_json(shard), record)
             continue
-        waveform, audio_timing = _load_flac(record.audio_path)
+        waveform, audio_timing = _load_audio(record.audio_path)
         result = dict(retrieve_function(waveform, detector, vocab))
         row = _build_result_row(
             record,
@@ -524,7 +531,7 @@ def _metric_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, object]:
                 "excludes processor, encoder, and CTC Head"
             ),
             "model_retrieval_seconds": "processor + encoder + CTC Head + pure retrieval",
-            "audio_to_result_seconds": "FLAC load/resample + model retrieval",
+            "audio_to_result_seconds": "audio load/resample + model retrieval",
         },
         "latency_seconds": timing,
         "pure_retrieval_over_50ms_count": sum(value > 0.05 for value in pure_values),
@@ -660,13 +667,13 @@ def _retrieve_waveform(detector: Any, waveform: Any, vocab: PhonemeVocab) -> Map
     }
 
 
-def _load_flac(path: Path) -> tuple[Any, dict[str, object]]:
+def _load_audio(path: Path) -> tuple[Any, dict[str, object]]:
     try:
         librosa = importlib.import_module("librosa")
         np = importlib.import_module("numpy")
         sf = importlib.import_module("soundfile")
     except ImportError as error:
-        raise RuntimeError("librosa, numpy, and soundfile are required for FLAC input") from error
+        raise RuntimeError("librosa, numpy, and soundfile are required for audio input") from error
     started = time.perf_counter()
     waveform, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
     channels = int(waveform.shape[1])
@@ -679,6 +686,7 @@ def _load_flac(path: Path) -> tuple[Any, dict[str, object]]:
     seconds = time.perf_counter() - started
     return waveform, {
         "original_sample_rate": int(sample_rate),
+        "format": path.suffix.removeprefix(".").upper(),
         "target_sample_rate": 16_000,
         "channels": channels,
         "resampled": resampled,
@@ -747,7 +755,11 @@ def _run_config(
         "language": "Portuguese",
         "device": device,
         "dtype": dtype,
-        "audio": {"format": "FLAC", "mono": True, "sample_rate": 16_000},
+        "audio": {
+            "formats": ["FLAC", "WAV"],
+            "mono": True,
+            "sample_rate": 16_000,
+        },
         "gate": {
             "threshold": 0.75,
             "top_k": 5,
@@ -815,7 +827,7 @@ def _validate_shard(row: Mapping[str, Any], record: ExternalAudioRecord) -> None
 def _readme(config: Mapping[str, object], *, status: str, sample_count: int) -> str:
     return (
         "# Portuguese external keyword retrieval\n\n"
-        "Complete-audio offline CTC retrieval over two external FLAC test sources. "
+        "Complete-audio offline CTC retrieval over external FLAC/WAV test sources. "
         "The Qwen decoder is not run. All 266 keywords are active; Anchor search produces "
         "a Top-64 shortlist and the fixed 0.75 / posterior 0.5 / Top-5 gate produces the "
         "downstream keyword list. Transcripts are used only after retrieval for strict "

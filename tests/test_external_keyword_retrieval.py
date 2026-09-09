@@ -75,7 +75,7 @@ def test_dataset_matches_flac_stems_and_rejects_cross_source_collisions(
     first.mkdir()
     second.mkdir()
     (first / "a.flac").write_bytes(b"fake")
-    (second / "b.FLAC").write_bytes(b"fake")
+    (second / "b.WAV").write_bytes(b"fake")
     first_txt = tmp_path / "first.txt"
     second_txt = tmp_path / "second.txt"
     first_txt.write_text("a\ttexto um\n", encoding="utf-8")
@@ -91,8 +91,12 @@ def test_dataset_matches_flac_stems_and_rejects_cross_source_collisions(
         ("b", "second"),
     ]
     assert audit["sample_count"] == 2
+    sources = audit["sources"]
+    assert isinstance(sources, list)
+    assert sources[0]["audio_format_counts"] == {"flac": 1, "wav": 0}
+    assert sources[1]["audio_format_counts"] == {"flac": 0, "wav": 1}
 
-    (second / "b.FLAC").rename(second / "a.flac")
+    (second / "b.WAV").rename(second / "a.wav")
     second_txt.write_text("a|texto dois\n", encoding="utf-8")
     with pytest.raises(ValueError, match="cross-source duplicate"):
         build_external_dataset(
@@ -217,11 +221,12 @@ def test_full_mock_run_writes_resumable_downstream_artifacts(
     output = tmp_path / "output"
 
     monkeypatch.setattr(
-        "qwen_hotword.inference.external_keyword_retrieval._load_flac",
+        "qwen_hotword.inference.external_keyword_retrieval._load_audio",
         lambda _path: (
             object(),
             {
                 "original_sample_rate": 16_000,
+                "format": "FLAC",
                 "target_sample_rate": 16_000,
                 "channels": 1,
                 "resampled": False,

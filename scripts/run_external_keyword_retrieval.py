@@ -20,7 +20,7 @@ DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Run complete-audio Portuguese CTC Anchor retrieval over external FLAC test sets."
+            "Run complete-audio Portuguese CTC Anchor retrieval over external FLAC/WAV sets."
         )
     )
     parser.add_argument("--model", required=True)

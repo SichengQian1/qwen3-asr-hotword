@@ -1,10 +1,31 @@
 # 工作交接记录
 
-## 0.76 2026-09-08 葡语外部FLAC测试集266词完整音频Anchor检索入口
+## 0.77 2026-09-09 外部测试集WAV/FLAC混合格式修正
+
+0.76首次CPU预检确认实际格式与先前口头信息不同：MLS来源是FLAC，Delivery
+`wav-total`来源是WAV。旧入口只发现`.flac`，因此在创建输出目录前正确中止并报告
+`source contains no FLAC files`；没有生成或覆盖任何产物。
+
+修正后每个来源递归发现`.flac`和`.wav`（大小写不敏感），仍按文件stem与转写严格
+一一匹配。`dataset_audit.json`为每个来源新增`audio_format_counts`，应分别显示MLS只有
+FLAC、Delivery只有WAV；混合格式也会被如实记录。两种格式统一通过SoundFile读取，只有
+运行时在内存中转mono/16 kHz/float32，绝不改写源文件。运行、门控、Anchor、输出、resume
+及指标口径均不变。
+
+拉取本节提交并核对最终SHA后，原样重跑0.76的`--audit-only`命令。由于上次错误发生在
+`_prepare_output`之前，`$EXTERNAL_OUTPUT`应仍不存在，不需要也不得删除目录。预检输出中
+重点确认：
+
+```text
+mls_portuguese.audio_format_counts:       {flac: >0, wav: 0}
+delivery_20260706_ptbr.audio_format_counts:{flac: 0, wav: >0}
+```
+
+## 0.76 2026-09-08 葡语外部WAV/FLAC测试集266词完整音频Anchor检索入口
 
 本轮为后续Context Learning新增一条完全隔离的外部测试入口，不修改既有4k容量、
 三语训练、formal100 streaming或Prompt/Qwen解码逻辑。用户已确认本轮按“完整音频离线
-检索”执行：每个FLAC文件整体经过Qwen3-ASR冻结audio encoder和三语Temporal 2x CTC
+检索”执行：每个WAV/FLAC文件整体经过Qwen3-ASR冻结audio encoder和三语Temporal 2x CTC
 Head，再用Anchor索引对266个MFA热词做Top-64 shortlist、音素重排和固定门控，最终为
 每个音频文件输出0至5个`word/phoneme`对象。本轮不运行Qwen LLM decoder；因此报告中的
 `final_retrieval_recall`严格指audio到最终检索列表的召回率，不冒充最终ASR文本Recall。
@@ -12,20 +33,20 @@ Head，再用Anchor索引对266个MFA热词做Top-64 shortlist、音素重排和
 新增文件：
 
 - `src/qwen_hotword/inference/external_keyword_retrieval.py`
-  - 读取多个`NAME=AUDIO_DIR,TRANSCRIPTS`来源，递归发现FLAC并按文件stem匹配转写。
+  - 读取多个`NAME=AUDIO_DIR,TRANSCRIPTS`来源，递归发现WAV/FLAC并按文件stem匹配转写。
   - 严格拒绝缺失转写、无音频转写、源内重复stem和跨来源重复stem，避免下游JSON覆盖。
   - 审计`pt_keyword_bias_phoneme.json`指定set中的全部词面和MFA音素，并要求100%映射到
     当前90类CTC词表。
   - 只使用转写做检索后的Unicode/case归一化完整连续短语真值匹配；转写不进入候选生成、
     排序或门控。
-  - 原生读取FLAC，转为mono/16 kHz/float32；源音频只读且不做离线格式转换。
+  - 原生读取WAV/FLAC，转为mono/16 kHz/float32；源音频不做离线格式转换。
   - 每条样本原子写入独立shard，`--resume`逐条复用；配置或输入SHA变化时拒绝resume。
   - 保留原始Top-20、greedy CTC音素、分数/edit ratio/posterior和门控结果，后续可先做
     case分析而不重跑Encoder。
   - 输出下游精简JSON、逐条详情、失败case、分来源/总计Recall与Precision、分阶段时延和
     SHA256清单。
 - `scripts/run_external_keyword_retrieval.py`：CPU预检及H200完整运行CLI。
-- `tests/test_external_keyword_retrieval.py`：词表、OOV、FLAC/transcript关联、ID冲突、
+- `tests/test_external_keyword_retrieval.py`：词表、OOV、WAV/FLAC与transcript关联、ID冲突、
   下游schema和指标口径测试。
 
 固定检索参数：
@@ -137,7 +158,7 @@ CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_external_keyword_retrieval.py 
 ```
 
 中断时原样重跑最后一条命令；不要删除`sample_shards`，也不要使用新输出目录绕过身份
-校验。完成后`retrieval_output.json`为后续要求的精简格式，所有FLAC stem均作为key，
+校验。完成后`retrieval_output.json`为后续要求的精简格式，所有音频stem均作为key，
 未召回则值为空数组。验证与紧凑回传：
 
 ```bash
@@ -155,10 +176,10 @@ wc -l \
 
 本轮需要回传上述终端输出即可；若文件传输恢复，再附
 `evaluation_summary.json`、`dataset_audit.json`、`keyword_audit.json`、`sha256.txt`
-四个小文件。不要回传FLAC、checkpoint、完整sample shards或完整Top-20详情。
+四个小文件。不要回传音频、checkpoint、完整sample shards或完整Top-20详情。
 
 结果解读固定报告：各来源和总计`raw_recall_at_5`、`final_retrieval_recall`、
-`final_retrieval_precision`、纯负样本FPR；以及纯检索、Encoder+Head检索、FLAC到结果的
+`final_retrieval_precision`、纯负样本FPR；以及纯检索、Encoder+Head检索、音频到结果的
 P50/P95/P99/max和整体RTF。纯检索口径仍是greedy decode + Anchor + shortlist rerank/gate，
 不含Processor/Encoder/Head，可与旧50 ms工程指标并列，但本次是整条音频而非2秒streaming
 step，不作直接因果回归。
