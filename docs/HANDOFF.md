@@ -1,5 +1,73 @@
 # 工作交接记录
 
+## 0.79 2026-09-10 外部测试集D5/D7 Top-K隔离结果
+
+0.78的CPU精确重放已在工区完成。重放基于0.76--0.77保存的逐条Anchor原始Top-20，
+没有重新加载模型、读取音频或执行Qwen decoder；共享门控固定为
+threshold=0.75、minimum posterior=0.5、maximum edit ratio=0.35、
+posterior weight=0.25、margin=0，唯一变化是Top-K从5增加到7。
+
+完整性核验通过：
+
+~~~text
+run_config.json:                 OK
+top7_replay_details.jsonl:       OK
+topk_comparison.json:            OK
+topk_comparison.md:              OK
+mls_retrieval_output.json:       OK
+delivery_retrieval_output.json:  OK
+README.md:                       OK
+
+top7_replay_details.jsonl:       2,942 rows
+mls_retrieval_output.json:       871 keys
+delivery_retrieval_output.json:  2,071 keys
+~~~
+
+结果表：
+
+| 来源 | 配置 | Raw Recall | 最终检索Recall | 最终检索Precision | 选中热词 | 纯负样本FPR |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 总计 | D5 Top-5 | 754/879 = 85.78% | 705/879 = 80.20% | 705/2,231 = 31.60% | 2,231 | 864/2,361 = 36.59% |
+| 总计 | D7 Top-7 | 777/879 = 88.40% | 712/879 = 81.00% | 712/2,243 = 31.74% | 2,243 | 864/2,361 = 36.59% |
+| MLS | D5 Top-5 | 578/700 = 82.57% | 531/700 = 75.86% | 531/1,271 = 41.78% | 1,271 | 250/465 = 53.76% |
+| MLS | D7 Top-7 | 601/700 = 85.86% | 538/700 = 76.86% | 538/1,283 = 41.93% | 1,283 | 250/465 = 53.76% |
+| Delivery | D5 Top-5 | 176/179 = 98.32% | 174/179 = 97.21% | 174/960 = 18.12% | 960 | 614/1,896 = 32.38% |
+| Delivery | D7 Top-7 | 176/179 = 98.32% | 174/179 = 97.21% | 174/960 = 18.12% | 960 | 614/1,896 = 32.38% |
+
+D7相对D5的精确增量：
+
+- 总计Raw命中增加23个，Raw Recall提升2.62个百分点；
+- 最终正确检索增加7个，最终检索Recall提升0.80个百分点；
+- 总选中项增加12个，其中7个正确、5个错误，新增项本身Precision为58.33%；
+- 总体最终Precision从31.60%微升到31.74%，纯负样本FPR完全不变；
+- 所有增量均来自MLS：MLS Raw Recall提升3.29个百分点，最终Recall提升1.00个百分点，
+  Precision从41.78%微升到41.93%；
+- Delivery的Raw、门控输出、Recall、Precision和纯负样本FPR全部不变，说明该来源在
+  当前分数与门控下没有可由第6/7槽位释放的候选。
+
+结论：Top-7在当前固定门控下对汇总Recall、Precision和纯负样本FPR均无回归，
+可以作为本次Context Learning交付版本；它改善了MLS，但总体只新增12个输出项，
+其中仍包含5个错误项，说明Top-K不是当前召回缺口的主要
+限制。剩余问题仍主要位于MLS的上游排名与门控覆盖，以及两个来源都较高的错误候选量；
+尤其Delivery虽然Recall达到97.21%，最终Precision只有18.12%，不能因Recall高而忽略
+Prompt噪声风险。纯负样本FPR不变只说明Top-7没有新增“空真值样本是否出现任意输出”的
+回归，不代表正样本内的错误候选没有增加；本轮新增的5个错误项发生在已有输出的样本中。
+
+本节的“最终检索Recall”仍是完整音频到CTC Anchor门控列表的Recall，不是Qwen最终转写
+Recall。时延沿用源D5实测值，CPU重放没有重新测量Top-7的Encoder/Anchor时延，因此本节
+不声称Top-7具有一套独立端到端时延数据。
+
+本次Top-7下游交付文件位于：
+
+~~~text
+outputs/pt_external_keyword_retrieval_mls_delivery_top7_replay_v1/
+  mls_retrieval_output.json
+  delivery_retrieval_output.json
+~~~
+
+二者已按来源拆分，schema保持音频stem映射到0至7个word/phoneme对象，可直接交给
+Context Learning下游。完整逐条详情和comparison文件留在工区审计，不需要对外传递。
+
 ## 0.78 2026-09-09 外部测试集Top-7精确重放及MLS/Delivery独立交付
 
 0.76--0.77的完整运行已为2,942条外部音频逐条保存Anchor原始Top-20排名。
