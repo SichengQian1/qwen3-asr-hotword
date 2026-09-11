@@ -1,5 +1,45 @@
 # 工作交接记录
 
+## 0.80 2026-09-11 当前两条推理入口的迁移与使用说明
+
+新增`docs/INFERENCE_USAGE.md`，集中记录当前代码仓已经实现的两条推理路径、准确能力边界、
+必需输入、运行命令、resume约束、输出文件、时延口径及新机器迁移清单。本节仅补文档，
+不修改模型、CTC、Anchor、门控、Prompt、Qwen解码或任何既有输出。
+
+两条现有入口明确区分如下：
+
+1. `scripts/run_external_keyword_retrieval.py`是完整WAV/FLAC到CTC Anchor热词列表的入口，
+   当前验证配置为266词、threshold 0.75、posterior minimum 0.5、Top-5。它不初始化vLLM、
+   不运行Qwen文本decoder；transcript只用于检索后指标统计。完成的D5源运行可以通过
+   `scripts/replay_external_keyword_top7.py`在CPU上精确重放Top-7。
+2. `scripts/run_streaming_rag_evaluation.py`是CTC + Anchor + Prompt + Qwen的2秒流式端到端
+   入口，但当前仍是formal评测型CLI：需要validation Manifest、cases、offline选择、CTC
+   report和families等身份资产，不接受任意单条`--audio`。
+
+讨论中的`scripts/transcribe_with_anchor_rag.py`尚未实现，不能作为当前迁移命令。未来纯
+推理入口应在复用现有`streaming_backends.py`、`streaming_core.py`、Anchor和Prompt模块的
+基础上剥离评测依赖，支持单音频/目录及完整音频/2秒流式模式；该工作不在本次文档变更中。
+
+三语CTC Head使用同一个checkpoint；当前端到端评测仍按语种分别运行，并向Qwen传
+`English`、`Spanish`或`Portuguese`。Qwen官方接口具备`language=None`自动识别，但本仓库
+CLI尚未实现`--language auto`到`None`的映射，也没有完成自动识别后的热词子库与Prompt
+切换；因此文档不把`--language auto`列为已支持功能。
+
+工区拉取文档交付：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+最终提交SHA以本轮Git交付消息为准。完整命令见`docs/INFERENCE_USAGE.md`：路径一先用
+`--audit-only`创建新输出目录，正式运行必须对同一目录加`--resume`；路径二只在配置与输入
+身份完全相同时使用`--resume`。模型、三语CTC checkpoint、数据、Manifest和`outputs/`
+通常不在Git，迁移时必须单独复制并核验。需要回传排查时优先提供`run_config.json`、摘要、
+端到端运行的`latency_summary.json`和`sha256.txt`；完整音频检索的时延位于
+`evaluation_summary.json`。不回传模型、音频、feature cache或完整sample shards。
+
 ## 0.79 2026-09-10 外部测试集D5/D7 Top-K隔离结果
 
 0.78的CPU精确重放已在工区完成。重放基于0.76--0.77保存的逐条Anchor原始Top-20，
