@@ -210,3 +210,53 @@ def test_full_replay_writes_split_delivery_files_and_comparison(tmp_path: Path) 
             keyword_bias_path=keyword_path,
             output_dir=output,
         )
+
+
+def test_full_replay_accepts_delivery_only_and_writes_delivery_contract(tmp_path: Path) -> None:
+    keyword_path, bundle = _keyword_bundle(tmp_path)
+    source = tmp_path / "source"
+    source.mkdir()
+    config = {
+        "schema_version": 1,
+        "git_commit": "source-commit",
+        "vocab": _identity(VOCAB_PATH),
+        "keyword_bias": _identity(keyword_path),
+        "keyword_set": "hard_k266",
+        "gate": {**GATE, "top_k": 5},
+        "retrieval": {"backend": "anchor_guided", "saved_raw_rank_depth": 20},
+    }
+    rows = [_row("delivery_20260706_ptbr", "delivery_sample", bundle)]
+    summary = {
+        "evaluation_scope": "complete_audio_to_ctc_anchor_retrieval_no_qwen_decoder",
+        "overall": _source_metrics(1),
+        "by_source": {"delivery_20260706_ptbr": _source_metrics(1)},
+    }
+    _write_json(source / "run_config.json", config)
+    (source / "retrieval_details.jsonl").write_text(json.dumps(rows[0]) + "\n", encoding="utf-8")
+    _write_json(source / "evaluation_summary.json", summary)
+    (source / "sha256.txt").write_text(
+        "".join(
+            f"{_sha256(source / name)}  {name}\n"
+            for name in ("run_config.json", "retrieval_details.jsonl", "evaluation_summary.json")
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "output"
+    comparison = replay_external_keyword_top7(
+        source_run=source,
+        vocab_path=VOCAB_PATH,
+        keyword_bias_path=keyword_path,
+        output_dir=output,
+    )
+
+    assert comparison["status"] == "pass"
+    assert not (output / "mls_retrieval_output.json").exists()
+    assert list(json.loads((output / "delivery_retrieval_output.json").read_text())) == [
+        "delivery_sample"
+    ]
+    assert "| Delivery | Top-7 |" in (output / "topk_comparison.md").read_text()
+    assert "| MLS |" not in (output / "topk_comparison.md").read_text()
+    manifest = (output / "sha256.txt").read_text()
+    assert "delivery_retrieval_output.json" in manifest
+    assert "mls_retrieval_output.json" not in manifest

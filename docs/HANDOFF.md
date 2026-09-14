@@ -1,5 +1,156 @@
 # 工作交接记录
 
+## 0.81 2026-09-14 Delivery专用热词表重跑与单来源Top-7交付
+
+前一轮MLS和Delivery共用了`pt_keyword_bias_phoneme.json`的`hard_k266`，因此
+Delivery统计中的174/179=97.21%最终Recall只覆盖这266个活动热词；不在
+`hard_k266`中的Delivery词没有进入Anchor索引，不可能被返回。`shortlist_size=64`
+是每条音频从完整活动热词表中取得的Anchor精排上限，不是全局只加载64个词。
+
+新的Delivery词表位于工区：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/pt_keyword_bias_phoneme_sd.json
+```
+
+已回传的静态结构审计显示：`keyword_sets.all_keywords`有362个不同词面，
+`keyword_phonemes`也有362个键，但有1个`all_keywords`词没有同名音素映射；
+`baseline`为空集合。新集合与旧`hard_k266`精确字符串重合9个，并集为619个。
+本轮必须使用`all_keywords`，但在修正或解释该1个缺失映射前不得启动完整模型，
+也不得静默丢弃该词。
+
+代码将`scripts/replay_external_keyword_top7.py`的已验证CPU精确重放扩展为接受
+MLS/Delivery的任意非空已知子集。新的Delivery-only源运行不再因缺少MLS而拒绝，
+只生成`delivery_retrieval_output.json`；旧的MLS+Delivery双来源行为、指标及两个
+独立交付文件保持不变。
+
+### 0.81.1 拉取与新词表阻塞审计
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+
+NEW_KEYWORDS=/host_home/star/q00933266/qwen3-asr-hotword/pt_keyword_bias_phoneme_sd.json
+
+jq '
+  . as $root |
+  {
+    missing_phoneme_words: [
+      $root.keyword_sets.all_keywords[]
+      | select(($root.keyword_phonemes[.] // "") == "")
+    ],
+    extra_phoneme_keys: [
+      ($root.keyword_phonemes | keys[]) as $key
+      | select(($root.keyword_sets.all_keywords | index($key)) == null)
+      | $key
+    ]
+  }
+' "$NEW_KEYWORDS"
+```
+
+先回传这个小型JSON。如`missing_phoneme_words`非空，在核对是否为词面大小写、
+重音或空格差异前停止；不要人工猜测音素，不要删除该词。
+
+### 0.81.2 Delivery-only CPU预检
+
+只有在362/362词都具备音素映射后才执行。使用新目录，不覆盖旧的
+MLS/Delivery共用词表结果：
+
+```bash
+MODEL=/glusterfs_103/models/Qwen3-ASR-1.7B
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+NEW_KEYWORDS=/host_home/star/q00933266/qwen3-asr-hotword/pt_keyword_bias_phoneme_sd.json
+DELIVERY_AUDIO=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/wav-total
+DELIVERY_TEXT=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/transcripts.txt
+DELIVERY_OUTPUT=outputs/pt_external_keyword_retrieval_delivery_sd_v1
+DELIVERY_TOP7_OUTPUT=outputs/pt_external_keyword_retrieval_delivery_sd_top7_replay_v1
+
+test -f "$MODEL/config.json"
+test -f "$CTC_CHECKPOINT"
+test -f "$VOCAB"
+test -f "$NEW_KEYWORDS"
+test -d "$DELIVERY_AUDIO"
+test -f "$DELIVERY_TEXT"
+test ! -e "$DELIVERY_OUTPUT"
+test ! -e "$DELIVERY_TOP7_OUTPUT"
+
+python scripts/run_external_keyword_retrieval.py \
+  --model "$MODEL" \
+  --ctc-checkpoint "$CTC_CHECKPOINT" \
+  --vocab "$VOCAB" \
+  --keyword-bias "$NEW_KEYWORDS" \
+  --keyword-set all_keywords \
+  --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" \
+  --output-dir "$DELIVERY_OUTPUT" \
+  --audit-only
+
+(cd "$DELIVERY_OUTPUT" && sha256sum -c sha256.txt)
+jq '{status, keyword_set, keyword_count, vocabulary_size, oov_keyword_count,
+  keywords_below_four_phonemes}' "$DELIVERY_OUTPUT/keyword_audit.json"
+jq '{status, sample_count, sources}' "$DELIVERY_OUTPUT/dataset_audit.json"
+```
+
+预检必须显示`keyword_set=all_keywords`、`keyword_count=362`、`oov_keyword_count=0`、
+Delivery 2,071条音频/转写一一匹配且没有MLS来源。任一不满足时停止，不启动GPU。
+
+### 0.81.3 H200完整检索、resume及Top-7交付
+
+预检通过后在同一D5目录上加`--resume`。该命令只读Delivery，不加载MLS：
+
+```bash
+GPU_ID=3
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_external_keyword_retrieval.py \
+  --model "$MODEL" \
+  --ctc-checkpoint "$CTC_CHECKPOINT" \
+  --vocab "$VOCAB" \
+  --keyword-bias "$NEW_KEYWORDS" \
+  --keyword-set all_keywords \
+  --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" \
+  --output-dir "$DELIVERY_OUTPUT" \
+  --device cuda:0 \
+  --dtype bfloat16 \
+  --resume
+```
+
+中断时原样重跑上述命令，保留`sample_shards`。D5完成并校验后，CPU精确重放
+Top-7；共享参数为threshold 0.75、posterior minimum 0.5、maximum edit ratio 0.35，
+唯一改变为Top-K 5到7：
+
+```bash
+(cd "$DELIVERY_OUTPUT" && sha256sum -c sha256.txt)
+
+python scripts/replay_external_keyword_top7.py \
+  --source-run "$DELIVERY_OUTPUT" \
+  --vocab "$VOCAB" \
+  --keyword-bias "$NEW_KEYWORDS" \
+  --keyword-set all_keywords \
+  --output-dir "$DELIVERY_TOP7_OUTPUT"
+
+(cd "$DELIVERY_TOP7_OUTPUT" && sha256sum -c sha256.txt)
+wc -l "$DELIVERY_TOP7_OUTPUT/top7_replay_details.jsonl"
+jq 'keys | length' "$DELIVERY_TOP7_OUTPUT/delivery_retrieval_output.json"
+cat "$DELIVERY_TOP7_OUTPUT/topk_comparison.md"
+```
+
+预期逐条详情和最终交付JSON都覆盖2,071条Delivery音频。交给Context Learning
+的文件只是：
+
+```text
+outputs/pt_external_keyword_retrieval_delivery_sd_top7_replay_v1/delivery_retrieval_output.json
+```
+
+schema与旧交付完全相同：每个音频stem映射到0至7个`{"word": ..., "phoneme": ...}`
+对象。请回传SHA校验、两个行数/键数和`topk_comparison.md`终端输出；不需要打包音频、
+checkpoint、sample shards或完整详情。
+
+本轮代码只改动Top-7交付工具的来源子集支持，不修改CTC、Anchor排名、门控、
+三语训练、4k评测或旧输出。本地定向13项测试和全仓254项pytest通过；Ruff、
+format、相关模块strict Mypy（skip第三方imports）和`git diff --check`通过。不带
+`--follow-imports=skip`的Mypy仍会因当前NumPy stub的Python 3.12 `type`语句与项目
+Python 3.10解析目标冲突而在第三方依赖解析阶段中止，不是本轮类型错误。
+
 ## 0.80 2026-09-11 当前两条推理入口的迁移与使用说明
 
 新增`docs/INFERENCE_USAGE.md`，集中记录当前代码仓已经实现的两条推理路径、准确能力边界、

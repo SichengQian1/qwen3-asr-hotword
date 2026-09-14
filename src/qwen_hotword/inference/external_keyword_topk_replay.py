@@ -15,17 +15,15 @@ from qwen_hotword.inference.external_keyword_retrieval import (
 )
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab
 
-SOURCE_OUTPUTS = {
+SUPPORTED_SOURCE_OUTPUTS = {
     "mls_portuguese": "mls_retrieval_output.json",
     "delivery_20260706_ptbr": "delivery_retrieval_output.json",
 }
-FINAL_FILES = (
+BASE_FINAL_FILES = (
     "run_config.json",
     "top7_replay_details.jsonl",
     "topk_comparison.json",
     "topk_comparison.md",
-    "mls_retrieval_output.json",
-    "delivery_retrieval_output.json",
     "README.md",
 )
 
@@ -76,10 +74,14 @@ def replay_external_keyword_top7(
     replay_rows = replay_rows_top7(rows, gate=gate, bundle=bundle)
 
     source_names = {str(row["source"]) for row in replay_rows}
-    if source_names != set(SOURCE_OUTPUTS):
+    unsupported_sources = source_names.difference(SUPPORTED_SOURCE_OUTPUTS)
+    if unsupported_sources:
         raise ValueError(
-            f"source names do not match the required MLS/Delivery split: {sorted(source_names)}"
+            f"source names do not have a downstream output mapping: {sorted(unsupported_sources)}"
         )
+    output_source_mapping = {
+        source_name: SUPPORTED_SOURCE_OUTPUTS[source_name] for source_name in sorted(source_names)
+    }
 
     profiles: dict[str, object] = {}
     for label, top_k in (("top5", 5), ("top7", 7)):
@@ -131,7 +133,7 @@ def replay_external_keyword_top7(
         "baseline_top_k": 5,
         "candidate_top_k": 7,
         "shared_gate": gate,
-        "output_source_mapping": SOURCE_OUTPUTS,
+        "output_source_mapping": output_source_mapping,
     }
 
     destination.mkdir(parents=True)
@@ -139,15 +141,21 @@ def replay_external_keyword_top7(
     _write_jsonl(destination / "top7_replay_details.jsonl", replay_rows)
     _write_json(destination / "topk_comparison.json", comparison)
     _atomic_write_text(destination / "topk_comparison.md", _markdown_table(comparison))
-    for source_name, filename in SOURCE_OUTPUTS.items():
+    for source_name, filename in output_source_mapping.items():
         selected_output = {
             str(row["sample_id"]): _delivery_items(row, bundle=bundle, top_k=7)
             for row in replay_rows
             if row["source"] == source_name
         }
         _write_json(destination / filename, selected_output)
-    _atomic_write_text(destination / "README.md", _readme(source, comparison))
-    _write_hash_manifest(destination)
+    _atomic_write_text(
+        destination / "README.md",
+        _readme(source, comparison, output_source_mapping=output_source_mapping),
+    )
+    _write_hash_manifest(
+        destination,
+        (*BASE_FINAL_FILES, *output_source_mapping.values()),
+    )
     return comparison
 
 
@@ -431,7 +439,8 @@ def _markdown_table(comparison: Mapping[str, Any]) -> str:
         "mls_portuguese": "MLS",
         "delivery_20260706_ptbr": "Delivery",
     }
-    for source_name in ("overall", "mls_portuguese", "delivery_20260706_ptbr"):
+    source_names = tuple(sorted(_mapping(_mapping(profiles, "top5"), "by_source")))
+    for source_name in ("overall", *source_names):
         for profile_name, top_k in (("top5", 5), ("top7", 7)):
             profile = _mapping(profiles, profile_name)
             metrics = (
@@ -463,7 +472,13 @@ def _markdown_table(comparison: Mapping[str, Any]) -> str:
     return "".join(lines)
 
 
-def _readme(source: Path, comparison: Mapping[str, object]) -> str:
+def _readme(
+    source: Path,
+    comparison: Mapping[str, object],
+    *,
+    output_source_mapping: Mapping[str, str],
+) -> str:
+    downstream_files = ", ".join(f"`{filename}`" for filename in output_source_mapping.values())
     return (
         "# External Portuguese Top-7 replay\n\n"
         "Exact CPU replay of threshold 0.75 / posterior 0.5 / Top-7 from the completed "
@@ -472,8 +487,7 @@ def _readme(source: Path, comparison: Mapping[str, object]) -> str:
         "is rerun.\n\n"
         f"Source run: `{source}`\n\n"
         f"Samples: `{comparison['sample_count']}`\n\n"
-        "Downstream files are split into `mls_retrieval_output.json` and "
-        "`delivery_retrieval_output.json`.\n"
+        f"Downstream files: {downstream_files}.\n"
     )
 
 
@@ -618,8 +632,8 @@ def _atomic_write_text(path: Path, value: str) -> None:
     os.replace(temporary, path)
 
 
-def _write_hash_manifest(destination: Path) -> None:
-    lines = [f"{_sha256(destination / name)}  {name}\n" for name in FINAL_FILES]
+def _write_hash_manifest(destination: Path, filenames: Sequence[str]) -> None:
+    lines = [f"{_sha256(destination / name)}  {name}\n" for name in filenames]
     _atomic_write_text(destination / "sha256.txt", "".join(lines))
 
 
