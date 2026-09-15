@@ -1,5 +1,114 @@
 # 工作交接记录
 
+## 0.82 2026-09-15 Delivery in/out 165词Top-5与Top-7重跑
+
+本轮使用新的Delivery专用热词文件，只运行Delivery 2,071条WAV，
+不读取或重跑MLS：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/pt_keyword_bias_phoneme-Delivery_20260706-inout.json
+```
+
+工区静态审计确认：`keyword_sets.baseline`为空，必须选择`all_keywords`；
+`all_keywords`共165个词，去重后仍为165个，165个词均有同名MFA音素映射。
+是否全部可映射到当前90类CTC词表由下述CPU预检严格验证；如有OOV则在加载
+完整模型前中止，不静默丢弃热词。
+
+拉取已支持Delivery-only Top-7精确重放的分支，最终SHA以本轮交付消息为准：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+设置本轮输入与全新输出目录：
+
+```bash
+MODEL=/glusterfs_103/models/Qwen3-ASR-1.7B
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+KEYWORDS_INOUT=/host_home/star/q00933266/qwen3-asr-hotword/pt_keyword_bias_phoneme-Delivery_20260706-inout.json
+DELIVERY_AUDIO=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/wav-total
+DELIVERY_TEXT=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/transcripts.txt
+DELIVERY_D5_ROOT=outputs/pt_external_keyword_retrieval_delivery_inout_top5_v1
+DELIVERY_D7_ROOT=outputs/pt_external_keyword_retrieval_delivery_inout_top7_v1
+
+test -f "$MODEL/config.json"
+test -f "$CTC_CHECKPOINT"
+test -f "$VOCAB"
+test -f "$KEYWORDS_INOUT"
+test -d "$DELIVERY_AUDIO"
+test -f "$DELIVERY_TEXT"
+test ! -e "$DELIVERY_D5_ROOT"
+test ! -e "$DELIVERY_D7_ROOT"
+```
+
+Top-5 CPU预检，该命令不加载模型：
+
+```bash
+python scripts/run_external_keyword_retrieval.py --model "$MODEL" --ctc-checkpoint "$CTC_CHECKPOINT" --vocab "$VOCAB" --keyword-bias "$KEYWORDS_INOUT" --keyword-set all_keywords --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" --output-dir "$DELIVERY_D5_ROOT" --device cuda:0 --dtype bfloat16 --audit-only
+
+(cd "$DELIVERY_D5_ROOT" && sha256sum -c sha256.txt)
+jq '{status, keyword_set, keyword_count, vocabulary_size, oov_keyword_count,
+  keywords_below_four_phonemes}' "$DELIVERY_D5_ROOT/keyword_audit.json"
+jq '{status, sample_count, sources}' "$DELIVERY_D5_ROOT/dataset_audit.json"
+```
+
+必须确认`keyword_set=all_keywords`、`keyword_count=165`、`oov_keyword_count=0`，
+并且只有Delivery 2,071条数据。预检不通过时停止，不启动GPU。
+
+预检通过后在同一目录加`--resume`运行Top-5；物理GPU 3仍映射为逻辑
+`cuda:0`，如GPU 3不空闲可只替换`GPU_ID`：
+
+```bash
+GPU_ID=3
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_external_keyword_retrieval.py --model "$MODEL" --ctc-checkpoint "$CTC_CHECKPOINT" --vocab "$VOCAB" --keyword-bias "$KEYWORDS_INOUT" --keyword-set all_keywords --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" --output-dir "$DELIVERY_D5_ROOT" --device cuda:0 --dtype bfloat16 --resume
+```
+
+中断时原样重跑最后一条命令，不删除`sample_shards`。Top-5完成后先校验源运行，
+再在CPU上对已保存的Anchor排名精确重放Top-7；不重读音频、不重跑Encoder或
+CTC Head。Top-5和Top-7共享threshold 0.75、posterior minimum 0.5、maximum
+edit ratio 0.35，唯一改变为Top-K：
+
+```bash
+(cd "$DELIVERY_D5_ROOT" && sha256sum -c sha256.txt)
+
+python scripts/replay_external_keyword_top7.py --source-run "$DELIVERY_D5_ROOT" --vocab "$VOCAB" --keyword-bias "$KEYWORDS_INOUT" --keyword-set all_keywords --output-dir "$DELIVERY_D7_ROOT"
+
+(cd "$DELIVERY_D7_ROOT" && sha256sum -c sha256.txt)
+```
+
+Top-5源结果已经是只含Delivery的目标schema。为了与Top-7交付文件同名，
+不覆盖源文件，只新增一个内容完全相同的显式交付副本：
+
+```bash
+test ! -e "$DELIVERY_D5_ROOT/delivery_retrieval_output.json"
+cp "$DELIVERY_D5_ROOT/retrieval_output.json" "$DELIVERY_D5_ROOT/delivery_retrieval_output.json"
+cmp "$DELIVERY_D5_ROOT/retrieval_output.json" "$DELIVERY_D5_ROOT/delivery_retrieval_output.json"
+sha256sum "$DELIVERY_D5_ROOT/delivery_retrieval_output.json" > "$DELIVERY_D5_ROOT/delivery_retrieval_output.sha256"
+
+jq 'keys | length' "$DELIVERY_D5_ROOT/delivery_retrieval_output.json"
+jq 'keys | length' "$DELIVERY_D7_ROOT/delivery_retrieval_output.json"
+wc -l "$DELIVERY_D7_ROOT/top7_replay_details.jsonl"
+cat "$DELIVERY_D7_ROOT/topk_comparison.md"
+```
+
+三个数量必须都是2,071。最终交给Context Learning的两个新文件为：
+
+```text
+Top-5:
+outputs/pt_external_keyword_retrieval_delivery_inout_top5_v1/delivery_retrieval_output.json
+
+Top-7:
+outputs/pt_external_keyword_retrieval_delivery_inout_top7_v1/delivery_retrieval_output.json
+```
+
+两者都保持每个音频stem映射到`[{"word": ..., "phoneme": ...}]`的原交付schema。
+请回传CPU预检摘要、两个SHA校验、三个数量以及`topk_comparison.md`；不需要打包
+音频、checkpoint、sample shards或完整详情。得到实测结果后再以独立结果提交
+更新本节。
+
 ## 0.81 2026-09-14 Delivery专用热词表重跑与单来源Top-7交付
 
 前一轮MLS和Delivery共用了`pt_keyword_bias_phoneme.json`的`hard_k266`，因此
