@@ -14,10 +14,11 @@ Delivery统计中的174/179=97.21%最终Recall只覆盖这266个活动热词；�
 ```
 
 已回传的静态结构审计显示：`keyword_sets.all_keywords`有362个不同词面，
-`keyword_phonemes`也有362个键，但有1个`all_keywords`词没有同名音素映射；
+`keyword_phonemes`也有362个键。后续审计已确认唯一的键不一致是集合词面`"Dra. "`
+末尾多一个空格，而对应音素键是`"Dra."`；音素并未缺失。
 `baseline`为空集合。新集合与旧`hard_k266`精确字符串重合9个，并集为619个。
-本轮必须使用`all_keywords`，但在修正或解释该1个缺失映射前不得启动完整模型，
-也不得静默丢弃该词。
+本轮必须使用`all_keywords`。保留原始文件不变，另行生成Delivery专用派生词表，
+只对该精确词面去除末尾空格；不删除热词、不猜测或修改MFA音素。
 
 代码将`scripts/replay_external_keyword_top7.py`的已验证CPU精确重放扩展为接受
 MLS/Delivery的任意非空已知子集。新的Delivery-only源运行不再因缺少MLS而拒绝，
@@ -49,8 +50,39 @@ jq '
 ' "$NEW_KEYWORDS"
 ```
 
-先回传这个小型JSON。如`missing_phoneme_words`非空，在核对是否为词面大小写、
-重音或空格差异前停止；不要人工猜测音素，不要删除该词。
+回传结果已精确确认`missing_phoneme_words=["Dra. "]`、
+`extra_phoneme_keys=["Dra."]`。生成不覆盖原文件的派生Delivery词表：
+
+```bash
+DELIVERY_KEYWORD_ROOT=outputs/pt_external_keyword_retrieval_delivery_sd_keyword_table_v1
+DELIVERY_KEYWORDS="$DELIVERY_KEYWORD_ROOT/pt_keyword_bias_phoneme_delivery.json"
+
+test ! -e "$DELIVERY_KEYWORD_ROOT"
+mkdir -p "$DELIVERY_KEYWORD_ROOT"
+
+jq '
+  .keyword_sets.all_keywords |= map(
+    if . == "Dra. " then "Dra." else . end
+  )
+' "$NEW_KEYWORDS" > "$DELIVERY_KEYWORDS"
+
+jq '
+  . as $root |
+  {
+    keyword_count: ($root.keyword_sets.all_keywords | length),
+    unique_keyword_count: ($root.keyword_sets.all_keywords | unique | length),
+    phoneme_mapping_count: ($root.keyword_phonemes | length),
+    missing_phoneme_words: [
+      $root.keyword_sets.all_keywords[]
+      | select(($root.keyword_phonemes[.] // "") == "")
+    ]
+  }
+' "$DELIVERY_KEYWORDS"
+
+sha256sum "$NEW_KEYWORDS" "$DELIVERY_KEYWORDS"
+```
+
+派生审计必须显示362/362/362且`missing_phoneme_words=[]`。
 
 ### 0.81.2 Delivery-only CPU预检
 
@@ -62,6 +94,7 @@ MODEL=/glusterfs_103/models/Qwen3-ASR-1.7B
 VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
 CTC_CHECKPOINT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
 NEW_KEYWORDS=/host_home/star/q00933266/qwen3-asr-hotword/pt_keyword_bias_phoneme_sd.json
+DELIVERY_KEYWORDS=outputs/pt_external_keyword_retrieval_delivery_sd_keyword_table_v1/pt_keyword_bias_phoneme_delivery.json
 DELIVERY_AUDIO=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/wav-total
 DELIVERY_TEXT=/home_91/z00816262/data/2026data/27A/data/Delivery_20260706/Delivery_20260706_PT-BR/transcripts.txt
 DELIVERY_OUTPUT=outputs/pt_external_keyword_retrieval_delivery_sd_v1
@@ -71,6 +104,7 @@ test -f "$MODEL/config.json"
 test -f "$CTC_CHECKPOINT"
 test -f "$VOCAB"
 test -f "$NEW_KEYWORDS"
+test -f "$DELIVERY_KEYWORDS"
 test -d "$DELIVERY_AUDIO"
 test -f "$DELIVERY_TEXT"
 test ! -e "$DELIVERY_OUTPUT"
@@ -80,7 +114,7 @@ python scripts/run_external_keyword_retrieval.py \
   --model "$MODEL" \
   --ctc-checkpoint "$CTC_CHECKPOINT" \
   --vocab "$VOCAB" \
-  --keyword-bias "$NEW_KEYWORDS" \
+  --keyword-bias "$DELIVERY_KEYWORDS" \
   --keyword-set all_keywords \
   --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" \
   --output-dir "$DELIVERY_OUTPUT" \
@@ -105,7 +139,7 @@ CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/run_external_keyword_retrieval.py 
   --model "$MODEL" \
   --ctc-checkpoint "$CTC_CHECKPOINT" \
   --vocab "$VOCAB" \
-  --keyword-bias "$NEW_KEYWORDS" \
+  --keyword-bias "$DELIVERY_KEYWORDS" \
   --keyword-set all_keywords \
   --source "delivery_20260706_ptbr=$DELIVERY_AUDIO,$DELIVERY_TEXT" \
   --output-dir "$DELIVERY_OUTPUT" \
@@ -124,7 +158,7 @@ Top-7；共享参数为threshold 0.75、posterior minimum 0.5、maximum edit rat
 python scripts/replay_external_keyword_top7.py \
   --source-run "$DELIVERY_OUTPUT" \
   --vocab "$VOCAB" \
-  --keyword-bias "$NEW_KEYWORDS" \
+  --keyword-bias "$DELIVERY_KEYWORDS" \
   --keyword-set all_keywords \
   --output-dir "$DELIVERY_TOP7_OUTPUT"
 
