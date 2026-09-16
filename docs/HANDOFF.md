@@ -1,5 +1,101 @@
 # 工作交接记录
 
+## 0.83 2026-09-16 葡语CTC同集分层诊断与新旧Head对比
+
+当前最高优先级已从端到端formal100切回CTC Head本身：最终三语Head在同一平衡
+validation上的English/Spanish/Portuguese PER分别为4.736%/3.910%/9.662%。葡语错误中
+deletion为4.205%，且reference phoneme/input frame约0.435，明显高于英语0.207和西语
+0.347。本轮只做只读归因，不训练、不重建feature cache、不加载Qwen Encoder、不读取
+sealed test，也不修改端到端、Anchor、Prompt或4k主线。
+
+新增：
+
+- `scripts/diagnose_portuguese_ctc.py`：从现有三语validation feature cache严格筛选
+  `balanced_language_bucket=pt`，在完全相同的hidden states和音素标签上依次评估最终三语
+  Head与旧葡语专用Head；
+- `src/qwen_hotword/training/portuguese_ctc_diagnostics.py`：同时按`source_corpus`、
+  `release_source`、二者交叉及每条样本`reference_tokens/effective_ctc_input_frames`稳定
+  三分位统计PER、substitution、deletion、insertion、预测/参考长度比和blank比例；
+- 逐样本配对比较记录三语Head相对葡语Head更好/更差/持平的数量及错误总差，并只保存
+  最多50条高PER或退化样本用于音频文本边界/G2P复核；
+- 两个checkpoint都必须匹配同一90类词表、1024维输入和Temporal 2×契约，否则在创建
+  结果结论前明确失败，不把不同标签空间或时间轴冒充公平对比。
+
+工作区拉取并确认本节交付SHA：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+只运行现有cache上的两个小型Head。输出目录必须全新；本工具不支持resume，失败时
+回传错误，不删除或覆盖任何旧outputs：
+
+```bash
+GPU_ID=3
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+CACHE=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1/validation
+MULTILINGUAL_HEAD=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt
+PORTUGUESE_HEAD=outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt
+OUTPUT=outputs/en_es_pt_balanced_ctc_pt_stratified_diagnostics_v1
+
+test -f "$VOCAB"
+test -f "$VALIDATION_ROOT/full_ctc_validation.jsonl"
+test -f "$CACHE/cache_summary.json"
+test -f "$MULTILINGUAL_HEAD"
+test -f "$PORTUGUESE_HEAD"
+test ! -e "$OUTPUT"
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/diagnose_portuguese_ctc.py \
+  --validation-cache "$CACHE" \
+  --validation-manifest "$VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab "$VOCAB" \
+  --multilingual-checkpoint "$MULTILINGUAL_HEAD" \
+  --portuguese-checkpoint "$PORTUGUESE_HEAD" \
+  --output-dir "$OUTPUT" \
+  --device cuda:0 \
+  --batch-size 256
+```
+
+完成后只需执行以下紧凑验收：
+
+```bash
+(cd "$OUTPUT" && sha256sum -c sha256.txt)
+
+jq 'def m: {
+  samples: .sample_count,
+  ref_ph: .reference_tokens,
+  frames: .input_frames,
+  per: .phoneme_error_rate,
+  sub: (.substitutions / .reference_tokens),
+  del: (.deletions / .reference_tokens),
+  ins: (.insertions / .reference_tokens),
+  hyp_ref: .hypothesis_reference_length_ratio
+}; {
+  status,
+  selection,
+  pressure_stratification,
+  checkpoint_sha256: (.inputs.checkpoints | with_entries(.value |= .sha256)),
+  checkpoints: (.checkpoints | with_entries(.value |= {
+    overall: (.validation | m),
+    by_dimension: (.validation_by_dimension |
+      with_entries(.value |= with_entries(.value |= m)))
+  })),
+  comparison
+}' "$OUTPUT/portuguese_ctc_diagnostics.json"
+
+wc -l "$OUTPUT/top_error_samples.jsonl"
+```
+
+请回传`portuguese_ctc_diagnostics.json`和`sha256.txt`两个小文件；只有需要人工复核具体
+错配样本时再回传`top_error_samples.jsonl`，不需要checkpoint、feature cache或音频。
+结果判定顺序固定为：先看release/source差异，再看压力桶单调性，最后看旧葡语Head是否
+在各桶一致优于三语Head。只有证据指向共享训练干扰时才讨论葡语增采样/语言条件化Head；
+若两个Head都在同一来源或高压力样本上退化，则优先审计标签、G2P与音频文本边界，不盲目
+增加同类语料时长。
+
 ## 0.82 2026-09-15 Delivery in/out 165词Top-5与Top-7重跑
 
 本轮使用新的Delivery专用热词文件，只运行Delivery 2,071条WAV，

@@ -151,8 +151,8 @@ def test_sharded_ctc_training_saves_and_resumes(
     head_type: str,
 ) -> None:
     torch = pytest.importorskip("torch")
-    train_dir, validation_dir, train_manifest, validation_manifest, vocab_path = (
-        _build_cache_pair(tmp_path)
+    train_dir, validation_dir, train_manifest, validation_manifest, vocab_path = _build_cache_pair(
+        tmp_path
     )
     train_cache = load_disk_feature_cache(
         train_dir,
@@ -226,6 +226,20 @@ def test_sharded_ctc_training_saves_and_resumes(
     macro_per = diagnostics["validation_macro_phoneme_error_rate"]
     assert isinstance(macro_per, float)
 
+    subset_diagnostics = diagnose_ctc_checkpoint(
+        output / "ctc_head_best.pt",
+        validation_cache,
+        vocab,
+        device=torch.device("cpu"),
+        batch_size=2,
+        selected_sample_ids={"validation-0"},
+        sample_groupings={"source": {"validation-0": "fixture"}},
+        include_sample_metrics=True,
+    )
+    assert subset_diagnostics["validation"]["sample_count"] == 1
+    assert subset_diagnostics["validation_by_dimension"]["source"]["fixture"]["sample_count"] == 1
+    assert [row["sample_id"] for row in subset_diagnostics["sample_metrics"]] == ["validation-0"]
+
     group_manifest = tmp_path / "validation-groups.jsonl"
     group_manifest.write_text(
         "".join(
@@ -289,8 +303,8 @@ def test_grouped_validation_training_records_macro_metrics_and_resumes(
     tmp_path: Path,
 ) -> None:
     torch = pytest.importorskip("torch")
-    train_dir, validation_dir, train_manifest, validation_manifest, vocab_path = (
-        _build_cache_pair(tmp_path)
+    train_dir, validation_dir, train_manifest, validation_manifest, vocab_path = _build_cache_pair(
+        tmp_path
     )
     train_cache = load_disk_feature_cache(
         train_dir,
