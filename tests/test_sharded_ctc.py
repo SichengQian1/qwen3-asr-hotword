@@ -23,6 +23,7 @@ from qwen_hotword.training.sharded_ctc import (
     load_feature_shard,
     train_sharded_ctc_head,
 )
+from qwen_hotword.training.train_sampling import TrainingSamplingPlan
 
 
 def _records(tmp_path: Path, split: str, count: int) -> list[ExperimentRecord]:
@@ -168,6 +169,17 @@ def test_sharded_ctc_training_saves_and_resumes(
     )
     vocab = load_phoneme_vocab(vocab_path)
     output = tmp_path / "run"
+    sampling_plan = TrainingSamplingPlan(
+        policy="fixture_sampling",
+        included_sample_ids=frozenset({"train-0", "train-1", "train-2"}),
+        oversample_pool_sample_ids=("train-0",),
+        oversample_strata={"fixture": ("train-0",)},
+        additional_samples_by_stratum={"fixture": 1},
+        additional_samples_per_epoch=1,
+        epoch_sample_count=4,
+        fingerprint="fixture-sampling-fingerprint",
+        summary={"schema_version": 1, "status": "pass"},
+    )
     common = {
         "vocab_path": vocab_path,
         "device": torch.device("cpu"),
@@ -181,6 +193,7 @@ def test_sharded_ctc_training_saves_and_resumes(
         "head_kernel_size": 3,
         "head_dropout": 0.0,
         "head_time_upsampling_factor": 2,
+        "train_sampling_plan": sampling_plan,
     }
 
     first = train_sharded_ctc_head(
@@ -206,10 +219,14 @@ def test_sharded_ctc_training_saves_and_resumes(
     assert resumed.epochs_completed == 2
     assert resumed.test_set_used is False
     assert resumed.early_stopping_metric == "validation_loss"
+    assert resumed.train_sampling_policy == "fixture_sampling"
+    assert resumed.train_samples_per_epoch == 4
+    assert resumed.train_sampling_plan_fingerprint == "fixture-sampling-fingerprint"
     assert resumed.head_config["head_type"] == head_type
     assert (output / "ctc_head_best.pt").is_file()
     assert (output / "ctc_head_latest.pt").is_file()
     assert (output / "training_state_latest.pt").is_file()
+    assert (output / "train_sampling_plan.json").is_file()
     assert len((output / "metrics.jsonl").read_text(encoding="utf-8").splitlines()) == 2
     diagnostics = diagnose_ctc_checkpoint(
         output / "ctc_head_best.pt",

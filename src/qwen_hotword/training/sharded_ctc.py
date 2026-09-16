@@ -9,7 +9,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from qwen_hotword.phonemes.coverage import PhonemeVocab
 from qwen_hotword.training.ctc_overfit import (
@@ -19,6 +19,9 @@ from qwen_hotword.training.ctc_overfit import (
     collate_cached_samples,
     save_ctc_head_checkpoint,
 )
+
+if TYPE_CHECKING:
+    from qwen_hotword.training.train_sampling import TrainingSamplingPlan
 
 SHARDED_CTC_SCHEMA_VERSION = 1
 EarlyStoppingMetric = Literal[
@@ -85,9 +88,9 @@ class GroupedValidationMetrics:
     def macro_phoneme_error_rate(self) -> float | None:
         if not self.by_group:
             return None
-        return sum(
-            metrics.phoneme_error_rate for metrics in self.by_group.values()
-        ) / len(self.by_group)
+        return sum(metrics.phoneme_error_rate for metrics in self.by_group.values()) / len(
+            self.by_group
+        )
 
     @property
     def worst_group(self) -> str | None:
@@ -112,9 +115,7 @@ class GroupedValidationMetrics:
             },
             "validation_macro_phoneme_error_rate": self.macro_phoneme_error_rate,
             "validation_worst_group": self.worst_group,
-            "validation_worst_group_phoneme_error_rate": (
-                self.worst_group_phoneme_error_rate
-            ),
+            "validation_worst_group_phoneme_error_rate": (self.worst_group_phoneme_error_rate),
         }
 
 
@@ -153,6 +154,9 @@ class ShardedCtcReport:
     validation_shard_count: int
     train_feature_bytes: int
     validation_feature_bytes: int
+    train_sampling_policy: str
+    train_sampling_plan_fingerprint: str | None
+    train_samples_per_epoch: int
     num_classes: int
     blank_id: int
     head_config: dict[str, object]
@@ -423,14 +427,8 @@ def load_feature_shard(
         or token_values[0] != 0
         or hidden_values[-1] != hidden.shape[0]
         or token_values[-1] != tokens.shape[0]
-        or any(
-            left > right
-            for left, right in zip(hidden_values, hidden_values[1:], strict=False)
-        )
-        or any(
-            left > right
-            for left, right in zip(token_values, token_values[1:], strict=False)
-        )
+        or any(left > right for left, right in zip(hidden_values, hidden_values[1:], strict=False))
+        or any(left > right for left, right in zip(token_values, token_values[1:], strict=False))
     ):
         raise ValueError(f"feature shard offset values are invalid: {descriptor.feature_path}")
     if (
@@ -479,6 +477,7 @@ def train_sharded_ctc_head(
     early_stopping_metric: EarlyStoppingMetric = "validation_loss",
     checkpoint_selection_metric: CheckpointSelectionMetric = "validation_per",
     validation_sample_groups: Mapping[str, str] | None = None,
+    train_sampling_plan: TrainingSamplingPlan | None = None,
     train_batch_size: int = 256,
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
@@ -518,8 +517,22 @@ def train_sharded_ctc_head(
         minimum_learning_rate=minimum_learning_rate,
         log_every_shards=log_every_shards,
     )
+    if train_sampling_plan is not None:
+        _validate_train_sampling_plan(train_cache, train_sampling_plan)
     destination = Path(output_dir).expanduser()
     destination.mkdir(parents=True, exist_ok=True)
+    sampling_plan_path = destination / "train_sampling_plan.json"
+    if train_sampling_plan is not None:
+        sampling_payload = {
+            **train_sampling_plan.summary,
+            "identity": train_sampling_plan.identity_dict(),
+        }
+        if sampling_plan_path.is_file():
+            existing_sampling_payload = _read_object(sampling_plan_path)
+            if existing_sampling_payload != sampling_payload:
+                raise ValueError("existing train sampling plan differs from this run")
+        else:
+            _write_json(sampling_plan_path, sampling_payload)
     blank_id = 0
     normalized_validation_groups = _validate_validation_sample_groups(
         validation_cache,
@@ -592,6 +605,8 @@ def train_sharded_ctc_head(
                 ),
             }
         )
+    if train_sampling_plan is not None:
+        fingerprint_hyperparameters["train_sampling_plan"] = train_sampling_plan.identity_dict()
     run_fingerprint = _training_fingerprint(
         train_cache,
         validation_cache,
@@ -647,9 +662,7 @@ def train_sharded_ctc_head(
         )
         raw_best_train = state.get("best_train")
         best_train = (
-            _epoch_metric_from_dict(raw_best_train)
-            if isinstance(raw_best_train, dict)
-            else None
+            _epoch_metric_from_dict(raw_best_train) if isinstance(raw_best_train, dict) else None
         )
         patience_reference_value = float(state["patience_reference_value"])
         stale_epochs = _required_int(state, "stale_epochs")
@@ -662,8 +675,7 @@ def train_sharded_ctc_head(
         print(f"resumed full CTC training from epoch {completed_epoch}", flush=True)
     else:
         if not resume and any(
-            path.exists()
-            for path in (training_state_path, metrics_path, best_checkpoint_path)
+            path.exists() for path in (training_state_path, metrics_path, best_checkpoint_path)
         ):
             raise ValueError("training output already exists; use --resume or a new output dir")
         print("evaluating fresh random CTC head on validation cache", flush=True)
@@ -720,6 +732,7 @@ def train_sharded_ctc_head(
             epoch=epoch,
             seed=seed,
             log_every_shards=log_every_shards,
+            sampling_plan=train_sampling_plan,
         )
         validation_result = _evaluate_cache(
             head,
@@ -823,6 +836,17 @@ def train_sharded_ctc_head(
         validation_shard_count=validation_cache.shard_count,
         train_feature_bytes=train_cache.feature_bytes,
         validation_feature_bytes=validation_cache.feature_bytes,
+        train_sampling_policy=(
+            train_sampling_plan.policy if train_sampling_plan is not None else "all_samples_once"
+        ),
+        train_sampling_plan_fingerprint=(
+            train_sampling_plan.fingerprint if train_sampling_plan is not None else None
+        ),
+        train_samples_per_epoch=(
+            train_sampling_plan.epoch_sample_count
+            if train_sampling_plan is not None
+            else train_cache.sample_count
+        ),
         num_classes=len(vocab.tokens),
         blank_id=blank_id,
         head_config=head_configuration,
@@ -867,9 +891,7 @@ def train_sharded_ctc_head(
         best_validation_loss=best_validation.loss,
         best_validation_phoneme_error_rate=best_validation.phoneme_error_rate,
         best_validation_by_group=_validation_group_report(best_validation_result),
-        best_validation_macro_phoneme_error_rate=(
-            best_validation_result.macro_phoneme_error_rate
-        ),
+        best_validation_macro_phoneme_error_rate=(best_validation_result.macro_phoneme_error_rate),
         best_validation_worst_group=best_validation_result.worst_group,
         best_validation_worst_group_phoneme_error_rate=(
             best_validation_result.worst_group_phoneme_error_rate
@@ -892,8 +914,7 @@ def train_sharded_ctc_head(
         training_state_path=str(training_state_path),
         metrics_path=str(metrics_path),
         early_stopped=early_stopped,
-        cache_sha256_verified=train_cache.sha256_verified
-        and validation_cache.sha256_verified,
+        cache_sha256_verified=train_cache.sha256_verified and validation_cache.sha256_verified,
         selection_metric=_checkpoint_selection_description(checkpoint_selection_metric),
         test_set_used=False,
         status="completed",
@@ -914,12 +935,21 @@ def _train_cache_epoch(
     epoch: int,
     seed: int,
     log_every_shards: int,
+    sampling_plan: TrainingSamplingPlan | None = None,
 ) -> EpochMetrics:
     import torch
 
     from qwen_hotword.modeling.ctc_head import compute_ctc
 
     generator = random.Random(seed + epoch)
+    additional_repeat_counts = (
+        sampling_plan.additional_repeat_counts(epoch=epoch, seed=seed)
+        if sampling_plan is not None
+        else {}
+    )
+    expected_sample_count = (
+        sampling_plan.epoch_sample_count if sampling_plan is not None else cache.sample_count
+    )
     descriptors = list(cache.shards)
     generator.shuffle(descriptors)
     head.train()
@@ -929,6 +959,15 @@ def _train_cache_epoch(
     total_reference = 0
     for shard_position, descriptor in enumerate(descriptors, start=1):
         samples = load_feature_shard(descriptor, num_classes=head.num_classes)
+        if sampling_plan is not None:
+            selected_samples: list[CachedSample] = []
+            for sample in samples:
+                if sample.sample_id not in sampling_plan.included_sample_ids:
+                    continue
+                selected_samples.extend(
+                    [sample] * (1 + additional_repeat_counts.get(sample.sample_id, 0))
+                )
+            samples = selected_samples
         indices = list(range(len(samples)))
         generator.shuffle(indices)
         for start in range(0, len(indices), batch_size):
@@ -967,10 +1006,15 @@ def _train_cache_epoch(
         ):
             print(
                 f"epoch={epoch:03d} trained_shards={shard_position}/{len(descriptors)} "
-                f"samples={sample_count}/{cache.sample_count}",
+                f"samples={sample_count}/{expected_sample_count}",
                 flush=True,
             )
         del samples
+    if sample_count != expected_sample_count:
+        raise RuntimeError(
+            "training sampling plan produced an unexpected epoch sample count: "
+            f"actual={sample_count}, expected={expected_sample_count}"
+        )
     return _finalize_metrics(
         epoch,
         loss_sum=loss_sum,
@@ -1007,8 +1051,8 @@ def _evaluate_cache(
             samples = load_feature_shard(descriptor, num_classes=head.num_classes)
             for start in range(0, len(samples), batch_size):
                 batch = samples[start : start + batch_size]
-                hidden_states, input_lengths, targets, target_lengths = (
-                    collate_cached_samples(batch, device=device, blank_id=blank_id)
+                hidden_states, input_lengths, targets, target_lengths = collate_cached_samples(
+                    batch, device=device, blank_id=blank_id
                 )
                 computation = compute_ctc(
                     head,
@@ -1170,8 +1214,7 @@ def _validate_training_arguments(
         "validation_macro_per",
     }:
         raise ValueError(
-            "early stopping metric must be validation_loss, validation_per, "
-            "or validation_macro_per"
+            "early stopping metric must be validation_loss, validation_per, or validation_macro_per"
         )
     if checkpoint_selection_metric not in {
         "validation_per",
@@ -1195,6 +1238,34 @@ def _validate_training_arguments(
         raise ValueError("learning rates and gradient norm must be positive")
     if not 0 < scheduler_factor < 1:
         raise ValueError("scheduler factor must be between zero and one")
+
+
+def _validate_train_sampling_plan(
+    cache: DiskFeatureCache,
+    plan: TrainingSamplingPlan,
+) -> None:
+    cache_ids = {sample_id for descriptor in cache.shards for sample_id in descriptor.sample_ids}
+    included = set(plan.included_sample_ids)
+    pool = set(plan.oversample_pool_sample_ids)
+    if not included or not pool:
+        raise ValueError("training sampling plan has an empty included set or oversample pool")
+    if not included <= cache_ids or not pool <= included:
+        raise ValueError("training sampling plan sample IDs do not match the train cache")
+    stratum_ids = [
+        sample_id for sample_ids in plan.oversample_strata.values() for sample_id in sample_ids
+    ]
+    if len(stratum_ids) != len(set(stratum_ids)) or not set(stratum_ids) <= pool:
+        raise ValueError(
+            "training sampling plan strata overlap or fall outside the oversample pool"
+        )
+    if set(plan.oversample_strata) != set(plan.additional_samples_by_stratum):
+        raise ValueError("training sampling plan strata and draw counts differ")
+    if sum(plan.additional_samples_by_stratum.values()) != plan.additional_samples_per_epoch:
+        raise ValueError("training sampling plan stratum draw total is inconsistent")
+    if plan.additional_samples_per_epoch <= 0:
+        raise ValueError("training sampling plan must add positive sample exposure")
+    if plan.epoch_sample_count != len(included) + plan.additional_samples_per_epoch:
+        raise ValueError("training sampling plan epoch count is inconsistent")
 
 
 def _training_fingerprint(
@@ -1234,8 +1305,7 @@ def _early_stopping_value(
             raise ValueError("validation_macro_per requires grouped validation metrics")
         return value
     raise ValueError(
-        "early stopping metric must be validation_loss, validation_per, "
-        "or validation_macro_per"
+        "early stopping metric must be validation_loss, validation_per, or validation_macro_per"
     )
 
 
@@ -1251,9 +1321,7 @@ def _checkpoint_selection_key(
         if macro is None or worst is None:
             raise ValueError("validation_macro_per selection requires grouped metrics")
         return (macro, worst, metrics.overall.loss)
-    raise ValueError(
-        "checkpoint selection metric must be validation_per or validation_macro_per"
-    )
+    raise ValueError("checkpoint selection metric must be validation_per or validation_macro_per")
 
 
 def _checkpoint_selection_description(metric: CheckpointSelectionMetric) -> str:
@@ -1264,9 +1332,7 @@ def _checkpoint_selection_description(metric: CheckpointSelectionMetric) -> str:
             "validation_macro_phoneme_error_rate_then_worst_group_"
             "phoneme_error_rate_then_validation_loss"
         )
-    raise ValueError(
-        "checkpoint selection metric must be validation_per or validation_macro_per"
-    )
+    raise ValueError("checkpoint selection metric must be validation_per or validation_macro_per")
 
 
 def _validation_group_log(metrics: GroupedValidationMetrics) -> str:
@@ -1279,19 +1345,13 @@ def _validation_group_log(metrics: GroupedValidationMetrics) -> str:
         f"val_{group}_PER={value.phoneme_error_rate:.4f}"
         for group, value in sorted(metrics.by_group.items())
     )
-    return (
-        f"val_macro_PER={macro:.4f} "
-        f"val_worst={worst_group}:{worst_per:.4f} "
-        f"{group_values} "
-    )
+    return f"val_macro_PER={macro:.4f} val_worst={worst_group}:{worst_per:.4f} {group_values} "
 
 
 def _validation_group_report(
     metrics: GroupedValidationMetrics,
 ) -> dict[str, dict[str, object]]:
-    return {
-        group: value.to_dict() for group, value in sorted(metrics.by_group.items())
-    }
+    return {group: value.to_dict() for group, value in sorted(metrics.by_group.items())}
 
 
 def _validate_validation_sample_groups(
@@ -1303,9 +1363,7 @@ def _validate_validation_sample_groups(
     normalized = dict(sample_groups)
     if any(not isinstance(group, str) or not group for group in normalized.values()):
         raise ValueError("validation sample groups must be non-empty strings")
-    cache_ids = {
-        sample_id for descriptor in cache.shards for sample_id in descriptor.sample_ids
-    }
+    cache_ids = {sample_id for descriptor in cache.shards for sample_id in descriptor.sample_ids}
     group_ids = set(normalized)
     if cache_ids != group_ids:
         raise ValueError(

@@ -1,5 +1,159 @@
 # 工作交接记录
 
+## 0.84 2026-09-16 葡语original-ready同曝光CTC Head消融训练
+
+0.83同集诊断已在H200完成并通过：2,662条葡语validation上，当前三语
+Head PER为9.6618%，旧葡语专用Head为9.0324%，绝对差0.6294点。三语Head的
+`original_ready`/`temporal_2x_recovery` PER分别为8.4366%/11.8273%，旧葡语Head
+分别为7.8537%/11.1156%。高标签密度三分位在两个Head上均显著更差，因此下一步
+先验证recovery训练样本是否会拖累Head，不修改Head结构。
+
+当前平衡train中葡语为100,499条/150.000337小时：
+
+```text
+original_ready:       69,918条 / 108.522236小时
+temporal_2x_recovery: 30,581条 /  41.478101小时
+```
+
+本次是低成本因果消融，不冒充为新的150小时唯一样本数据集：
+
+- 英语、西语每条仍每epoch恰好一次；
+- 葡语30,581条`temporal_2x_recovery`全部从训练采样排除；
+- 从69,918条已缓存的葡语`original_ready`中，每epoch按`source_corpus`分层
+  确定性补抽30,581次，保持各corpus的记录曝光数与基线一致；
+- 总训练样本曝光仍为310,257条/epoch，不因删除recovery减少optimizer step；
+- 每epoch重抽子集随epoch变化，但由seed和来源名确定，resume可复现；
+- 复用现有43.3 GB的三语train feature cache，不加载Qwen Encoder、不重建cache、
+  不读sealed test；
+- validation保持完整8,101条和en/es/pt Macro选模，不删除困难验证样本。
+
+新采样plan严格验证train Manifest与cache ID完全一致，并将Manifest SHA、cache
+fingerprint、包含ID SHA、各来源pool/补抽数和plan fingerprint写入
+`train_sampling_plan.json`。该fingerprint已绑定training state；改变采样后不会误resume。
+
+工作区拉取并确认本节交付SHA：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+首次训练必须使用全新目录：
+
+```bash
+GPU_ID=3
+VOCAB=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+TRAIN_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_v2
+VALIDATION_ROOT=outputs/en_es_pt_balanced_validation_4h_v1
+CACHE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1
+BASELINE_ROOT=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1
+ABLATION_ROOT=outputs/en_es_pt_balanced_150h_pt_original_resample_ctc_formal_macro_v1
+
+test -f "$BASELINE_ROOT/ctc_head_best.pt"
+test ! -e "$ABLATION_ROOT"
+
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/train_full_ctc.py \
+  --train-cache "$CACHE_ROOT/train" \
+  --validation-cache "$CACHE_ROOT/validation" \
+  --train-manifest "$TRAIN_ROOT/full_ctc_train.jsonl" \
+  --validation-manifest "$VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab "$VOCAB" \
+  --output-dir "$ABLATION_ROOT" \
+  --device cuda:0 \
+  --epochs 30 \
+  --minimum-epochs 5 \
+  --early-stopping-patience 6 \
+  --early-stopping-min-delta 0.001 \
+  --early-stopping-metric validation_macro_per \
+  --checkpoint-selection-metric validation_macro_per \
+  --validation-group-column balanced_language_bucket \
+  --expected-validation-groups en,es,pt \
+  --train-batch-size 256 \
+  --learning-rate 0.0003 \
+  --weight-decay 0.0001 \
+  --max-gradient-norm 5 \
+  --scheduler-patience 2 \
+  --scheduler-factor 0.5 \
+  --minimum-learning-rate 0.00001 \
+  --seed 20260825 \
+  --log-every-shards 25 \
+  --head-type temporal_upsample \
+  --head-hidden-dimension 512 \
+  --head-kernel-size 5 \
+  --head-dropout 0.1 \
+  --head-time-upsampling-factor 2 \
+  --train-sampling-policy pt_original_ready_equal_record_exposure
+```
+
+若中断，保留原目录，删除上面的`test ! -e` 验收行，在完全相同命令末尾加
+`--resume`。不改seed、数据、采样policy或超参强续原目录。
+
+完成后先做紧凑验收：
+
+```bash
+jq '{status,policy,cache_sample_count,included_unique_sample_count,
+  excluded_portuguese_recovery_sample_count,
+  portuguese_original_unique_sample_count,
+  portuguese_original_oversample_pool_count,
+  additional_portuguese_original_draws_per_epoch,epoch_sample_count,
+  language_input,portuguese_release_input,portuguese_source_release_input,
+  identity,fingerprint,test_set_used}' "$ABLATION_ROOT/train_sampling_plan.json"
+
+jq '{status,train_sampling_policy,train_sampling_plan_fingerprint,
+  train_samples_per_epoch,best_epoch,best_validation_phoneme_error_rate,
+  best_validation_macro_phoneme_error_rate,best_validation_by_group,
+  early_stopped,test_set_used,cache_sha256_verified}' "$ABLATION_ROOT/report.json"
+
+jq -c '{epoch,learning_rate,train_per:.train.phoneme_error_rate,
+  validation_per:.validation.phoneme_error_rate,
+  macro_per:.validation_macro_phoneme_error_rate,
+  by_group:(.validation_by_group|with_entries(.value=.value.phoneme_error_rate)),
+  epoch_seconds}' "$ABLATION_ROOT/metrics.jsonl"
+
+sha256sum "$ABLATION_ROOT/ctc_head_best.pt" \
+  "$ABLATION_ROOT/report.json" \
+  "$ABLATION_ROOT/metrics.jsonl" \
+  "$ABLATION_ROOT/train_sampling_plan.json"
+```
+
+再将新三语Head放到完全相同的葡语2,662条validation上，与旧葡语专用Head
+做同集分层诊断。上轮当前三语Head的诊断作为已冻结baseline，不覆盖：
+
+```bash
+PT_HEAD=outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt
+PT_DIAG_ROOT=outputs/en_es_pt_balanced_ctc_pt_original_resample_stratified_diagnostics_v1
+
+test ! -e "$PT_DIAG_ROOT"
+CUDA_VISIBLE_DEVICES="$GPU_ID" python scripts/diagnose_portuguese_ctc.py \
+  --validation-cache "$CACHE_ROOT/validation" \
+  --validation-manifest "$VALIDATION_ROOT/full_ctc_validation.jsonl" \
+  --vocab "$VOCAB" \
+  --multilingual-checkpoint "$ABLATION_ROOT/ctc_head_best.pt" \
+  --portuguese-checkpoint "$PT_HEAD" \
+  --output-dir "$PT_DIAG_ROOT" \
+  --device cuda:0 \
+  --batch-size 256
+
+(cd "$PT_DIAG_ROOT" && sha256sum -c sha256.txt)
+```
+
+请回传以下小文件，不需要checkpoint、training state、feature cache或音频：
+
+```text
+en_es_pt_balanced_150h_pt_original_resample_ctc_formal_macro_v1/
+  train_sampling_plan.json
+  report.json
+  metrics.jsonl
+en_es_pt_balanced_ctc_pt_original_resample_stratified_diagnostics_v1/
+  portuguese_ctc_diagnostics.json
+  sha256.txt
+```
+
+只有当新Head在未改动的完整validation上降低葡语PER，且英/西PER没有不可接受退化，
+才构建真正的“150小时唯一original-ready葡语”新Manifest，用未选中的同corpus
+original-ready样本替换重抽；本轮不重建数据或Encoder cache。
+
 ## 0.83 2026-09-16 葡语CTC同集分层诊断与新旧Head对比
 
 当前最高优先级已从端到端formal100切回CTC Head本身：最终三语Head在同一平衡

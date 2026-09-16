@@ -16,6 +16,10 @@ from qwen_hotword.training.sharded_ctc import (
     load_disk_feature_cache,
     train_sharded_ctc_head,
 )
+from qwen_hotword.training.train_sampling import (
+    PT_ORIGINAL_READY_EQUAL_RECORD_EXPOSURE,
+    build_portuguese_original_ready_sampling_plan,
+)
 
 DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json"
 
@@ -42,9 +46,7 @@ def main() -> int:
         "--early-stopping-metric",
         choices=("validation_loss", "validation_per", "validation_macro_per"),
         default="validation_loss",
-        help=(
-            "Metric used to count stale epochs. Macro PER requires validation groups."
-        ),
+        help=("Metric used to count stale epochs. Macro PER requires validation groups."),
     )
     parser.add_argument(
         "--checkpoint-selection-metric",
@@ -83,6 +85,16 @@ def main() -> int:
     parser.add_argument("--head-kernel-size", type=int, default=5)
     parser.add_argument("--head-dropout", type=float, default=0.1)
     parser.add_argument("--head-time-upsampling-factor", type=int, default=2)
+    parser.add_argument(
+        "--train-sampling-policy",
+        choices=("all_samples_once", PT_ORIGINAL_READY_EQUAL_RECORD_EXPOSURE),
+        default="all_samples_once",
+        help=(
+            "Optional train-only ablation. The Portuguese original-ready policy "
+            "excludes pt temporal recovery records and deterministically redraws "
+            "pt original-ready records to preserve the epoch record count."
+        ),
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--skip-cache-sha256-verification", action="store_true")
     args = parser.parse_args()
@@ -115,16 +127,12 @@ def main() -> int:
                 if value.strip()
             )
             if expected_validation_groups and not args.validation_group_column:
-                raise ValueError(
-                    "--expected-validation-groups requires --validation-group-column"
-                )
+                raise ValueError("--expected-validation-groups requires --validation-group-column")
             if (
                 args.early_stopping_metric == "validation_macro_per"
                 or args.checkpoint_selection_metric == "validation_macro_per"
             ) and not args.validation_group_column:
-                raise ValueError(
-                    "Macro validation metrics require --validation-group-column"
-                )
+                raise ValueError("Macro validation metrics require --validation-group-column")
             validation_sample_groups = (
                 load_validation_sample_groups(
                     args.validation_manifest,
@@ -133,6 +141,14 @@ def main() -> int:
                     expected_groups=expected_validation_groups,
                 )
                 if args.validation_group_column
+                else None
+            )
+            train_sampling_plan = (
+                build_portuguese_original_ready_sampling_plan(
+                    args.train_manifest,
+                    train_cache,
+                )
+                if args.train_sampling_policy == PT_ORIGINAL_READY_EQUAL_RECORD_EXPOSURE
                 else None
             )
             print(
@@ -147,6 +163,12 @@ def main() -> int:
                         "cache_sha256_verified": verify_sha256,
                         "validation_group_column": args.validation_group_column,
                         "validation_groups": list(expected_validation_groups),
+                        "train_sampling_policy": args.train_sampling_policy,
+                        "train_sampling_plan": (
+                            train_sampling_plan.identity_dict()
+                            if train_sampling_plan is not None
+                            else None
+                        ),
                         "device": args.device,
                         "test_set_used": False,
                     },
@@ -168,6 +190,7 @@ def main() -> int:
                 early_stopping_metric=args.early_stopping_metric,
                 checkpoint_selection_metric=args.checkpoint_selection_metric,
                 validation_sample_groups=validation_sample_groups,
+                train_sampling_plan=train_sampling_plan,
                 train_batch_size=args.train_batch_size,
                 learning_rate=args.learning_rate,
                 weight_decay=args.weight_decay,
