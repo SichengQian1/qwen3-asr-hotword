@@ -1,5 +1,61 @@
 # 工作交接记录
 
+## 0.85 2026-09-18 葡语validation原始转写元数据只读核对入口
+
+当前主线是核实葡语validation的标注依据；暂停重训、人工发音盲审和纯推理入口移植。
+训练隔离检查已由用户完成，本入口不重复读取训练清单，不读取sealed test。
+不能把`original_ready`、原始文字一致或MFA对齐成功当作逐音素标签准确的证明。
+
+用户无法方便地向H200粘贴长Python命令，因此将现有检查封装为：
+
+- `scripts/audit_pt_validation_metadata.py`：默认加载工作区配置，一条短命令运行；
+- `configs/pt_validation_metadata.workzone.json`：保存已确认的候选清单SHA和原始数据路径；
+- `src/qwen_hotword/training/pt_validation_metadata.py`：只读核对Common Voice原始
+  `validated.tsv`，预览FLEURS **train** TSV前两行的格式，不加载任何模型；
+- `tests/test_pt_validation_metadata.py`：覆盖超长字段、未闭合文字引号、列数异常、
+  重复元数据、路径精确关联、文字差异、SHA失败和CLI运行。
+
+修复此前内联命令的`csv.Error: field larger than field limit (131072)`：Common Voice
+按物理行及制表符解析，保留文字中的引号；严格验证每行列数。格式不符合预期即报错，
+不跳过、不修补原始行。该模式下序列化差异也可能造成`text_difference`，必须查看
+示例后解释，不能自动认定为错标。核对不使用CTC预测、不筛选新集合、不重写参考标签。
+
+交付分支为`codex/g2p-coverage-scan`。H200仓库目录执行：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git log -1 --format='%H %s'
+python -B scripts/audit_pt_validation_metadata.py
+```
+
+拉取后的SHA应与本次交付回复提供的远端SHA一致，提交标题为
+`Add read-only Portuguese validation metadata audit`。若拉取失败或SHA不符，先停止，
+不要reset、覆盖或清理工作区。
+
+默认配置使用`outputs/pt_combined_temporal2x_v1/full_ctc_validation.jsonl`，其SHA必须为
+`196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524`；不匹配直接退出。
+配置中的相对路径相对仓库根目录解析；其他环境可通过`--config PATH`提供同结构JSON。
+
+输出目录政策：本入口不创建输出目录，不修改任何outputs，只向终端打印紧凑JSON。
+`-B`避免新增Python字节码文件。不需要`--resume`；中断后直接重复同一命令。
+无需下载模型、申请GPU或传输完整语料。仅回传打印的JSON；报错则回传简短错误。
+
+验收：命令退出码为0，JSON中`status=completed`、`model_loaded=false`、
+`test_set_used=false`、`files_written=false`，`cv_checks`各项总数等于`cv_candidates`。
+报告包含候选清单和CV原始元数据SHA、文字匹配分类、审核票数/口音分布、已知说话人数、
+最多3条差异示例及FLEURS前2行格式。示例字段最多240字符并标记截断，审核票数最多20组。
+
+`completed`仅表示检查运行完成；缺失/重复元数据、空文字、文字差异均作为事实报告，
+不自动改为“数据干净/不干净”。FLEURS当前仅看格式，尚未完成原始转写关联。
+本阶段不运行MFA，也不核实实际发音。收到结果后再确定FLEURS逐条关联和独立声学检查。
+本地合成测试只验证程序行为，不能当作H200质量结果。
+
+本地验证：定向pytest 8 passed；全量pytest 244 passed / 23 skipped；新增文件Ruff、
+新增模块Mypy和`git diff --check`通过。全仓`ruff check .`另报用户未跟踪PPT脚本的
+2处E501（未修改）及既有`scan_g2p_coverage.py`的3处E501；`mypy src`另报既有
+`ctc_overfit.py`、`sharded_ctc.py`、`unfrozen_encoder_ctc.py`的3处unused-ignore。
+在原始`1e28ad1`独立导出副本复跑，确认仓库内上述Ruff/Mypy报错已存在，未因本次新增。
+
 ## 0.84 2026-09-16 葡语original-ready同曝光CTC Head消融训练
 
 0.83同集诊断已在H200完成并通过：2,662条葡语validation上，当前三语

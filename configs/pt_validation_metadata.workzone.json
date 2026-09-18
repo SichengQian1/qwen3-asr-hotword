@@ -1,0 +1,6 @@
+{
+  "validation_manifest": "outputs/pt_combined_temporal2x_v1/full_ctc_validation.jsonl",
+  "validation_sha256": "196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524",
+  "common_voice_root": "/host_home/z00841352/27A/data/Common_Voice_Scripted_Speech_25.0/cv-corpus-25.0-2026-03-09/pt",
+  "fleurs_train_tsv": "/host_home/z00841352/27A/data/Fleurs/fleurs_wav/Portuguese/train.tsv"
+}
