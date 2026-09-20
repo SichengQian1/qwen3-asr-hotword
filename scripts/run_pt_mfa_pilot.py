@@ -22,10 +22,11 @@ def main() -> int:
     parser.add_argument(
         "--output-dir", type=Path, help="Must not exist; default creates a fresh run."
     )
+    parser.add_argument("--assets-dir", type=Path, help="Previously downloaded MFA asset directory")
     args = parser.parse_args()
     try:
         config = json.loads(args.config.read_text(encoding="utf-8"))
-        report = run_pilot(config, REPO_ROOT, args.output_dir)
+        report = run_pilot(config, REPO_ROOT, args.output_dir, args.assets_dir)
     except (OSError, ValueError, KeyError) as error:
         parser.error(str(error))
     return 0 if report["status"] == "completed" else 1

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from qwen_hotword.training.g2p_prep import digit_fragments, extract_word_tokens
+from qwen_hotword.training.pt_mfa_assets import DEFAULT_ASSETS, VERSION, verify_assets
 from qwen_hotword.training.pt_mfa_pilot import (
     inspect_alignment,
     select_pilot,
@@ -92,7 +93,10 @@ def alignment_command(
 
 
 def run_pilot(
-    config: dict[str, Any], repo_root: Path, output_dir: Path | None = None
+    config: dict[str, Any],
+    repo_root: Path,
+    output_dir: Path | None = None,
+    assets_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Fresh output only; any failure is preserved with a compact JSON report."""
     manifest = repo_root / config["validation_manifest"]
@@ -117,7 +121,7 @@ def run_pilot(
     logs.mkdir()
     corpus.mkdir()
     env = dict(os.environ)
-    # Isolate all MFA-managed global state, downloads and scratch from existing outputs/caches.
+    # Isolate all MFA-managed global state and scratch from existing outputs/caches.
     env["MFA_ROOT_DIR"] = str(root / "mfa_root")
     env["TMPDIR"] = str(root / "scratch")
     (root / "scratch").mkdir()
@@ -141,6 +145,7 @@ def run_pilot(
         "test_set_used": False,
         "labels_changed": False,
         "mfa_alignment_invoked": False,
+        "asset_policy": "local_verified_only_no_download",
         "limitations": [
             "Flags are review signals, not confirmed label errors; aligned does not mean clean.",
             "Equal-source/stratum oversampling: raw flag rates are not pool error prevalence.",
@@ -163,16 +168,32 @@ def run_pilot(
         report["selection_sha256"] = sha256_file(root / "selection.json")
         report["code_sha256"] = {
             name: sha256_file(Path(__file__).with_name(name))
-            for name in ("pt_mfa_runner.py", "pt_mfa_pilot.py", "g2p_prep.py")
+            for name in ("pt_mfa_runner.py", "pt_mfa_pilot.py", "pt_mfa_assets.py", "g2p_prep.py")
         }
-        identity = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        report["git_commit"] = identity.stdout.strip() if identity.returncode == 0 else None
+        try:
+            identity = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            report["git_commit"] = identity.stdout.strip() if identity.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired):
+            # Container Git is optional; per-file code hashes are still recorded.
+            report["git_commit"] = None
+        if (
+            config["acoustic_model"] != "portuguese_mfa"
+            or config["dictionary"] != "portuguese_brazil_mfa"
+            or config["model_version"] != VERSION
+        ):
+            raise ValueError("Pilot config must match the fixed Portuguese MFA assets")
+        asset_root = (assets_dir or repo_root / DEFAULT_ASSETS).resolve()
+        report["assets"] = verify_assets(asset_root)
+        report["asset_receipt_sha256"] = sha256_file(asset_root / "assets.json")
+        acoustic = Path(report["assets"]["acoustic"]["path"])
+        dictionary = Path(report["assets"]["dictionary"]["path"])
         report["mfa_version"] = importlib.metadata.version("montreal-forced-aligner")
         if report["mfa_version"] != "3.4.0":
             raise ValueError("This pilot is prepared for the confirmed MFA 3.4.0 environment")
@@ -180,22 +201,6 @@ def run_pilot(
         if not mfa or not ffmpeg:
             raise ValueError("Run in the aligner environment; mfa and ffmpeg are required")
         run_command([mfa, "--help"], logs / "mfa_preflight.log", env)
-        for kind, name in (
-            ("acoustic", config["acoustic_model"]),
-            ("dictionary", config["dictionary"]),
-        ):
-            run_command(
-                [mfa, "model", "download", kind, name, "--version", config["model_version"]],
-                logs / f"download_{kind}.log",
-                env,
-            )
-        assets = root / "mfa_root/pretrained_models"
-        acoustic = assets / "acoustic" / f"{config['acoustic_model']}.zip"
-        dictionary = assets / "dictionary" / f"{config['dictionary']}.dict"
-        report["assets"] = {
-            "acoustic": {"path": str(acoustic), "sha256": sha256_file(acoustic)},
-            "dictionary": {"path": str(dictionary), "sha256": sha256_file(dictionary)},
-        }
         vocabulary: set[str] = set()
         with dictionary.open(encoding="utf-8-sig") as handle:
             for line in handle:

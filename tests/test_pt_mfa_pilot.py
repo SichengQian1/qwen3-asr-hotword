@@ -154,6 +154,7 @@ def test_mocked_pipeline_preserves_sources_and_records_missing_alignment(
 ) -> None:
     from qwen_hotword.training import pt_mfa_runner as runner
 
+    _local_assets(tmp_path, monkeypatch)
     config = _config(tmp_path)
     root = tmp_path / "pilot"
     before = {p: p.read_bytes() for p in tmp_path.iterdir() if p.is_file()}
@@ -164,13 +165,8 @@ def test_mocked_pipeline_preserves_sources_and_records_missing_alignment(
         assert env["MFA_ROOT_DIR"] == str(root / "mfa_root")
         assert str(root) in env["TMPDIR"]
         log.write_text("mock, not H200 evidence")
-        if args[1:3] == ["model", "download"]:
-            kind, name = args[3:5]
-            suffix = ".zip" if kind == "acoustic" else ".dict"
-            path = root / "mfa_root/pretrained_models" / kind / (name + suffix)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("olá\to l a\nmundo\tm u n d o\n")
-        elif args[0] == "ffmpeg":
+        assert "download" not in args
+        if args[0] == "ffmpeg":
             with wave.open(args[-1], "wb") as handle:
                 handle.setnchannels(1)
                 handle.setsampwidth(2)
@@ -184,7 +180,16 @@ def test_mocked_pipeline_preserves_sources_and_records_missing_alignment(
     monkeypatch.setattr(runner, "run_command", fake_command)
     monkeypatch.setattr(runner.shutil, "which", lambda name: name)
     monkeypatch.setattr(runner.importlib.metadata, "version", lambda name: "3.4.0")
+
+    def missing_git(*args: Any, **kwargs: Any) -> None:
+        raise FileNotFoundError("git unavailable in container")
+
+    monkeypatch.setattr(runner.subprocess, "run", missing_git)
+    asset_root = tmp_path / "models/mfa/pt_pilot_v2_0_0a"
+    original_assets = {p: p.read_bytes() for p in asset_root.iterdir()}
     report = run_pilot(config, tmp_path, root)
+    assert report["git_commit"] is None
+    assert original_assets == {p: p.read_bytes() for p in asset_root.iterdir()}
     assert report["status"] == "completed"
     assert report["counts_by_status"] == {"aligned": 1, "missing_alignment": 1}
     assert report["training_started"] is False and report["labels_changed"] is False
@@ -202,6 +207,7 @@ def test_failed_preflight_keeps_compact_report_and_never_downloads(
 ) -> None:
     from qwen_hotword.training import pt_mfa_runner as runner
 
+    _local_assets(tmp_path, monkeypatch)
     config = _config(tmp_path)
     root = tmp_path / "failed"
     calls = []
@@ -218,3 +224,41 @@ def test_failed_preflight_keeps_compact_report_and_never_downloads(
     assert report["mfa_alignment_invoked"] is False
     assert calls == [["mfa", "--help"]]
     assert "MFA dependency failed" in (root / "report.json").read_text()
+
+
+def _local_assets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from qwen_hotword.training import pt_mfa_assets as assets
+
+    root = tmp_path / assets.DEFAULT_ASSETS
+    root.mkdir(parents=True)
+    receipt: dict[str, Any] = {"model_version": assets.VERSION, "assets": {}}
+    specs = {}
+    for kind, spec in assets.ASSETS.items():
+        path = root / str(spec["name"])
+        path.write_text("olá\to l a\nmundo\tm u n d o\n")
+        specs[kind] = {**spec, "size_bytes": path.stat().st_size}
+        receipt["assets"][kind] = {**specs[kind], "sha256": sha256_file(path)}
+    (root / "assets.json").write_text(json.dumps(receipt))
+    monkeypatch.setattr(assets, "ASSETS", specs)
+    return root
+
+
+def test_missing_or_corrupt_assets_fail_without_external_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from qwen_hotword.training import pt_mfa_runner as runner
+
+    config = _config(tmp_path)
+    calls = []
+    monkeypatch.setattr(runner, "run_command", lambda *args: calls.append(args))
+    report = run_pilot(config, tmp_path, tmp_path / "missing")
+    assert report["status"] == "failed"
+    assert "download_pt_mfa_assets.py" in report["error"]
+    asset_root = _local_assets(tmp_path, monkeypatch)
+    dictionary = asset_root / "portuguese_brazil_mfa.dict"
+    dictionary.write_bytes(b"x" * dictionary.stat().st_size)
+    report = run_pilot(config, tmp_path, tmp_path / "corrupt")
+    assert "SHA256 mismatch" in report["error"]
+    assert not report["mfa_alignment_invoked"]
+    assert calls == []

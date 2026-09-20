@@ -1,5 +1,73 @@
 # 工作交接记录
 
+## 0.91 2026-09-20 MFA模型单独下载，容器内只读本地模型
+
+本节取代0.89的自动下载运行方式。用户要求Git和模型下载在容器外进行，
+容器内只运行已准备的MFA声学检查。原100条选样、阈值、参考标签和对齐参数不变。
+未重训、未运行Qwen、未将对齐成功解释为标注正确。
+
+交付分支`codex/g2p-coverage-scan`，实现提交标题
+`Separate MFA asset download from container pilot`；上一独立结果提交`c84a778`
+记录用户返回的证书失败。Git SHA以交付回复及以下命令核对。
+
+**容器外**（Python 3.10+及curl即可，不需要Conda/MFA）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python3 -B scripts/download_pt_mfa_assets.py
+```
+
+下载器只访问官方GitHub两个固定release资产URL，不访问GitHub API列表：
+
+- `acoustic-portuguese_mfa-v2.0.0a/portuguese_mfa.zip`，91,604,181字节；
+- `dictionary-portuguese_brazil_mfa-v2.0.0a/portuguese_brazil_mfa.dict`，1,583,153字节。
+
+两者在2026-09-20通过官方release API核对名称、URL及大小；API未提供digest。
+下载使用系统curl的HTTPS验证，不设置`-k`/`--insecure`，只允许HTTPS及HTTPS重定向。
+记录下载SHA、固定版本、大小及URL到`assets.json`，声学ZIP检查CRC，词典检查UTF-8。
+SHA是本次下载/传输完整性记录，不冒充官方签名。若宿主机也报证书错误，停止并
+回传错误，需配置管理员提供的可信CA或换可信下载环境，不关闭TLS校验。
+
+完整资产放在忽略目录`models/mfa/pt_pilot_v2_0_0a/`，不提交模型。
+成功后重复运行仅校验现有资产，不重下或覆盖；下载失败保留唯一的
+`models/mfa/pt_pilot_v2_0_0a_download_<随机>/`临时目录，下次重跑新建临时目录。
+若最终目录已存在但缺文件/哈希不符，拒绝覆盖；用`--output-dir NEW_PATH`另行下载，
+并给容器入口传`--assets-dir`对应共享路径。无断点续传；源/既有outputs保持不动。
+
+**回到容器内**（共享挂载目录，与上述宿主机仓库对应）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+conda run --no-capture-output -n aligner python -B scripts/run_pt_mfa_pilot.py
+```
+
+入口先核验本地`assets.json`、固定版本/来源/大小及实际SHA，再调用MFA。
+缺文件立即提示单独下载，不自动下载，不回退到旧G2P模型；Git缺失、报错或超时
+不会阻断声学检查，报告`git_commit=null`并继续记录代码文件SHA。
+MFA以本地资产绝对路径对齐，状态和临时文件仍隔离到本次新输出目录。
+每次`outputs/pt_mfa_pilot_v1_<随机>/`，不resume、不覆盖；失败重跑仍选相同ID。
+
+仅返回本次`report.json`和`sha256.txt`（脚本末尾给出完整路径）。若单独下载失败，
+只返回终端错误，不继续容器内步骤。验证命令：
+
+```bash
+# 容器外：重复下载命令应只返回 verified_existing，验证两份资产SHA
+python3 -B scripts/download_pt_mfa_assets.py
+# 容器内：用实际本次路径替换后缀
+RUN_DIR=outputs/pt_mfa_pilot_v1_实际后缀
+(cd "$RUN_DIR" && sha256sum -c sha256.txt)
+```
+
+报告应有`asset_policy=local_verified_only_no_download`、两个资产SHA及
+`asset_receipt_sha256`；完成时各状态覆盖100条，仍不意味着100条标注正确。
+
+本地：定向16 passed；全量267 passed / 23 skipped；修改文件Ruff、模块Mypy、
+`git diff --check`通过。全仓Ruff的5处E501和Mypy的3处unused-ignore均为0.85
+已确认旧问题。测试模拟curl/MFA，不在本地下载模型或运行真实对齐；覆盖下载失败
+保留文件、重跑只校验、损坏/缺失资产阻止调用、容器无Git及输入文件保持不变。
+
 ## 0.90 2026-09-20 MFA首次小试验下载证书失败（用户返回）
 
 用户终端返回`outputs/pt_mfa_pilot_v1_gt0iz6k7`，`status=failed`、
