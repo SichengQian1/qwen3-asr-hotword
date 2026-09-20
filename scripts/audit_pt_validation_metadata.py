@@ -10,7 +10,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from qwen_hotword.training.pt_validation_metadata import audit_pt_validation_metadata
+from qwen_hotword.training.pt_validation_metadata import (
+    audit_pt_validation_metadata,
+    inspect_mfa_environment,
+)
 
 
 def main() -> int:
@@ -20,7 +23,18 @@ def main() -> int:
         type=Path,
         default=REPO_ROOT / "configs/pt_validation_metadata.workzone.json",
     )
+    parser.add_argument(
+        "--mfa-inventory", action="store_true",
+        help="Inspect the active environment and local MFA assets; no corpus reads or MFA run.",
+    )
     args = parser.parse_args()
+    if args.mfa_inventory:
+        try:
+            report = inspect_mfa_environment(REPO_ROOT)
+        except OSError as error:
+            parser.error(str(error))
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
     try:
         config = json.loads(args.config.read_text(encoding="utf-8"))
         required = {

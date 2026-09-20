@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from qwen_hotword.training.pt_validation_metadata import audit_pt_validation_metadata
+from qwen_hotword.training.pt_validation_metadata import (
+    _difference_kind,
+    audit_pt_validation_metadata,
+    inspect_mfa_environment,
+)
 
 
 def _fixture(tmp_path: Path) -> dict[str, str]:
@@ -47,7 +51,7 @@ def _fixture(tmp_path: Path) -> dict[str, str]:
             lines.append(line)
     (root / "validated.tsv").write_text("\ufeff" + header + "".join(lines), encoding="utf-8")
     fleurs = tmp_path / "fleurs_train.tsv"
-    fleurs.write_text("1\tclip.wav\tOlá\n2\tclip2.wav\tBom dia\n", encoding="utf-8")
+    fleurs.write_text("path\ttranscription\nclip.wav\tOlá\nclip2.wav\tBom dia\n", encoding="utf-8")
     return {
         "validation_manifest": str(manifest),
         "validation_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
@@ -138,3 +142,65 @@ def test_cli_runs_from_another_directory_and_returns_error_on_wrong_sha(tmp_path
     assert result.returncode != 0
     assert "SHA256 mismatch" in result.stderr
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize(("current", "original", "expected"), [
+    ("Bem, então? o menino disse.", '\"Bem, então?\" o menino disse.',
+     "ascii_double_quotes_case_space_only"),
+    ("O menino disse", "O menino não disse", "g2p_words_or_digit_fragments_differ"),
+    ("Tenho 12 livros", "Tenho 13 livros", "g2p_words_or_digit_fragments_differ"),
+    ("A mãe", "A mão", "g2p_words_or_digit_fragments_differ"),
+    ("Olá, mundo!", "Olá mundo.", "same_g2p_words_and_digit_fragments_other_text_difference"),
+])
+def test_text_changes_do_not_hide_missing_words_digits_or_accents(
+    current: str, original: str, expected: str,
+) -> None:
+    assert _difference_kind(current, original) == expected
+
+
+def test_fleurs_join_uses_full_path_and_reports_all_candidates(tmp_path: Path) -> None:
+    config = _fixture(tmp_path)
+    manifest = Path(config["validation_manifest"])
+    records = [
+        ("exact", "train/clip.wav", "Olá"),
+        ("changed", "train/clip2.wav", "Boa noite"),
+        ("wrong_directory", "other/clip.wav", "Olá"),
+        ("dup", "train/dup.wav", "Olá"),
+    ]
+    with manifest.open("a") as handle:
+        for name, audio, text in records:
+            handle.write(json.dumps({
+                "id": name, "audio_path": str(tmp_path / audio), "text": text,
+                "source_corpus": "fleurs", "split": "validation",
+            }) + "\n")
+    config["validation_sha256"] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    with Path(config["fleurs_train_tsv"]).open("a") as handle:
+        handle.write("dup.wav\tOlá\ndup.wav\tOlá\n")
+    report = _run(config)
+    assert report["fleurs"] == {
+        "candidates": 4,
+        "checks": {"exact_text_match": 1, "text_difference": 1,
+                   "missing_metadata": 1, "duplicate_metadata": 1},
+        "difference_kinds": {"g2p_words_or_digit_fragments_differ": 1},
+        "difference_examples": [{
+            "id": "changed", "kind": "g2p_words_or_digit_fragments_differ",
+            "current": {"text": "Boa noite", "characters": 9, "truncated": False},
+            "original": {"text": "Bom dia", "characters": 7, "truncated": False},
+        }],
+        "join_policy": "resolved_path_under_tsv_parent_train_no_basename_fallback",
+    }
+
+
+def test_mfa_inventory_is_read_only_even_without_installed_mfa(tmp_path: Path) -> None:
+    model = tmp_path / "models/mfa/g2p/portuguese_brazil_mfa.zip"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"synthetic archive identity; not a real model")
+    missing_root = tmp_path / "absent_mfa_root"
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    report = inspect_mfa_environment(tmp_path, mfa_root=missing_root)
+    assert report["asset_count"] == 1
+    expected_sha = hashlib.sha256(model.read_bytes()).hexdigest()
+    assert report["portuguese_assets"][0]["sha256"] == expected_sha
+    assert report["mfa_imported_or_run"] is False
+    assert not missing_root.exists()
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}

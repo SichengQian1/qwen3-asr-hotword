@@ -1,5 +1,51 @@
 # 工作交接记录
 
+## 0.87 2026-09-20 补齐CV/FLEURS转写核对及MFA只读环境盘点
+
+0.86返回的3条CV差异是引号变化。不能据此把全部8条判为格式变化或错标。
+本轮只扩展0.85入口，不筛选验证集、不修订标签、不运行声学模型：
+
+- 保留原始文字匹配计数；对全部差异额外分类，最多返回8条示例；
+- 单独识别ASCII双引号/大小写/空白差异，并复用现有G2P词提取器比较词序列和
+  数字片段；不会删除重音、漏词或数字差异以制造“一致”；
+- 增加CV文字匹配类别与反对票分组的交叉计数。票数是审核信息，不是准确率；
+- FLEURS已确认`path/transcription`两列格式，逐条关联候选的完整解析路径与
+  TSV所在目录下`train/<filename>`，拒绝仅按basename关联、重复元数据和列数异常；
+- MFA盘点仅查询当前Python环境的安装版本、可执行文件位置、已有葡语资产路径/SHA。
+  不导入MFA、不调用MFA CLI、不下载或加载模型、不初始化数据库、不读取语料。
+
+H200工作区`codex/g2p-coverage-scan`执行以下短命令（第二条在现有主环境运行，
+第三条在已知`aligner`环境中运行）：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+python -B scripts/audit_pt_validation_metadata.py
+conda run -n aligner python -B scripts/audit_pt_validation_metadata.py --mfa-inventory
+```
+
+用`git rev-parse HEAD`核对交付回复的远端SHA；本轮代码提交标题为
+`Extend Portuguese metadata audit and inspect MFA assets`。拉取失败或身份不符先停止，
+不清理/reset工作区。两个命令均只打印JSON，不创建输出目录、不覆盖outputs，
+不需要resume；中断后重跑即可。只回传两份终端JSON，若命令失败则回传简短错误。
+
+默认元数据配置和validation SHA与0.85相同。新版报告`schema_version=2`，新增
+`cv_difference_kinds`、`cv_text_vote_groups`、`fleurs`及FLEURS原始TSV SHA。
+正常运行仍为`status=completed`，不代表标签质量认证；两来源checks分别应求和到
+对应候选数。`same_g2p_words...`不等于已核验保存的音素ID或真实发音。
+
+MFA盘点的`scope=mfa_package_and_asset_inventory_only`；版本为null表示当前环境未发现
+对应包元数据，模型列表为空只表示未在已搜索位置找到。只搜索仓库`models/mfa`及
+`MFA_ROOT_DIR`（默认`~/Documents/MFA`）下`pretrained_models`的acoustic/dictionary/g2p，
+最多列出20个名称以portug开头的资产；不声称穷尽其他自定义路径。
+MFA根目录依据[官方配置说明](https://montreal-forced-aligner.readthedocs.io/en/latest/user_guide/configuration/index.html)。
+盘点有文件不代表可运行或音素集兼容，需根据实际返回决定下一条声学检查命令。
+
+不重复训练重叠检查，不触碰sealed test；原有三套Head和历史validation保持不变。
+
+本地验证：定向pytest 15 passed；全量pytest 251 passed / 23 skipped；修改文件Ruff、
+修改模块Mypy及`git diff --check`通过。全仓Ruff/Mypy仍只有0.85记录的既有报错，
+未改动相关文件。本地没有读取H200音频或运行MFA，合成测试不代表标注质量结果。
+
 ## 0.86 2026-09-20 H200葡语原始转写元数据核对返回
 
 用户返回0.85入口的终端JSON：`status=completed`，validation记录10,899，
