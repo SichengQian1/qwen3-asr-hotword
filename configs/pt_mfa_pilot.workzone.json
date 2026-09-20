@@ -1,0 +1,12 @@
+{
+  "validation_manifest": "outputs/pt_combined_temporal2x_v1/full_ctc_validation.jsonl",
+  "validation_sha256": "196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524",
+  "output_parent": "outputs",
+  "seed": 20260920,
+  "samples_per_source": 20,
+  "sources": ["common_voice", "fleurs", "mls", "noah_500h", "noah_finance_200h"],
+  "acoustic_model": "portuguese_mfa",
+  "dictionary": "portuguese_brazil_mfa",
+  "model_version": "v2.0.0a",
+  "jobs": 4
+}

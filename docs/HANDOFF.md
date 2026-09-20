@@ -1,5 +1,93 @@
 # 工作交接记录
 
+## 0.89 2026-09-20 葡语100条MFA声学小试验入口
+
+方向：先检查音频、文字及发音参考的可靠性，再冻结验证集、比较三个现有Head。
+本轮是检查工具的小试验，不生成clean标签、不重训、不运行Qwen，也不计算PER。
+已完成的CV/FLEURS原始文字核对见0.88。用户已授权本轮准备及H200执行。
+
+新增`configs/pt_mfa_pilot.workzone.json`、`scripts/run_pt_mfa_pilot.py`、
+`training/pt_mfa_pilot.py`及`training/pt_mfa_runner.py`和定向测试。
+工作分支`codex/g2p-coverage-scan`，代码提交标题
+`Add stratified Portuguese MFA acoustic pilot`。H200仓库目录执行：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+conda run --no-capture-output -n aligner python -B scripts/run_pt_mfa_pilot.py
+```
+
+确认SHA与交付回复一致；若拉取失败不要reset/清理。只需CPU与网络下载MFA资产，
+不需要GPU，不下载Qwen模型。本地只运行合成/模拟单元测试，真实命令仅由用户在H200执行。
+
+固定设计：
+
+- 候选仍为10,899条/约16.24小时的既有validation，严格核对SHA
+  `196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524`；不读train/test。
+- 五来源各20条，总100条。每个source×release内部按`label_length/effective_ctc_input_length`
+  排序（同值按ID），切样本数三分位；对非空release×density层确定性轮流分配配额，
+  小层取尽后余额分配给其他层。用seed=20260920与ID的SHA排序选取；保留original/recovery。
+- 样本选择不读取预测或PER，也不因后续OOV、解码失败或对齐失败更换样本。
+  所有层输出总体数/抽样数/入选比例和密度范围；这是探索性过抽样，不是总体错标率估计。
+- `selected_ids.txt`、`selection.json`及其SHA固定选中身份。每次重跑仍选择同一批ID。
+- 保留原文本；`.lab`只折叠空白，不删除词/数字/标点，不重写音素参考。
+  ffmpeg仅转为16kHz单声道PCM16副本，不裁剪；记录原音频及副本SHA。
+
+模型与运行：
+
+- 在全新隔离`MFA_ROOT_DIR`运行`mfa --help`作实际依赖预检；不根据kalpy元数据null
+  擅自安装/升级依赖。预检失败返回报告，停止下载/对齐。
+- 固定官方`portuguese_mfa` acoustic和`portuguese_brazil_mfa` dictionary，版本均为
+  `v2.0.0a`。官方release已确认文件分别为`portuguese_mfa.zip`（91,604,181字节）和
+  `portuguese_brazil_mfa.dict`（1,583,153字节）；下载后记录实际SHA。未在本地下载模型。
+- 通过MFA 3.4.0的`mfa model download ... --version v2.0.0a`准备资产，然后
+  `mfa align`，JSON导出、4个CPU jobs、`--single_speaker`关闭speaker adaptation；
+  未知speaker不伪装成可靠说话人分组。不调用train/adapt/train_dictionary。
+- MFA负责声学模型/词典兼容性校验，失败即停止，不合并或强行映射音素。
+  不额外生成OOV发音；预检词典未覆盖词及MFA未知音素分别记为工具覆盖问题。
+
+输出和恢复：
+
+- 每次自动创建`outputs/pt_mfa_pilot_v1_<随机后缀>/`，末尾打印绝对路径。
+  需要指定路径可加`--output-dir NEW_PATH`，已有路径一律拒绝。
+- 模型下载、MFA全局状态、scratch、对齐临时目录、音频副本和日志都位于本次新目录。
+  不覆盖既有outputs、模型或MFA全局缓存；子命令使用`--no_clean --no_final_clean --no_overwrite`。
+- 不提供resume：失败/中断保留目录，再运行会新建目录，选中ID不变。不要删旧目录。
+  每个外部步骤最多1小时，超时停止并报告；网络速度和环境差异可能影响耗时。
+- 正常失败报告保存`error`及最多3000字符日志尾部。若用户直接中断，可能只有部分产物，
+  仍保留它们，重新运行新目录；不把未完成输出当作结果。
+
+返回与验收：仅回传`report.json`和`sha256.txt`，不传模型、100条音频或完整outputs。
+末尾`return_files`给出两者完整路径。工作区可验证：
+
+```bash
+# RUN_DIR替换成脚本打印的本次输出目录
+RUN_DIR=outputs/pt_mfa_pilot_v1_实际后缀
+(cd "$RUN_DIR" && sha256sum -c sha256.txt)
+```
+
+完整逐条诊断在`sample_diagnostics.json`，报告只返回来源/分层汇总及每来源最多2条疑点ID。
+正常验收检查100个选中ID、五来源各20、SHA通过、各状态计数覆盖全部100条；
+`status=completed`仅表示流水线完成，不表示全部对齐成功或标签准确。
+优先看准备失败/未对齐比例、词典覆盖、异常是否集中某来源/密度层；工具失败先处理工具，
+不能反过来把难对齐样本删成“干净验证集”。
+
+预先冻结的疑点提示：非静音音素≤10.1ms占比≥25%、单音素≥300ms、对齐语音贴近
+音频首尾20ms、未知音素/词、词典未覆盖、数字、RMS<0.001、PCM饱和样本占比>1%、
+时长与Manifest差>0.1s。它们只是查看线索，正常快速语音/长元音/边界也可能触发。
+不把MFA输出当成独立核验的发音标签，不把失败率当成错标率，不据此计算PER改善。
+
+已知检查器偏差：官方葡语模型包含CV、MLS训练来源，主要面向低噪声朗读；
+Noah口语可能域外，CV/MLS也可能与检查器训练数据重叠；巴葡词典不保证适合所有pt口音。
+参考：[官方声学模型](https://mfa-models.readthedocs.io/en/latest/acoustic/Portuguese/Portuguese%20MFA%20acoustic%20model%20v2_0_0a.html)、
+[MFA 3.4对齐参数](https://montreal-forced-aligner.readthedocs.io/en/v3.4.0/user_guide/workflows/alignment.html)、
+[模型下载参数](https://montreal-forced-aligner.readthedocs.io/en/v3.4.0/user_guide/models/index.html)。
+
+本地验证：定向pytest 10 passed；全量pytest 261 passed / 23 skipped；新增代码Ruff、
+Mypy及`git diff --check`通过。全仓Ruff仍为0.85记录的5处既有E501，Mypy仍为3处
+既有unused-ignore，未修改用户PPT文件或相关旧代码。模拟下载、音频转换和对齐用于
+验证命令编排/报表与拒绝覆盖，不是真实MFA或H200质量结果。
+
 ## 0.88 2026-09-20 CV/FLEURS核对与MFA环境返回
 
 用户返回0.87的两份终端JSON，validation/CV元数据SHA与0.86一致，未另返回H200 Git SHA。
