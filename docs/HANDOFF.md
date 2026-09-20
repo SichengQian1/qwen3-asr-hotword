@@ -1,5 +1,19 @@
 # 工作交接记录
 
+## 0.90 2026-09-20 MFA首次小试验下载证书失败（用户返回）
+
+用户终端返回`outputs/pt_mfa_pilot_v1_gt0iz6k7`，`status=failed`、
+`counts_by_status={}`。`mfa --help`已通过；随后`mfa model download acoustic`
+访问`api.github.com`的release列表时，Requests报`CERTIFICATE_VERIFY_FAILED`，
+具体为证书链包含不受信任的自签名证书。此时尚未准备音频或执行对齐，不能据此
+判断任何样本质量或PER；也不能由此判定MFA运行依赖或Python版本不兼容。
+可能涉及容器/Conda信任库与工作区网关证书不一致，但根因尚未取得证书链核实。
+
+本记录依据用户终端输出；尚未返回report.json/sha256.txt或工作区Git SHA，
+不能声称已本地重算H200产物哈希。保留失败目录及日志，不清理、不覆盖。
+用户明确要求模型单独下载，且容器内Git有问题，Git拉取必须在容器外完成。
+下一步拆分模型下载和本地资产对齐，不关闭TLS证书验证。
+
 ## 0.89 2026-09-20 葡语100条MFA声学小试验入口
 
 方向：先检查音频、文字及发音参考的可靠性，再冻结验证集、比较三个现有Head。
