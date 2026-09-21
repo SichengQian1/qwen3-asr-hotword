@@ -1,0 +1,23 @@
+{
+  "pt_manifest": "outputs/pt_combined_temporal2x_v1/full_ctc_validation.jsonl",
+  "pt_sha256": "196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524",
+  "reference_manifest": "outputs/en_es_pt_balanced_validation_4h_v1/full_ctc_validation.jsonl",
+  "reference_sha256": "d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499",
+  "reference_cache": "outputs/en_es_pt_balanced_150h_temporal2x_feature_cache_v1/validation",
+  "output_dir": "outputs/pt_es_density_match_v1",
+  "seed": 20260921,
+  "max_ks": 0.05,
+  "max_p95_pair_gap": 0.025,
+  "max_pair_gap": 0.10,
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "model_config": "configs/workzone.example.yaml",
+  "checkpoints": {
+    "multilingual_baseline": "outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt",
+    "portuguese_old": "outputs/noah_pt_full_training_v1/run_temporal_upsample_ctc_h512_k5_lr3e4_v1/ctc_head_best.pt",
+    "failed_recovery_ablation": "outputs/en_es_pt_balanced_150h_pt_original_resample_ctc_formal_macro_v1/ctc_head_best.pt"
+  },
+  "checkpoint_sha256": {
+    "multilingual_baseline": "bd9df8072b7efe7fafa599e958bbd7ca8405b289d0a353913d865340764d01a0",
+    "portuguese_old": "abaadac43c40daf8e2eee339653c64bfafa44fd0267eb7930449bd8d927de774"
+  }
+}

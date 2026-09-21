@@ -1,5 +1,118 @@
 # 工作交接记录
 
+## 0.93 2026-09-21 葡语按西语密度分布匹配的固定子集评测
+
+用户明确要求先实际做一版：从现有16小时葡语validation中，选音素密度分布接近
+西语的子集，评测现有Head。暂停外部ASR审计；不训练、不修订标签、不改核心模型。
+本节是条件分布评测，不是clean validation认证，也不是完整跨语言公平评测。
+
+交付分支`codex/g2p-coverage-scan`；代码提交标题
+`Add Spanish-density-matched Portuguese validation experiment`，SHA以交付回复为准。
+运行配置`configs/pt_es_density_match.workzone.json`固定输入/Checkpoint路径、已知SHA及阈值。
+
+**容器外拉代码**：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+**容器内先选子集（CPU，不读取音频、不加载模型）**：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_pt_density_match.py build
+```
+
+固定来源：
+
+- 葡语候选：`outputs/pt_combined_temporal2x_v1/full_ctc_validation.jsonl`，
+  10,899条/16.239131小时，SHA
+  `196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524`。
+- 西语参照：`outputs/en_es_pt_balanced_validation_4h_v1/full_ctc_validation.jsonl`
+  中`balanced_language_bucket=es`的全部样本，历史数量2,631条/4.000866小时；
+  三语清单SHA `d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499`。
+- 旧葡语对照：同一三语清单中的全部pt（历史2,662条），保留9.662%的原始比较口径。
+
+预先固定的选样规则：
+
+1. density=`label_length / effective_ctc_input_length`；帧数必须为
+   `estimated_ctc_input_length*2`，标签长度核对保存的`phoneme_token_ids`。
+   它不是包含相邻重复音素开销的minimum CTC ratio，不混用两种比值。
+2. 葡语全池及西语参照按密度排序，同密度以seed=20260921与ID的SHA排序。
+   动态规划求一维有序、不重复的一对一匹配，最小化绝对密度差总和。
+   保留每一条西语参照，选择同样数量的葡语，不删参照尾部、不重复抽样，
+   不读取预测/PER，不排除recovery，不预选低错误来源。
+3. 本版按样本数匹配密度分布。总时长、句长、来源、口音和token加权分布未匹配；
+   报告提供source样本/小时、release数量、时长/参考长度分位数、固定0.025宽密度直方图、
+   密度分位数、逐样本均值及总reference/总frame，便于检查组成变化。
+4. 通过条件：经验CDF KS距离≤0.05、配对绝对密度差P95≤0.025、最大差≤0.10。
+   阈值是本版预设的匹配容差，不是统计显著性或标签质量标准。
+   若不满足，输出`insufficient_density_match`并退出1；评测入口拒绝运行。
+   不事后根据PER放宽规则，不把失败匹配冒充“接近西语”。
+5. 子集保留原记录/原音素标签，保存固定IDs、配对密度和SHA256。新目录固定为
+   `outputs/pt_es_density_match_v1/`；build拒绝已有目录，绝不覆盖。
+
+选样通过（`status=matched`）后，**容器内H200评测**：
+
+```bash
+# 3仅为示例；改为实际分配给你的物理GPU编号
+CUDA_VISIBLE_DEVICES=3 python -B scripts/run_pt_density_match.py evaluate
+```
+
+不需要新下载。使用现有`/glusterfs_103/models/Qwen3-ASR-1.7B`和已有90类IPA词表；
+由于16小时池中新的选中音频未必包含在旧三语cache里，本版显式为选中葡语重新
+缓存冻结Encoder的`ln_post`特征，仅处理该validation子集，不读train/test。
+完整Qwen加载/Encoder推理只由用户在H200执行，不生成最终转写，不进行优化器更新。
+一张H200，建议至少30–40GiB可用显存，并为新特征预留10GiB磁盘；实际用量见报告。
+不声称本地模拟测试测得H200耗时。
+
+评测前验证：原三语Head与旧葡语Head的已知SHA，三个Head的词表、权重结构和
+Temporal 2x；全部参考cache分片SHA；新特征模型的config/index SHA与原参考cache
+身份及dtype一致。候选Head记录实际SHA，只标记`failed_recovery_ablation`，不替换基线。
+选样文件SHA、代码SHA、配置均一致后才运行；实际缓存帧数/标签必须与Manifest完全
+一致，否则停止，不能用估计密度冒充实际匹配。
+
+矩阵：
+
+| Head | 新匹配葡语 | 旧2662条葡语 | 原2631条西语 |
+|---|---|---|---|
+| 原三语baseline | 评测 | 同次重评 | 同次重评 |
+| 旧葡语专用 | 评测 | 同次重评 | 不作为跨语参照 |
+| 失败的去recovery候选 | 评测 | 同次重评 | 不作为基线 |
+
+每项包含micro PER、S/D/I计数、reference数、预测/参考长度比、blank比例，及source/
+release分层。S/D/I百分比为各计数/reference数。新子集和旧集可能有重叠，重叠数已报告。
+若新PER降低，只能说明该密度匹配视图更易识别；来源/句长等也可能随之改变，
+不能把下降全部归因于时间压力，不能证明原标签错误或新标签正确。
+
+每次evaluate创建`outputs/pt_es_density_match_v1/evaluation_<随机>/`，已有outputs
+和缓存只读；新特征在该新目录内。**不提供resume**：失败目录保留，重跑evaluate
+创建新目录，固定选中ID不变。不删除缓存分片、不覆盖旧评测；本轮不用旧缓存续写模式。
+需要重建selection时，用`--config`提供另一个output_dir，不修改已有配置/产物来续跑。
+
+返回小文件：
+
+1. `outputs/pt_es_density_match_v1/selection_report.json`及同目录`sha256.txt`；
+2. 本次终端打印的`evaluation_<随机>/report.json`及同目录`sha256.txt`。
+
+不要返回feature tensors、模型或完整outputs。验证命令：
+
+```bash
+(cd outputs/pt_es_density_match_v1 && sha256sum -c sha256.txt)
+# 用终端打印的实际路径替换随机后缀
+R=outputs/pt_es_density_match_v1/evaluation_实际后缀
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+本地验证：定向11 passed；全量278 passed / 23 skipped；新增文件Ruff通过；
+Mypy新增模块无报错，全仓仍有0.85记录的3处旧unused-ignore；全仓Ruff仍为5处旧E501。
+`git diff --check`和CLI help通过。合成10,899候选/2,631参照完成匹配并验证2,631唯一ID；
+小样本最优解与穷举一致，测试覆盖预测无关/顺序无关、身份篡改、帧数不符、
+未匹配尾部停止、拒绝覆盖以及模拟三个Head共用同一子集/保留旧对照。
+本地未加载Qwen或任何真实Checkpoint，不是H200 PER结果。
+
 ## 0.92 2026-09-21 MFA100条返回与当前诊断边界
 
 用户返回`outputs/pt_mfa_pilot_v1_880hc9dt`的终端报告及SHA清单，代码提交
