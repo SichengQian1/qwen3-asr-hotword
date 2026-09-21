@@ -1,5 +1,57 @@
 # 工作交接记录
 
+## 0.97 2026-09-21 使用实际帧数复验固定子集后继续PER评测
+
+根据0.96，evaluate不再要求Manifest估计帧数与实际cache帧数逐条相等。
+样本缺失、token序列变化和非Temporal 2x仍严格阻断。现有build代码、配置和已冻结
+子集SHA均不变；只在内存中的诊断副本使用实际有效帧数，不改源Manifest和参考音素。
+
+- 原西语和旧葡语使用已验证的原cache实际帧数；新葡语子集仍在新目录提取冻结特征。
+- 新旧两侧统计实际帧数后，重新计算经验CDF KS、排序分位数配对绝对差P95及最大差；
+  阈值仍为0.05、0.025、0.10，不因结果改变。帧数变化可能改变近邻顺序，故此处比较
+  两侧排序后的经验分位数，不沿用旧pairs.json中的原始配对ID计算差值。
+- 实际密度通过后才执行0.93的7项Head/view评测；失败则返回
+  `insufficient_actual_density_match`并退出1，保留新特征/报告，不运行Head评测。
+- 报告新增`actual_density`和`frame_audit`；新输出中另有
+  `actual_density_report.json`、`frame_audit.json`、`actual_frames.json`（三视图逐ID实际帧数）。
+  SHA清单包含这些JSON；原始selection报告仍准确表示估计帧数的选样依据。
+
+交付分支`codex/g2p-coverage-scan`，提交标题
+`Validate matched density using actual cached frame lengths`，SHA见交付回复。
+容器外项目目录执行：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内执行（GPU6为用户上次选择，仍须确保该卡可用）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+CUDA_VISIBLE_DEVICES=6 python -B scripts/run_pt_density_match.py evaluate
+```
+
+**不要重新build**。旧selection和失败产物全部保留；每次evaluate创建全新
+`outputs/pt_es_density_match_v1/evaluation_<随机>/`。本轮仍无resume；若失败，
+先返回错误，不删除任何输出。只用已有Qwen模型，不下载、不运行外部ASR、不训练。
+GPU/磁盘要求与0.93相同。原cache核验仍为只读。
+
+完成或实际密度未通过时，返回本次`report.json`和`sha256.txt`即可，报告已包含
+实际密度摘要；无需上传actual_frames、缓存或模型。验证：
+
+```bash
+R=outputs/pt_es_density_match_v1/evaluation_实际后缀
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+本地：定向14 passed；全量281 passed / 23 skipped；修改文件Ruff、模块Mypy、
+`git diff --check`通过。全仓仍只有5处旧E501与3处旧unused-ignore。
+测试验证±2帧使用实际值且不改输入、同长度不同标签/缺失样本仍阻断、实际密度
+不通过时不执行任何Head评测，以及通过时三个Head仍共用冻结ID集合。
+本地未运行真实Qwen/Head；实际密度是否通过及PER等待H200结果。
+
 ## 0.96 2026-09-21 旧cache核对结果：标签一致，仅估计帧数±2
 
 用户返回`audit-cache`：8,101/8,101条已检查、缺失0、标签序列不一致0。

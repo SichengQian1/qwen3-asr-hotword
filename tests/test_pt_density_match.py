@@ -152,7 +152,9 @@ def test_tied_densities_use_distinct_samples_and_insufficient_pool_fails() -> No
         optimal_pairs(pt[:2], es, 8)
 
 
+@pytest.mark.parametrize("actual_match", [True, False])
 def test_evaluation_uses_same_subset_three_heads_and_preserves_legacy(
+    actual_match: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -219,7 +221,15 @@ def test_evaluation_uses_same_subset_three_heads_and_preserves_legacy(
         coverage, "load_phoneme_vocab", lambda *a: SimpleNamespace(tokens=range(90))
     )
     monkeypatch.setattr(pt_density_evaluation, "validate_heads", lambda *a: None)
-    monkeypatch.setattr(pt_density_evaluation, "check_actual_lengths", lambda *a: None)
+
+    def actual_rows(cache: Any, rows: list[dict[str, Any]], classes: int) -> Any:
+        scale = 2 if not actual_match and all(r["language"] == "pt" for r in rows) else 1
+        return [
+            dict(r, effective_ctc_input_length=r["effective_ctc_input_length"] * scale)
+            for r in rows
+        ], {"status": "consistent"}
+
+    monkeypatch.setattr(pt_density_evaluation, "validated_actual_rows", actual_rows)
     monkeypatch.setattr(
         sharded_ctc,
         "load_disk_feature_cache",
@@ -244,7 +254,14 @@ def test_evaluation_uses_same_subset_three_heads_and_preserves_legacy(
 
     monkeypatch.setattr(ctc_diagnostics, "diagnose_ctc_checkpoint", diagnose)
     result = pt_density_evaluation.evaluate_subset(config, tmp_path)
+    if not actual_match:
+        assert result["status"] == "insufficient_actual_density_match"
+        assert calls == []
+        assert result["head_evaluation_started"] is False
+        assert (Path(result["output_dir"]) / "sha256.txt").is_file()
+        return
     assert result["status"] == "completed"
+    assert result["actual_density"]["status"] == "matched"
     assert calls[0] == calls[3] == calls[5] == {"pt_1", "pt_2", "pt_3"}
     assert calls[1] == calls[4] == calls[6] == {"pt_0"}
     assert calls[2] == {"es_0", "es_1", "es_2"}
@@ -285,3 +302,31 @@ def test_cache_audit_distinguishes_all_frame_and_label_mismatches(
     assert report["examples"][0]["labels_equal"] is True
     assert report["examples"][1]["labels_equal"] is False
     assert report["missing_count"] == 1
+
+
+def test_actual_density_rows_preserve_labels_and_reject_label_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from qwen_hotword.training import sharded_ctc
+    from qwen_hotword.training.pt_density_evaluation import validated_actual_rows
+
+    r = row(0, 20)
+    before = json.dumps(r, sort_keys=True)
+    sample = SimpleNamespace(
+        sample_id=r["id"],
+        token_ids=tuple(r["phoneme_token_ids"]),
+        hidden_states=SimpleNamespace(shape=(49, 1024)),
+    )
+    monkeypatch.setattr(sharded_ctc, "load_feature_shard", lambda *a, **k: [sample])
+    cache = SimpleNamespace(shards=["mock"], ctc_time_upsampling_factor=2)
+    actual, audit = validated_actual_rows(cache, [r], 90)
+    assert actual[0]["effective_ctc_input_length"] == 98
+    assert actual[0]["phoneme_token_ids"] == r["phoneme_token_ids"]
+    assert audit["frame_delta_counts"] == {-2: 1}
+    assert json.dumps(r, sort_keys=True) == before
+    sample.token_ids = (2,) * 20
+    with pytest.raises(ValueError, match="label/ID identity mismatch"):
+        validated_actual_rows(cache, [r], 90)
+    sample.sample_id = "missing"
+    with pytest.raises(ValueError, match="label/ID identity mismatch"):
+        validated_actual_rows(cache, [r], 90)

@@ -8,7 +8,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from qwen_hotword.training.pt_density_match import read_validation, write_checksums
+from qwen_hotword.training.pt_density_match import (
+    distribution,
+    match_quality,
+    read_validation,
+    write_checksums,
+)
 from qwen_hotword.training.pt_mfa_pilot import sha256_file, write_json_new
 
 
@@ -51,7 +56,13 @@ def verify_selection(config: dict[str, Any], repo: Path) -> tuple[Path, list[dic
     return selection, rows
 
 
-def audit_cache_lengths(cache: Any, rows: list[dict[str, Any]], classes: int) -> dict[str, Any]:
+def audit_cache_lengths(
+    cache: Any,
+    rows: list[dict[str, Any]],
+    classes: int,
+    *,
+    actual_frames_by_id: dict[str, int] | None = None,
+) -> dict[str, Any]:
     from qwen_hotword.training.sharded_ctc import load_feature_shard
 
     expected = {r["id"]: r for r in rows}
@@ -65,6 +76,10 @@ def audit_cache_lengths(cache: Any, rows: list[dict[str, Any]], classes: int) ->
                 continue
             row = expected[sample.sample_id]
             actual_frames = int(sample.hidden_states.shape[0]) * cache.ctc_time_upsampling_factor
+            if actual_frames <= 0:
+                raise ValueError("Empty cached feature sequence")
+            if actual_frames_by_id is not None:
+                actual_frames_by_id[sample.sample_id] = actual_frames
             frame_delta = actual_frames - row["effective_ctc_input_length"]
             labels_match = list(sample.token_ids) == row["phoneme_token_ids"]
             seen.add(sample.sample_id)
@@ -109,6 +124,51 @@ def check_actual_lengths(cache: Any, rows: list[dict[str, Any]], classes: int) -
         raise ValueError(
             "Actual feature length/labels differ: " + json.dumps(report, ensure_ascii=False)
         )
+
+
+def validated_actual_rows(
+    cache: Any,
+    rows: list[dict[str, Any]],
+    classes: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Keep labels/IDs fixed; density uses measured lengths in diagnostic copies only."""
+    if cache.ctc_time_upsampling_factor != 2:
+        raise ValueError("Actual density comparison requires temporal 2x")
+    frames: dict[str, int] = {}
+    audit = audit_cache_lengths(cache, rows, classes, actual_frames_by_id=frames)
+    if audit["missing_count"] or any(
+        key.endswith("::label_mismatch") for key in audit["mismatch_counts"]
+    ):
+        raise ValueError(
+            "Cache label/ID identity mismatch: " + json.dumps(audit, ensure_ascii=False)
+        )
+    return [dict(row, effective_ctc_input_length=frames[row["id"]]) for row in rows], audit
+
+
+def actual_density_comparison(
+    es: list[dict[str, Any]],
+    pt: list[dict[str, Any]],
+    legacy: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    quality = match_quality(list(zip(es, pt, strict=True)))
+    passed = (
+        quality["ks"] <= config["max_ks"]
+        and quality["p95_pair_gap"] <= config["max_p95_pair_gap"]
+        and quality["max_pair_gap"] <= config["max_pair_gap"]
+    )
+    return {
+        "status": "matched" if passed else "insufficient_actual_density_match",
+        "density_definition": "saved reference tokens / (actual cached encoder frames * 2)",
+        "quality": quality,
+        "spanish_reference": distribution(es),
+        "portuguese_selected": distribution(pt),
+        "portuguese_legacy": distribution(legacy),
+        "sample_ids_changed": False,
+        "labels_changed": False,
+        "thresholds": {k: config[k] for k in ("max_ks", "max_p95_pair_gap", "max_pair_gap")},
+        "gap_definition": "sorted empirical quantile gaps; original pair IDs are not reused",
+    }
 
 
 def audit_reference_cache(config: dict[str, Any], repo: Path) -> dict[str, Any]:
@@ -184,7 +244,11 @@ def evaluate_subset(config: dict[str, Any], repo: Path) -> dict[str, Any]:
     )
     if reference_cache.ctc_time_upsampling_factor != 2:
         raise ValueError("Reference cache requires temporal 2x")
-    check_actual_lengths(reference_cache, es + legacy, len(vocab.tokens))
+    reference_actual, reference_audit = validated_actual_rows(
+        reference_cache, es + legacy, len(vocab.tokens)
+    )
+    es_actual = [r for r in reference_actual if r["balanced_language_bucket"] == "es"]
+    legacy_actual = [r for r in reference_actual if r["balanced_language_bucket"] == "pt"]
     records = load_experiment_records(
         selection / "full_ctc_validation.jsonl",
         num_classes=len(vocab.tokens),
@@ -227,7 +291,35 @@ def evaluate_subset(config: dict[str, Any], repo: Path) -> dict[str, Any]:
         vocab_path=vocab_path,
         verify_sha256=True,
     )
-    check_actual_lengths(cache, rows, len(vocab.tokens))
+    pt_actual, selected_audit = validated_actual_rows(cache, rows, len(vocab.tokens))
+    actual_density = actual_density_comparison(es_actual, pt_actual, legacy_actual, config)
+    write_json_new(output / "actual_density_report.json", actual_density)
+    write_json_new(
+        output / "frame_audit.json", {"reference": reference_audit, "selected_pt": selected_audit}
+    )
+    write_json_new(
+        output / "actual_frames.json",
+        {
+            name: {r["id"]: r["effective_ctc_input_length"] for r in group}
+            for name, group in (
+                ("es", es_actual),
+                ("legacy_pt", legacy_actual),
+                ("matched_pt", pt_actual),
+            )
+        },
+    )
+    if actual_density["status"] != "matched":
+        report = {
+            "status": "insufficient_actual_density_match",
+            "actual_density": actual_density,
+            "output_dir": str(output),
+            "head_evaluation_started": False,
+            "training_started": False,
+            "selection_changed": False,
+        }
+        write_json_new(output / "report.json", report)
+        write_checksums(output, sorted(p.name for p in output.glob("*.json")))
+        return report
     reports = {}
     for name, checkpoint in checkpoints.items():
         print(f"Evaluating {name} on matched PT and legacy PT", flush=True)
@@ -261,6 +353,8 @@ def evaluate_subset(config: dict[str, Any], repo: Path) -> dict[str, Any]:
         "results": reports,
         "selection_report_sha256": sha256_file(selection / "selection_report.json"),
         "new_cache": summary.to_dict(),
+        "actual_density": actual_density,
+        "frame_audit": {"reference": reference_audit, "selected_pt": selected_audit},
         "training_started": False,
         "external_asr_used": False,
         "test_used": False,
