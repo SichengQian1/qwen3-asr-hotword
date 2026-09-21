@@ -1,5 +1,25 @@
 # 工作交接记录
 
+## 0.92 2026-09-21 MFA100条返回与当前诊断边界
+
+用户返回`outputs/pt_mfa_pilot_v1_880hc9dt`的终端报告及SHA清单，代码提交
+`113e0806791ec49853ac58cefcd4214b2d2f0ec5`。报告中4个代码文件SHA已与本地文件
+逐一核对一致；validation仍为`196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524`。
+结果：100条中98 aligned、1 incomplete_alignment、1 missing_alignment。
+词典OOV提示63条、未知词/音素61条、贴音频边界29条、长音素20条，计数可重叠。
+这是工具覆盖与疑点提示，不是标注错误率；不能认定98条正确、另外2条脏数据。
+
+报告提供的`report.json` SHA为
+`60ac9511b4d6bc8cfce964c38a32634acbb24be075998f90cf7137492cc73ff3`，
+选中ID SHA为`4a572cf8770a02096eccd6ead8b3a71ae02d0faece12d1bd9a8561d6da562d94`；
+附件为终端粘贴，未取得原始报告字节，不能声称本地复算报告SHA通过。
+MFA小试验不扩成全量标签认证。外部Whisper审计路线由用户暂停，只有本地未提交的
+`configs/pt_quality_whisper_assets.json`下载清单；未下载模型、未运行外部ASR，
+该文件不进入后续密度实验提交。
+
+最新用户决定：从既有16小时葡语validation中选音素密度分布接近西语的子集，
+先评测现有Head。该任务是密度控制的评测视图，不能替代音频/标签质量审核。
+
 ## 0.91 2026-09-20 MFA模型单独下载，容器内只读本地模型
 
 本节取代0.89的自动下载运行方式。用户要求Git和模型下载在容器外进行，
