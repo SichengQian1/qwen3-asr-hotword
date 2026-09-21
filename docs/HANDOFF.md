@@ -1,5 +1,38 @@
 # 工作交接记录
 
+## 0.95 2026-09-21 只读核对旧validation实际帧数与标签
+
+0.94错误仍保持阻断，不放宽帧数/标签校验，不改选样算法或已生成子集。
+新增`audit-cache`入口，读取旧三语validation cache全部8,101条（以实际身份校验为准），
+按语言分别统计帧数不一致/标签不一致、实际减估计帧数的分布、缺失样本及最多8条示例。
+同长度但不同token序列也会检测；正常evaluate报错同时给出这些详细诊断。
+
+分支`codex/g2p-coverage-scan`，提交标题`Explain density audit frame and label mismatches`。
+先在容器外项目目录拉取并核对交付SHA：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+再在容器内主环境、项目目录执行：
+
+```bash
+python -B scripts/run_pt_density_match.py audit-cache
+```
+
+不需要GPU，不加载Qwen/CTC Head，不提特征，不改任何outputs或模型；不需resume。
+只返回终端小JSON，不返回缓存。SHA逐分片验证后，报告包含cache fingerprint、
+manifest SHA、`model_loaded=false`、`files_written=false`。
+`status=mismatch`退出码1表示查到差异，不表示扫描失败或标签已判错。
+既有selection与SHA保留，暂不重复build/evaluate；先根据差异决定后续帧数口径。
+
+本地：定向12 passed；全量279 passed / 23 skipped；修改文件Ruff和模块Mypy通过，
+全仓仍为5处旧E501及3处旧unused-ignore。`git diff --check`通过。
+增加帧数/标签分离统计、同长度标签变化、缺失样本及两语种差异的合成测试；
+没有在本地读取H200缓存或产生新的PER结果。
+
 ## 0.94 2026-09-21 密度子集已匹配，旧缓存帧数/标签检查中止
 
 用户返回build：`status=matched`。葡语新子集2,631条/4.003024568小时，西语

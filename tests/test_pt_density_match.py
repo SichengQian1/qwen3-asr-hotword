@@ -134,7 +134,7 @@ def test_feature_lengths_cannot_silently_change_density(
         hidden_states=SimpleNamespace(shape=(50, 1024)),
     )
     monkeypatch.setattr(sharded_ctc, "load_feature_shard", lambda *a, **k: [sample])
-    cache = SimpleNamespace(shards=["mock"])
+    cache = SimpleNamespace(shards=["mock"], ctc_time_upsampling_factor=2)
     check_actual_lengths(cache, [r], 90)
     sample.hidden_states.shape = (49, 1024)
     with pytest.raises(ValueError, match="Actual feature length"):
@@ -252,3 +252,36 @@ def test_evaluation_uses_same_subset_three_heads_and_preserves_legacy(
     assert before == (tmp_path / "ref.jsonl").read_bytes()
     output = Path(result["output_dir"])
     assert (output / "sha256.txt").is_file()
+
+
+def test_cache_audit_distinguishes_all_frame_and_label_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from qwen_hotword.training import sharded_ctc
+    from qwen_hotword.training.pt_density_evaluation import audit_cache_lengths
+
+    rows = [row(i, 20, "pt" if i < 2 else "es") for i in range(4)]
+    samples = [
+        SimpleNamespace(
+            sample_id=r["id"],
+            token_ids=tuple(r["phoneme_token_ids"]),
+            hidden_states=SimpleNamespace(shape=(50, 1024)),
+        )
+        for r in rows[:3]
+    ]
+    samples[0].hidden_states.shape = (49, 1024)
+    samples[1].token_ids = (2,) * 20  # Same count, different reference; must still detect it.
+    samples[2].hidden_states.shape = (51, 1024)
+    monkeypatch.setattr(sharded_ctc, "load_feature_shard", lambda *a, **k: samples)
+    report = audit_cache_lengths(
+        SimpleNamespace(shards=["mock"], ctc_time_upsampling_factor=2), rows, 90
+    )
+    assert report["mismatch_counts"] == {
+        "pt::frame_mismatch": 1,
+        "pt::label_mismatch": 1,
+        "es::frame_mismatch": 1,
+    }
+    assert report["frame_delta_counts"] == {-2: 1, 2: 1}
+    assert report["examples"][0]["labels_equal"] is True
+    assert report["examples"][1]["labels_equal"] is False
+    assert report["missing_count"] == 1

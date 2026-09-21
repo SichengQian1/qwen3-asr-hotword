@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -50,24 +51,88 @@ def verify_selection(config: dict[str, Any], repo: Path) -> tuple[Path, list[dic
     return selection, rows
 
 
-def check_actual_lengths(cache: Any, rows: list[dict[str, Any]], classes: int) -> None:
+def audit_cache_lengths(cache: Any, rows: list[dict[str, Any]], classes: int) -> dict[str, Any]:
     from qwen_hotword.training.sharded_ctc import load_feature_shard
 
     expected = {r["id"]: r for r in rows}
     seen = set()
+    counts: Counter[str] = Counter()
+    deltas: Counter[int] = Counter()
+    examples: list[dict[str, Any]] = []
     for shard in cache.shards:
         for sample in load_feature_shard(shard, num_classes=classes):
             if sample.sample_id not in expected:
                 continue
             row = expected[sample.sample_id]
-            if (
-                list(sample.token_ids) != row["phoneme_token_ids"]
-                or int(sample.hidden_states.shape[0]) * 2 != row["effective_ctc_input_length"]
-            ):
-                raise ValueError(f"Actual feature length/labels differ: {sample.sample_id}")
+            actual_frames = int(sample.hidden_states.shape[0]) * cache.ctc_time_upsampling_factor
+            frame_delta = actual_frames - row["effective_ctc_input_length"]
+            labels_match = list(sample.token_ids) == row["phoneme_token_ids"]
             seen.add(sample.sample_id)
-    if seen != set(expected):
-        raise ValueError("Cache does not contain every required evaluation sample")
+            language = row.get("balanced_language_bucket", row["language"])
+            if frame_delta:
+                counts[f"{language}::frame_mismatch"] += 1
+                deltas[frame_delta] += 1
+            if not labels_match:
+                counts[f"{language}::label_mismatch"] += 1
+            if (frame_delta or not labels_match) and len(examples) < 8:
+                examples.append(
+                    {
+                        "id": sample.sample_id,
+                        "language": language,
+                        "manifest_effective_frames": row["effective_ctc_input_length"],
+                        "cache_effective_frames": actual_frames,
+                        "manifest_reference_tokens": len(row["phoneme_token_ids"]),
+                        "cache_reference_tokens": len(sample.token_ids),
+                        "labels_equal": labels_match,
+                        "manifest_density": len(row["phoneme_token_ids"])
+                        / row["effective_ctc_input_length"],
+                        "cache_density": len(sample.token_ids) / actual_frames,
+                    }
+                )
+    missing = sorted(set(expected) - seen)
+    return {
+        "status": "mismatch" if counts or missing else "consistent",
+        "checked_samples": len(seen),
+        "expected_samples": len(expected),
+        "mismatch_counts": dict(counts),
+        "frame_delta_counts": dict(sorted(deltas.items())),
+        "missing_count": len(missing),
+        "missing_examples": missing[:8],
+        "examples": examples,
+        "interpretation": "Frame estimate differences are not evidence of incorrect audio labels",
+    }
+
+
+def check_actual_lengths(cache: Any, rows: list[dict[str, Any]], classes: int) -> None:
+    report = audit_cache_lengths(cache, rows, classes)
+    if report["status"] != "consistent":
+        raise ValueError(
+            "Actual feature length/labels differ: " + json.dumps(report, ensure_ascii=False)
+        )
+
+
+def audit_reference_cache(config: dict[str, Any], repo: Path) -> dict[str, Any]:
+    from qwen_hotword.phonemes.coverage import load_phoneme_vocab
+    from qwen_hotword.training.sharded_ctc import load_disk_feature_cache
+
+    manifest = repo / config["reference_manifest"]
+    rows = read_validation(manifest, config["reference_sha256"])
+    vocab = repo / config["vocab"]
+    cache = load_disk_feature_cache(
+        repo / config["reference_cache"],
+        expected_split="validation",
+        source_manifest_path=manifest,
+        vocab_path=vocab,
+        verify_sha256=True,
+    )
+    report = audit_cache_lengths(cache, rows, len(load_phoneme_vocab(vocab).tokens))
+    report.update(
+        cache_fingerprint=cache.fingerprint,
+        manifest_sha256=sha256_file(manifest),
+        model_loaded=False,
+        files_written=False,
+    )
+    return report
 
 
 def evaluate_subset(config: dict[str, Any], repo: Path) -> dict[str, Any]:
