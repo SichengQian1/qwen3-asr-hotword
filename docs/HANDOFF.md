@@ -1,5 +1,104 @@
 # 工作交接记录
 
+## 0.101 2026-09-22 目标改为每语种480h；西语严格拉美容量核算入口
+
+### 用户决定与当前状态
+
+用户确认：各语种目标改为480小时唯一train，先利用现有资源；西语train和validation
+必须继续在拉美范围。现有Common Voice/MLS若不足，明确报告缺口，由用户补找语料。
+用户询问旧训练配比不代表要求复制旧配比：撤销0.100中葡语72.35/27.65及来源等比
+扩容作为默认配额。葡语可从783.223637h管线可用train中选480h，保留合法recovery，
+但不规定必须27%；实际组成在选样后量化。不得把recovery全部删掉再重复小池补时长。
+
+英语并非最多480h：历史可用train为487.628442h，可选480h，余约7.628442h。
+葡语可用train余量约303.223637h。这里“可训练”指既有音频/标签Manifest通过管线，
+不意味着全部480h的Encoder特征缓存已经建好；已知三语缓存只对应此前各150h。
+新子集要核验身份、准备缺少的特征，并保留Temporal2×兼容。不会自动认证标签全对。
+当前仅启动西语容量/范围核算，未创建480h训练集、未抽英葡数据、未训练或下载模型。
+
+### 为什么先核算
+
+现有西语管线可用train=181.868358h，距480h=298.131642h。
+原始CV总516.125434h不全是拉美；历史明确拉美部分约230h，且大量已包含在现有
+train中。América central规则已补正，本轮用现有classifier重算而不复用旧tier字段。
+MLS原始917.684176h现有库存没有明确拉美方言依据，当前准入小时为0；并不声称
+其每条都是半岛口音。历史证据预示总量不足，具体新增候选与最小缺口等H200返回。
+不通过混入地区未知、混合或半岛数据凑480h，不把同一CV clip跨版本重复计时。
+
+### 已交付的只读工具
+
+- `scripts/audit_es_480h_capacity.py`：默认target=480，默认既有两个输出根，可用参数覆盖。
+- `src/qwen_hotword/training/spanish_capacity.py`：校验指定资产SHA，只读train、
+  validation、speaker assignment元数据、CV inventory与MLS summary。
+- `tests/test_spanish_capacity.py`：6项测试覆盖去重计时、holdout说话人、未知/混合/
+  半岛排除、中美洲重分类、validation范围问题阻断、SHA篡改、重复clip拒绝以及
+  容量充足也不得宣称label-ready；夹具中sealed test文件不存在，证明不读取其内容。
+
+输入：
+
+```text
+outputs/es_candidate_inventory_v1/
+  common_voice_inventory.tsv, mls_summary.json, sha256.txt
+outputs/es_combined_temporal2x_v1/
+  split_summary.json, full_ctc_train.jsonl, full_ctc_validation.jsonl,
+  speaker_split_assignments.tsv, sha256.txt
+```
+
+算法：先复核当前train/validation的数量、时长、SHA和speaker split，再把CV辅助
+记录按唯一clip关联回已有元数据，复核明确拉美tier、es locale、文本关联、音频
+可读状态、时长和speaker；SLR61/Rioplatense核心沿用已验收的语料来源范围，报告
+明确标记该证据层次，不冒充逐音频口音识别。发现范围问题则blocked，不自动删除。
+
+剩余CV候选必须为官方train、明确拉美元数据、音频/文本关联通过、有speaker、
+不与核心clip重复、不属于既有validation/test speaker；当前train/validation中的
+CV clip单独计数，不能再次算新增。使用speaker assignment中的test身份防泄漏，
+不读sealed test Manifest、文字、音频或模型结果。未设置新的speaker时长截断，
+报告top5新增speaker小时数；所得为未做额外cap/标签过滤前的乐观容量上界。
+
+输出区分：
+
+- `existing_pool`：现有管线可用train/validation时长；
+- `existing_latam_scope`与`scope_issue_count`：两者拉美范围依据及疑点；
+- `additional_raw_candidates`：扣除既有记录和holdout后的新增原始候选；
+- `optimistic_total_train_hours_before_label_filtering`：现有train+新增候选上界；
+- `minimum_extra_hours_needed_even_if_all_candidates_pass`：即使新增全通过仍缺多少；
+- `gap_from_existing_ready_train_hours`：距现成可用train的实际缺口。
+
+`insufficient_raw_capacity`表示核算成功但容量不足（CLI正常退出）；
+`labels_not_yet_verified`表示原始上界够，仍需标签/内容重复审核，不代表可以训练；
+`blocked_existing_scope_audit`表示当前范围核验有问题，停止后续准备。
+`training_dataset_created=false`、`files_written=false`始终明确写出。
+该工具不统计两个候选库以外尚未释放的review数据，不能将局部容量界说成全球库存。
+
+### 工作区命令与回传
+
+分支`codex/g2p-coverage-scan`。容器外拉取：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内，现有qwen3-asr-hotword环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/audit_es_480h_capacity.py
+```
+
+只返回终端JSON与commit身份即可；不用GPU、不下载模型、不重跑MFA/音频审计。
+无输出目录、无resume状态，重跑是只读复核；已有outputs完全不变。
+收到结果后另作结果型HANDOFF提交，明确足够/不足及需用户新增的最低合格train时长。
+若不足，不生成虚假的480h Manifest；若足够，才进入新增候选词表/G2P/Manifest准备。
+
+### 本地验证（不等于H200真实容量）
+
+定向pytest 12 passed；全量287 passed/23 skipped。新增3文件Ruff、严格Mypy、
+CLI help、git diff --check通过。全仓Ruff仍有5个既有E501（scan_g2p_coverage.py三处、
+个人未跟踪PPT脚本两处）；MYPYPATH=src mypy仍有3个既有unused-ignore，分别在
+ctc_overfit.py:260、sharded_ctc.py:989、unfrozen_encoder_ctc.py:813；不修改无关文件。
+
 ## 0.100 2026-09-22 每语种500小时扩容：库存核对与配置草案（尚未准备/训练）
 
 ### 目的与阶段状态
