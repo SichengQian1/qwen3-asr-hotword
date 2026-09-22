@@ -1,5 +1,96 @@
 # 工作交接记录
 
+## 0.106 2026-09-22 Noah全量音频库存、文件去重与G2P词表准备入口
+
+0.105抽检通过后，开始实际准备源语料。新增阶段只创建音频/文本候选库存和词表，
+不创建最终480h train，不分配validation/test，不执行MFA G2P或任何模型训练。
+
+新增`noah_source_preparation.py`、`scripts/prepare_noah_es_source.py`及5项单元测试。
+复用已固定源配置、JSON流式解析器、明确路径映射和既有西语文本词表提取逻辑。
+默认8个CPU线程，分批256条并行，最多32线程；不把28万条任务同时塞入线程队列。
+实际会读取全部音频文件字节计算SHA，I/O量显著大于200条metadata抽检；每5120条
+向stderr打印进度。无需GPU/新模型/新依赖，不复制音频文件。
+
+处理流程与语义：
+
+1. 先核验源JSON固定SHA，再创建新目录；处理结束再核对源SHA，防止中途变化。
+2. 对每条检查单音频、Spanish前缀、非空文本及assistant/response一致，保留源行号、
+   原始response/音频路径、明确映射后路径、批次、原始身份字段和directory_group_hint。
+   音频header读取frames/rate/duration，读取文件字节算SHA并检查大小/mtime未中途变更。
+3. inventory保留每条源记录；读取/结构问题写明issue。对相同文件SHA，若文本完全
+   相同，只保留源顺序第一条；若任一转写不同，则全部副本隔离，包括最先出现的那条，
+   不靠后出现的转写覆盖前一条。精确字节去重不等于已识别重编码或同录音重叠片段。
+4. 第二遍从完整inventory划分candidates/needs_review，强制两者数量相加等于源记录数。
+   candidates写canonical source.tsv，保留source_id/source_batch等关联字段。
+   speaker_id留空，source_split=unsplit；Gxxxx只作提示，不编造speaker-disjoint。
+   es-419依据用户确认的整份来源范围，不声称用声学分类器重新验证。
+5. 复用prepare_mfa_wordlist生成全量词表、词频、数字片段；保留重音/ñ，原文保存在
+   inventory。只删除明确ASR格式前缀并裁剪外围空白，不改写转写答案。
+6. 报告按批次列出实测可读小时、去重候选小时、隔离原因和词表规模；candidate_hours
+   是进入G2P/CTC筛选前的候选量，不是新增可训练小时。training_ready=false。
+
+固定schema字段及原始路径以源JSON SHA+行号关联；不直接调用会丢失关联字段/覆盖
+既有输出的旧Swift转换器。当前没有检查与既有train/validation/test的内容重叠，
+没有读取sealed test；最终划分选样前必须补齐交叉去重/holdout隔离。
+音频检查是header和完整文件字节读取，不等同完整波形解码或人工标注准确率审核。
+
+### 输出及中断行为
+
+默认全新目录`outputs/es_noah_mobile_source_v1_<随机后缀>`，终端先打印实际路径。
+也可显式--output-dir，但任何已存在目录（包括空目录）均拒绝。
+
+```text
+input_config.json
+inventory.jsonl              所有源行及检查结果/文件SHA
+candidates.jsonl              唯一、无同文件文本冲突的候选
+needs_review.jsonl            无效、重复或冲突记录，不删除
+source.tsv                   保留关联字段的音频/文本源表
+wordlist/words.txt
+wordlist/word_counts.tsv
+wordlist/character_counts.tsv
+wordlist/fragments_with_digits.tsv
+wordlist/summary.json
+report.json
+sha256.txt
+```
+
+不支持resume；中断/异常保留已有部分文件，不宣称完成。普通异常另写failed report；
+重新运行默认命令会创建新目录，旧目录不删除。成功报告status=completed仅说明源准备
+结束；无候选时no_candidates退出非零。不自动训练、不覆盖旧数据或既有词典。
+
+### H200运行与回传
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内现有qwen3-asr-hotword环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/prepare_noah_es_source.py
+```
+
+核验命令（R取程序打印的本次新目录，不使用latest目录猜测）：
+
+```bash
+(cd "$R" && sha256sum -c sha256.txt)
+cat "$R/report.json"
+```
+
+只返回终端report JSON及本次sha256.txt；不传inventory/candidates大文件、音频或模型。
+下一步根据实际候选小时、review规模和words规模准备复用西语词典/增量MFA及CTC标签，
+经G2P/时间可行性与holdout隔离后的新增train须达到约298.13h，才能补现有181.87h到480h。
+本阶段未在本地或工作区实际处理新全量音频；真正小时数待用户返回后另作结果提交。
+
+验证：定向（准备+检查）16 passed；全量303 passed/23 skipped；新增3个Python文件
+Ruff、严格Mypy、CLI help及git diff --check通过。全仓Ruff仍5处既有E501、全包Mypy
+仍3处既有unused-ignore，详见0.101；不修改个人未跟踪文件或无关代码。
+
 ## 0.105 2026-09-22 Noah全量结构及200条音频抽检通过（用户返回）
 
 用户返回`inspect_noah_es_source.py`的终端JSON，status=inspection_completed。
