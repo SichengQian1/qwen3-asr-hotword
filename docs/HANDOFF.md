@@ -1,5 +1,67 @@
 # 工作交接记录
 
+## 0.104 2026-09-22 Noah源流式结构检查与分批次音频抽检入口
+
+目的：在已接受用户人工审核/拉美范围/容器路径确认的基础上，机械核验源数据契约，
+为后续全量时长和G2P准备提供依据。本节为代码交付，未产生工作区实测结果。
+
+新增：
+
+- `configs/noah_es_mobile_source.workzone.json`：源路径、用户回传SHA、明确音频
+  前缀重写、seed=20260922、每批次抽50条，以及用户确认的来源信息；
+- `src/qwen_hotword/training/noah_source_inspection.py`：标准库增量解析顶层数组，
+  避免将145M单行JSON整体json.load；保留唯一音频路径/摘要用于重复检查；
+- `scripts/inspect_noah_es_source.py`：一个短命令，只读输入，终端输出紧凑JSON；
+- `tests/test_noah_source_inspection.py`：11项测试覆盖多字节跨块、截断/尾随逗号等
+  非法JSON、明确路径映射、确定性分批次抽样、重复转写冲突、多音频及SHA拒绝。
+
+检查范围：
+
+1. 全文件SHA必须为0.103用户返回值；流式确认数组对象完整解析，包括结尾无多余内容。
+2. 全量统计字段、语言、来源目录记录数及speaker/country/accent/dialect/split是否存在。
+3. 检查每条是否恰好一个绝对音频路径、一个assistant消息、response与assistant完全
+   一致、language=Spanish且转写前缀符合既有形式；不静默把多音频/多轮对话降为一条。
+4. 精确路径去重并统计同路径不同response；标记问题，不删改数据、不输出可训练TSV。
+5. 按noah_esZ00后的批次目录分组，seed+音频路径SHA优先级无放回抽各50条；
+   若完整源只有两个预览批次则约100条，不使用文件开头代表全池。最多允许30批次，
+   超过时停止确认分组。样本只读音频metadata，统计可读数、采样率、时长范围/总和，
+   每组返回3个代表路径/截断文本及少量失败样例。
+6. 用户确认的路径映射为显式重写：命中旧前缀就使用/host_home路径，不在两个不同
+   文件间猜测或优先使用/home原路径。JSON本身/home_91路径不受重写影响。
+
+报告`provider_provenance`保留用户确认，
+`latin_american_scope_independently_verified=false`仅说明没有独立声学口音鉴定，
+不否定用户确认、不作为阻断条件。`inspection_completed`表示检查过程及已查字段通过，
+不是全库训练就绪；`inspection_has_flags`表示有结构/重复/音频提示，逐项解释后处理。
+全库真实时长仍为null，training_ready=false。不用抽样时长推算500h，不进行G2P、
+外部ASR、训练、内容重复检测或holdout关联；这些属于下一阶段全量准备。
+
+### 工作区执行
+
+容器外拉取`codex/g2p-coverage-scan`：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/inspect_noah_es_source.py
+```
+
+返回终端JSON即可，不传源JSON或音频。无需GPU、新依赖或模型。无输出目录，
+无resume状态，重跑只读，不覆盖任何outputs。后续如发现格式/路径提示，先依据
+报告修复适配，再进入完整音频metadata库存、保留speaker/split的源TSV与G2P准备。
+新生成数据必须使用新目录，不能盲用旧转换器覆盖旧TSV或丢失speaker等信息。
+
+本地定向11 passed；全量298 passed/23 skipped；新增3个Python文件Ruff、严格
+Mypy、CLI help及git diff --check通过。全仓Ruff仍5个既有E501，全包Mypy仍3个
+既有unused-ignore（位置见0.101），未修改无关文件。真实H200结果待用户返回。
+
 ## 0.103 2026-09-22 Noah西语源结构预览返回及用户确认（结果记录）
 
 用户在容器内返回源文件ls/sha256sum/head结果：文件显示145M，路径可访问，

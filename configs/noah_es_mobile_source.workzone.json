@@ -1,0 +1,14 @@
+{
+  "input": "/home_91/c00809914/qwen3-asr-eagle/500h_latn_es_mobile_noah.json",
+  "expected_sha256": "3a57177178368b1eae0ce0be659071e955edcde56a1227c830192a0adc90b93f",
+  "samples_per_corpus": 50,
+  "seed": 20260922,
+  "audio_prefix_rewrites": {
+    "/home/z00841352/27A/data/": "/host_home/z00841352/27A/data/"
+  },
+  "provenance": {
+    "human_review": "user_confirmed",
+    "latin_american_scope": "user_confirmed_for_both_previewed_batches",
+    "container_audio_path_mapping": "user_confirmed_accessible"
+  }
+}
