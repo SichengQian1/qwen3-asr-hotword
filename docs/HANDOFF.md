@@ -1,5 +1,77 @@
 # 工作交接记录
 
+## 0.107 2026-09-22 Noah新增西语全量库存实测约500小时（用户返回）
+
+用户执行`python -B scripts/prepare_noah_es_source.py`完成，返回终端report JSON。
+实际输出为`outputs/es_noah_mobile_source_v1_4bbc7edd5d`，status=completed，
+scope=source_inventory_and_wordlist_not_training_manifest。源JSON SHA仍为
+`3a57177178368b1eae0ce0be659071e955edcde56a1227c830192a0adc90b93f`。
+这是用户返回的工作区实测；本地核对计数、小时数加总一致，但尚未收到工作区
+report.json的独立SHA或sha256.txt，不能声称本地已核验原始产物字节身份。
+
+| 批次 | 候选条数 | 实测小时 |
+|---|---:|---:|
+| APY161101034_R | 45,018 | 94.404404 |
+| APY170801048 | 79,586 | 183.450922 |
+| APY161101034_G | 3,013 | 3.547695 |
+| APY181231012 | 159,204 | 218.596950 |
+| 合计 | 286,821 | 499.999970 |
+
+全部音频metadata可读，采样率均16kHz；286,821个不同文件SHA，无同文件文本冲突，
+review_records=0。所有记录有文本，共3,816,339个word token、69,589个unique word，
+数字fragment=0。source.tsv及wordlist已生成，不必重新运行全量音频扫描。
+
+结论：新来源的原始候选时长确实约500h，而不是把目录标称小时相加。按现有严格
+拉美西语train 181.868358h，距480h仍需新增298.131642h；本候选池最终保留约
+59.6263%即可满足数量要求，但这不是最终可训练时长承诺。
+
+仍未完成音素标签、CTC可行性、split分配、与既有holdout的交叉去重。
+音频检查为header和文件字节读取，不是完整解码或标注准确率认证；文件SHA去重
+不覆盖重编码和同录音重叠片段。speaker身份仍未确认，Gxxxx只作分组提示。
+保持training_ready=false，不启动训练，不修改原有验证集或outputs。
+
+### 下一步：复用既有西语词典，生成增量G2P计划
+
+复用已有`prepare_spanish_mfa_repairs.py`，保持旧西语文本/代理规则不变。
+先使用旧Common Voice Spanish原始MFA词典，统计本次词表的exact/proxy覆盖和
+需要补跑的proxy词数；原始词典可能有既知U+0303问题，最终必须经过既有finalize
+及vocab audit，不能把prepare报告的计划覆盖当作最终音素质量通过。
+本步不运行MFA、不下载模型、不读取音频或test，也不新增代码。
+
+容器外同步（分支`codex/g2p-coverage-scan`）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录，分段执行以下短命令；SHA检查失败时不要继续：
+
+```bash
+R=outputs/es_noah_mobile_source_v1_4bbc7edd5d
+(cd "$R" && sha256sum -c sha256.txt)
+sha256sum "$R/report.json"
+```
+
+```bash
+D=outputs/es_candidate_train_sources_v1/common_voice/mfa_g2p
+P=outputs/es_noah_mobile_g2p_plan_v1
+test ! -e "$P" && python -B scripts/prepare_spanish_mfa_repairs.py \
+  --corpus "noah=$R/wordlist" \
+  --dictionary "noah=$D/common_voice_spanish_latin_america_mfa.dict" \
+  --output-dir "$P"
+```
+
+新目录P保留prepare_summary.json、proxy_words.txt、逐词repair_plan及SHA清单。
+无resume；如果P已存在，不覆盖也不删除，改用新版本目录再运行。
+返回终端prepare JSON、report.json SHA及SHA核验是否全部OK即可，无需传大文件。
+下一轮按proxy词数决定增量MFA命令，使用现有
+`models/mfa/g2p/spanish_latin_america_mfa.zip`；若资产缺失则单独处理，脚本不下载。
+完成标签覆盖、CTC压力及隔离检查后才统计最终新增train小时并选择480h。
+
+本次仅结果型HANDOFF更新；git diff --check通过，未修改算法、代码或outputs。
+
 ## 0.106 2026-09-22 Noah全量音频库存、文件去重与G2P词表准备入口
 
 0.105抽检通过后，开始实际准备源语料。新增阶段只创建音频/文本候选库存和词表，
