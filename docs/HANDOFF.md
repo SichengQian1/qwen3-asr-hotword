@@ -1,5 +1,78 @@
 # 工作交接记录
 
+## 0.108 2026-09-22 Noah旧词典增量计划结果与适用范围纠正（用户返回）
+
+用户返回`outputs/es_noah_mobile_g2p_plan_v1`的prepare结果。69,589个词、
+3,816,339个词次，与0.107源词表规模一致；status=pass仅表示计划生成成功，
+training_labels_ready=false。
+
+| 计划分类 | 不同词数 | 词次 |
+|---|---:|---:|
+| base_exact | 35,669 | 3,273,619 |
+| base_proxy | 1,920 | 227,616 |
+| mfa_proxy | 10,912 | 237,031 |
+| unresolved | 21,088 | 78,073 |
+
+去重后proxy_words_for_mfa=10,826。planned_corpus_token_coverage=97.9542436%，
+unresolved词次占2.0457564%。这是词次的计划覆盖，不是已通过音素审计的覆盖，
+也不是可训练音频小时比例或人工标注准确率。不同原词可能共享代理，所以10,912
+与10,826不矛盾。
+
+用户报告的输入SHA：
+
+```text
+base_dictionary 341fee8513d745abef2dc47dcd071bceb6151e01e633c0de696e83643db972f6
+word_counts c2237dfd169d204a1fafe19157a94758e2dd59033343bd0a22a583c50b96d3f7
+words 6eb90c4e058f04f0dd1d52a072420e72cba9efadca14c4454d64e5be86bdf1a2
+```
+
+这些是回传JSON记录身份；仍未收到上一阶段report文件SHA/校验清单执行结果，
+不声称已在本地检查H200产物字节。
+
+代码复核发现0.107的复用方式不完整：spanish_g2p_proxy在没有acute/ñ/gü代理规则
+时返回no_safe_proxy。因此一个旧CV词典不含的普通新词也可能进入unresolved。
+这个脚本原本面向已经对本语料运行MFA之后的残余拼写问题，不是通用跨语料缺词
+补全器。现有汇总未按detail统计，不能断言21,088词全部属于这一原因，更不能据此
+删除相关音频或称为错误标注。保留原计划，停止把它当作完整增量待跑词表。
+
+### 下一步：本语料原始词表先跑MFA，再准备既有修复流程
+
+使用已在H200存在的spanish_latin_america_mfa.zip和既有top-1 G2P流程，直接处理
+Noah完整69,589词表；这会重新生成部分已有词的发音，但不需新合并器，也不会遗漏
+普通新词。保留同一模型、文本规范化和后续修复策略，不更改核心算法。
+无Qwen加载/训练，无下载，无音频重扫描；仅用户在H200执行MFA G2P。
+
+容器内项目根目录，以下整体小块在子shell中执行，任一步失败即停止；输出根G
+必须不存在，旧产物不覆盖。若目录已存在/中断，保留该目录，改用v2等新目录，
+不提供未验证的resume。现有脚本无需为本次文档提交重新pull。
+
+```bash
+(
+set -e
+R=outputs/es_noah_mobile_source_v1_4bbc7edd5d
+M=models/mfa/g2p/spanish_latin_america_mfa.zip
+G=outputs/es_noah_mobile_mfa_v1
+test -f "$M"
+(cd "$R" && sha256sum -c sha256.txt)
+test ! -e "$G"
+mkdir "$G"
+sha256sum "$M" "$R/wordlist/words.txt"
+conda run --no-capture-output -n aligner mfa g2p \
+  --num_jobs 16 --num_pronunciations 1 \
+  "$R/wordlist/words.txt" "$M" "$G/noah_raw.dict"
+python -B scripts/prepare_spanish_mfa_repairs.py \
+  --corpus "noah=$R/wordlist" \
+  --dictionary "noah=$G/noah_raw.dict" \
+  --output-dir "$G/repair_plan"
+)
+```
+
+用户只需返回最终prepare JSON、打印的模型/词表SHA及SHA检查是否全部OK；若失败，
+返回错误尾部。模型缺失则停止，另行准备资产，不在此命令内下载。
+随后根据该独立词典的残余问题决定proxy增量，再finalize和vocab审计。
+完成逐样本CTC可行性、交叉去重及holdout隔离后，才能判断新增298.13h是否满足。
+本次仅结果型文档提交，git diff --check通过；无代码/outputs修改。
+
 ## 0.107 2026-09-22 Noah新增西语全量库存实测约500小时（用户返回）
 
 用户执行`python -B scripts/prepare_noah_es_source.py`完成，返回终端report JSON。
