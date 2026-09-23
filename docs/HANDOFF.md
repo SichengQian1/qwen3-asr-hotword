@@ -1,5 +1,62 @@
 # 工作交接记录
 
+## 0.125 2026-09-23 三语480h修复完成、正式训练清单发布（用户返回）
+
+用户执行0.124修复入口，返回status=completed、training_manifest_ready=true。
+输出目录outputs/multilingual_480h_training_v2_a48f58e452。交付代码提交为
+9dc0b27cbbb9b31b433c3de04ec66ee97b78ecfe；回传未单独包含工作区git HEAD，
+不据此宣称已经再次核验运行时Git版本。本地粘贴附件SHA为
+b174ad885f6dcf25247052e4863e838b46bc980a1e221d5652a33b6afb4f105b。
+
+本轮解析回传JSON，核对排除ID摘要与configs/480h_repair.workzone.json一致，
+逐维度条数/小时加总、三语合计、文件扫描数与保护集合数量全部自洽。以下manifest
+SHA来自H200返回；本地没有这些大清单，未宣称独立重新读取并哈希了远程文件。
+
+| 语言 | 最终条数 | 最终小时 | recovery小时 | recovery时长占比 |
+|---|---:|---:|---:|---:|
+| EN | 340,379 | 480.000095655 | 0.021795642 | 0.004541% |
+| ES | 296,399 | 480.001822655 | 39.785051580 | 8.288521% |
+| PT | 321,741 | 480.000408127 | 133.649949007 | 27.843716% |
+| 合计 | 958,519 | 1440.002326437 | — | — |
+
+- 按既定排除摘要9f81aa34b54234f5c9401796aeb1500dbfc47726b80b4a1f765a997f9e451d1e
+  排除154条/0.201999236h；EN2条、PT152条，具体原因见0.123。
+- EN补1条/0.001483385h（5.340187秒）；PT补159条/0.199667170h
+  （11.980030分钟），补样字节扫描分别1/159个，均无拒绝。958513-154+160=958519。
+  小时略超480是保留完整音频的正常结果，没有重复抽样凑小时。
+- PT source小时为Noah500h 284.214870161、finance 111.838333630、MLS65.152634966、
+  Common Voice14.752036037、FLEURS4.042533333；保留多来源和原自然密度分布。
+  recovery27.843716%与修复前27.843469%近乎一致，不是固定强行抽27%。
+- ES全部296399条保留。新ES文件SHA变化来自三语新版本元数据；原冻结ES引用仍为
+  145c16e2019c4966c450557a150333eea19bcafec37f5eca36ee6e4d8815b300。
+- 最终重新扫描1,000,489文件/153,693,381,203字节；唯一train文件SHA958,519，
+  等于训练行数。conflict_groups_by_reason={}，train_holdout_path_overlaps=0，
+  combined重复ID/路径均0。保护集合validation21,029、test20,941，与旧扫描一致。
+  958519+21029+20941=1000489；retained_audio_rehashed=true。
+- 英/西/葡原validation/test引用及SHA保持0.124以前版本不变。test字节仅用于身份
+  保护；test_manifest_content_read=false、model_loaded=false、training_started=false。
+
+正式清单身份（均在上述v2目录）：
+
+```text
+full_ctc_train_en.jsonl cb85a548f41f1b21e682d09a90264829296aae01381a60aa603bbcf66ba67a5b
+full_ctc_train_es.jsonl 3f3abb4c53f511dd48b8b52ad59954480bbdcdf2cdfb62ec1ceb5aaa500d0777
+full_ctc_train_pt.jsonl 987e650842f2dabcbd82abd1cbe3659a5005a195ee3fa6d7df77383de450d25a
+full_ctc_train.jsonl eae271e209a79ee6aff64356eb75a7e7b5f94c7069bd9e857cd8de00cb740c82
+```
+
+数据清单准备阶段完成；不要再次运行repair或覆盖v1/v2。下一阶段先固定缓存和
+训练配置，绑定本节combined SHA，保持Qwen3-ASR-1.7B冻结、现有temporal-2x Head
+和音素定义，明确每epoch唯一音频遍历、预算/停止规则、checkpoint选择的validation
+视图，再给用户独立H200缓存及训练命令。继续保留旧固定验证视图用于历史PER比较；
+完整池的三语validation时长不同，不能直接将汇总micro PER当成三语等权指标。
+本轮没有实施该阶段、创建缓存或启动训练，不把旧150h缓存当作新480h缓存使用。
+
+结论边界：文件字节去重和保护集合隔离已通过，不证明重编码/重叠片段全部排除，
+不保证跨来源speaker隔离或每条音素标签正确，也不能据此解释历史葡语PER的因果。
+本次仅更新结果文档并核对回传算术/身份引用，git diff --check通过；没有源代码
+变更，不重复运行上一轮已记录的353项回归测试。
+
 ## 0.124 2026-09-23 三语480h冲突修复与补齐入口（待H200执行）
 
 0.123实测结果已单独提交ba66f04。原回传附件SHA为
