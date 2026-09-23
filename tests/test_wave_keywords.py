@@ -17,6 +17,7 @@ def inputs(lang="es"):
     phone = "/ĩ a/"
     primary = {
         wave: {
+            "language": "Spanish" if lang == "es" else "Portuguese",
             "keyword_sets": {"baseline": [], "all_keywords": ["Casa"]},
             "keyword_phonemes": {"Casa": phone},
         }
@@ -52,6 +53,79 @@ def inputs(lang="es"):
 def build(lang="es", **kwargs):
     return build_language(
         lang, *inputs(lang), VOCAB, target_size=4, seed="fixed", expected_primary=1, **kwargs
+    )
+
+
+@pytest.mark.parametrize(
+    "lang,declared",
+    [
+        ("es", "Spanish"),
+        ("es", "es"),
+        ("es", "es-419"),
+        ("es", " SPANISH "),
+        ("pt", "Portuguese"),
+        ("pt", "pt"),
+        ("pt", "pt-BR"),
+        ("pt", " portuguese "),
+    ],
+)
+def test_primary_language_aliases_preserve_table(lang, declared):
+    primary, neighbors, fillers = inputs(lang)
+    for raw in primary.values():
+        raw["language"] = declared
+    result = build_language(
+        lang, primary, neighbors, fillers, VOCAB, target_size=4, seed="fixed", expected_primary=1
+    )
+    assert result == build(lang)
+
+
+@pytest.mark.parametrize(
+    "lang,declared",
+    [
+        ("es", "Portuguese"),
+        ("pt", "Spanish"),
+        ("es", "pt-BR"),
+        ("pt", "es-419"),
+        ("es", "unknown"),
+        ("pt", ""),
+        ("es", None),
+        ("pt", ["Portuguese"]),
+    ],
+)
+def test_primary_language_mismatch_reports_actual_value(lang, declared):
+    primary, neighbors, fillers = inputs(lang)
+    primary["wave3"]["language"] = declared
+    with pytest.raises(ValueError) as exc:
+        build_language(
+            lang,
+            primary,
+            neighbors,
+            fillers,
+            VOCAB,
+            target_size=4,
+            seed="fixed",
+            expected_primary=1,
+        )
+    assert f"wave3/{lang}: primary language mismatch" in str(exc.value)
+    assert repr(declared) in str(exc.value)
+
+
+def test_primary_missing_language_keeps_previous_behavior():
+    primary, neighbors, fillers = inputs()
+    for raw in primary.values():
+        del raw["language"]
+    assert (
+        build_language(
+            "es",
+            primary,
+            neighbors,
+            fillers,
+            VOCAB,
+            target_size=4,
+            seed="fixed",
+            expected_primary=1,
+        )
+        == build()
     )
 
 

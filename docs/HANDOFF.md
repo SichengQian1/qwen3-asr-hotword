@@ -1,5 +1,36 @@
 # 工作交接记录
 
+## 0.134 2026-09-23 修复wave主词表语言名称兼容（待重跑）
+
+0.133用户回传结果已独立提交2622eff。本轮仅修改primary语言元数据校验：
+ES允许es/es-419/Spanish，PT允许pt/pt-BR/Portuguese，忽略大小写及首尾空白。
+语言不匹配、未知值、空值及非字符串仍阻断；报错现在包括wave、目标语言、实际值
+和允许别名。缺少language字段沿用原有由显式lang参数限定的行为。
+不改变neighbors/旧库校验、SHA绑定、IPA处理、配比或选词顺序，不改用户源文件。
+测试fixture改成实测Spanish/Portuguese，避免今后只测省略language的合成输入。
+
+交付分支codex/g2p-coverage-scan（推送SHA见回复）。容器外项目根目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录重跑原命令，仅CPU：
+
+```bash
+python -B scripts/build_wave_4000_keywords.py
+```
+
+仍自动创建outputs/wave_4000_keywords_v1_<随机后缀>，无resume、拒绝覆盖既有目录。
+成功后回传return_files指定report.json与sha256.txt；在新目录执行
+sha256sum -c sha256.txt核验。失败则返回完整短报错，不更改原JSON以绕过SHA。
+两份4000表及16份推理文件仍未在H200成功生成；本轮仅修复已证实的元数据兼容错误。
+
+39项定向测试通过（含17项新增别名、交叉语言拒绝和旧行为回归），全量402 passed、
+23 skipped。本轮文件Ruff、定向strict Mypy、git diff --check通过；全仓仍为既有
+5处E501和3处unused-ignore，无新增，未修改这些无关文件。
+
 ## 0.133 2026-09-23 wave构建首跑失败：主词表使用英文语言名称
 
 用户在9868a52版本运行build_wave_4000_keywords.py，返回status=failed、

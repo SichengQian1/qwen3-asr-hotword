@@ -84,8 +84,16 @@ def build_language(
         raw = primary[wave]
         if not isinstance(raw, dict):
             raise ValueError(f"{wave}: primary must be an object")
-        if raw.get("language", lang) not in {lang, "pt-BR" if lang == "pt" else "es-419"}:
-            raise ValueError(f"{wave}: primary language mismatch")
+        declared_language = raw.get("language", lang)
+        aliases = {"es", "es-419", "spanish"} if lang == "es" else {"pt", "pt-br", "portuguese"}
+        if (
+            not isinstance(declared_language, str)
+            or declared_language.strip().casefold() not in aliases
+        ):
+            raise ValueError(
+                f"{wave}/{lang}: primary language mismatch: "
+                f"got {declared_language!r}; expected one of {sorted(aliases)}"
+            )
         sets, phones = raw.get("keyword_sets"), raw.get("keyword_phonemes")
         if not isinstance(sets, dict) or not isinstance(phones, dict):
             raise ValueError(f"{wave}: invalid primary schema")
