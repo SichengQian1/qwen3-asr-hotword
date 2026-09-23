@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -87,20 +88,59 @@ def inspect_waves(root: Path, vocab_path: Path) -> dict[str, Any]:
                         info["set_counts"] = {k: len(v) for k, v in sets.items()}
                         # Inventory all declared sets; never select an empty baseline by default.
                         info["declared_surfaces"] = len(set(surfaces))
+                        phone_issues = []
                         for surface in sorted(set(surfaces)):
                             key = " ".join(normalize_match_words(surface))
                             phone = phones.get(surface)
-                            if not key or not isinstance(phone, str) or not phone.strip():
-                                raise ValueError(f"missing surface/phoneme: {surface[:80]}")
-                            tokens = tokenize_ipa_to_vocab(phone, vocab)
-                            if tokens.oov_units or not tokens.token_ids:
-                                raise ValueError(f"OOV/empty phonemes: {surface[:80]}")
+                            if not key:
+                                raise ValueError(f"empty normalized surface: {surface[:80]}")
+                            tokens = (
+                                tokenize_ipa_to_vocab(phone, vocab)
+                                if isinstance(phone, str) and phone.strip()
+                                else None
+                            )
+                            ready = bool(tokens and tokens.token_ids and not tokens.oov_units)
+                            oov = tokens.oov_units if tokens else []
+                            if not ready:
+                                phone_issues.append(
+                                    {
+                                        "surface": surface,
+                                        "phoneme": phone,
+                                        "reason": "oov_or_empty" if tokens else "missing_phoneme",
+                                        "oov_units": oov,
+                                        "oov_unicode": [
+                                            {
+                                                "unit": unit,
+                                                "characters": [
+                                                    {
+                                                        "char": c,
+                                                        "codepoint": f"U+{ord(c):04X}",
+                                                        "name": unicodedata.name(c, "UNKNOWN"),
+                                                    }
+                                                    for c in unit
+                                                ],
+                                            }
+                                            for unit in sorted(set(oov))
+                                        ],
+                                    }
+                                )
                             unions[lang][key].append(
                                 {
                                     "wave": wave,
                                     "surface": surface,
                                     "phoneme": phone,
-                                    "token_ids": tokens.token_ids,
+                                    "token_ids": tokens.token_ids if ready and tokens else None,
+                                    "oov_units": oov,
+                                    "phonemes_ready": ready,
+                                }
+                            )
+                        info["phoneme_issue_count"] = len(phone_issues)
+                        info["phoneme_issue_examples"] = phone_issues[:10]
+                        if phone_issues:
+                            issues.append(
+                                {
+                                    "input": str(path),
+                                    "error": f"{len(phone_issues)} unmappable words (full scan)",
                                 }
                             )
                         parsed_primary[lang] += 1
@@ -147,8 +187,16 @@ def inspect_waves(root: Path, vocab_path: Path) -> dict[str, Any]:
         conflicts = {
             key: entries
             for key, entries in words.items()
-            if len({tuple(e["token_ids"]) for e in entries}) > 1
+            if len({tuple(e["token_ids"]) for e in entries if e["phonemes_ready"]}) > 1
         }
+        unmappable = {
+            key: entries
+            for key, entries in words.items()
+            if any(not e["phonemes_ready"] for e in entries)
+        }
+        oov_counts = Counter(
+            unit for entries in words.values() for e in entries for unit in e["oov_units"]
+        )
         union_summary[lang] = {
             "complete_primary_files": parsed_primary[lang],
             "counts_are_partial": parsed_primary[lang] != 4,
@@ -156,6 +204,13 @@ def inspect_waves(root: Path, vocab_path: Path) -> dict[str, Any]:
             "remaining_to_4000": max(0, 4000 - len(words)),
             "phoneme_conflict_count": len(conflicts),
             "phoneme_conflict_examples": dict(list(conflicts.items())[:5]),
+            "unmappable_normalized_word_count": len(unmappable),
+            "unmappable_examples": dict(list(unmappable.items())[:5]),
+            "oov_units_top20": oov_counts.most_common(20),
+            "phoneme_conflict_check_incomplete": bool(unmappable),
+            "primary_phonemes_ready": parsed_primary[lang] == 4
+            and not unmappable
+            and not conflicts,
             "cross_wave_shared_stem_count": sum(len(v) > 1 for v in wave_stems[lang].values()),
         }
         if conflicts or len(words) > 4000:
@@ -176,6 +231,7 @@ def inspect_waves(root: Path, vocab_path: Path) -> dict[str, Any]:
                 issues.append({"input": str(path), "error": str(error)})
         fillers[lang] = info
     return {
+        "schema_version": 2,
         "status": "inventory_completed",
         "root": str(root),
         "scope": "input_schema_and_primary_union_inventory_not_4000_table_release",

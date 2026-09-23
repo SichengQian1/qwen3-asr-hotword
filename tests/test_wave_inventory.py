@@ -67,8 +67,11 @@ def test_inventory_reports_issues_without_silently_releasing_tables(tmp_path, pr
     assert report["issues"] and not report["tables_created"]
     if problem == "conflict":
         assert report["primary_unions"]["pt"]["phoneme_conflict_count"] == 1
-    elif problem in {"oov", "schema"}:
+    elif problem == "schema":
         assert report["primary_unions"]["pt"]["counts_are_partial"]
+    elif problem == "oov":
+        assert not report["primary_unions"]["pt"]["counts_are_partial"]
+        assert not report["primary_unions"]["pt"]["primary_phonemes_ready"]
 
 
 def test_duplicate_json_keys_rejected_and_preview_bounded(tmp_path):
@@ -78,3 +81,30 @@ def test_duplicate_json_keys_rejected_and_preview_bounded(tmp_path):
     report = inspect_waves(tmp_path, VOCAB)
     assert "duplicate JSON key" in report["issues"][0]["error"]
     assert len(json.dumps(preview(["x" * 10000] * 10000))) < 1000
+
+
+def test_oov_does_not_truncate_surface_union_or_equate_partial_pronunciations(tmp_path):
+    make_inputs(tmp_path)
+    path = tmp_path / "wave1/es/es_keyword_bias_phoneme.json"
+    path.write_text(
+        json.dumps(
+            {
+                "keyword_sets": {"all_keywords": ["Adrián", "Casa", "Zeta"]},
+                "keyword_phonemes": {"Adrián": "a ☃", "Casa": "k a s a ☃", "Zeta": "s e t a"},
+            }
+        )
+    )
+    report = inspect_waves(tmp_path, VOCAB)
+    union = report["primary_unions"]["es"]
+    assert union["complete_primary_files"] == 4
+    assert union["normalized_union_count"] == 3
+    assert union["remaining_to_4000"] == 3997
+    assert union["unmappable_normalized_word_count"] == 2
+    assert union["phoneme_conflict_check_incomplete"]
+    assert union["phoneme_conflict_count"] == 0
+    info = report["json_files"]["wave1/es/keyword_bias_phoneme"]
+    assert info["phoneme_issue_count"] == 2
+    assert (
+        info["phoneme_issue_examples"][0]["oov_unicode"][0]["characters"][0]["codepoint"]
+        == "U+2603"
+    )

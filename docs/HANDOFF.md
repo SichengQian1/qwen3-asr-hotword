@@ -1,5 +1,46 @@
 # 工作交接记录
 
+## 0.129 2026-09-23 wave盘点v2：OOV逐词继续，分离词面并集与音素可用性
+
+0.128用户实测摘要已独立提交2a36189。本轮只修复evaluation/wave_inventory.py的
+盘点行为和测试，不修改vocab、IPA转换规则、源热词/近音词文件或检索门控。
+
+- 旧版遇首个OOV即中止一份primary文件，使ES显示并集1。v2对缺失音素、OOV或空
+  音素逐词记录并继续扫描：目标词面仍进入规范化并集，不因不可映射而被删除。
+- complete_primary_files现表示结构正确且词面扫描完成的文件数，不表示每个音素
+  已可用；counts_are_partial只针对词面扫描。primary_phonemes_ready单独要求4份
+  完整扫描、无任何不可映射项及无已映射发音冲突，不能混为通过。
+- 每语言报告unmappable_normalized_word_count、最多5词所有wave原音素示例、
+  oov_units_top20；每文件列phoneme_issue_count及最多10个原音素/OOV/Unicode编码
+  和Unicode名称示例。不把tokenizer返回的部分token序列用于发音一致性比较：
+  不可映射项token_ids=null，冲突仅对完整可映射序列比较；若有未映射项，明确
+  phoneme_conflict_check_incomplete=true，0个已知冲突不等于已经排除全部冲突。
+- schema_version=2，仍tables_created=false。不会根据名字猜测西语异常符号，
+  不做全局音素合并，也不运行G2P/Encoder/检索；旧盘点目录保持原样。
+
+容器外项目目录拉取工作分支（最终SHA见交付消息）：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内重跑同一短命令，不使用GPU：
+
+```bash
+python -B scripts/inspect_wave_keyword_inputs.py
+```
+
+自动创建新的outputs/wave_keyword_inventory_v1_<随机后缀>；路径前缀沿用，实际
+JSON schema为2，不复写6c459d81a1。无resume。请返回新return_files指定的完整
+report.json与sha256.txt；终端摘要省略neighbors结构，不能只据摘要实现补词解析。
+可在新目录sha256sum -c sha256.txt校验。得到字段、异常原音素及补充库库存后，
+再确定最小兼容处理和两份4000表；当前两份表与16份推理交付仍未生成。
+
+7项定向测试通过，新增回归覆盖首词OOV不截断后续词、完整并集独立计数、部分
+token序列不冒充完整发音、Unicode证据；全量370 passed/23 skipped。新增/修改
+Ruff、定向strict Mypy、git diff --check通过。全仓仍既有5处E501和3处unused-ignore。
+
 ## 0.128 2026-09-23 wave盘点回传：800条音文对应、PT并集295，ES被音素映射阻断
 
 用户回传outputs/wave_keyword_inventory_v1_6c459d81a1的终端摘要，尚未回传该目录
