@@ -1,5 +1,29 @@
 # 工作交接记录
 
+## 0.138 2026-09-23 三语480h全量特征缓存完成（H200回传）
+
+用户返回status=cache_completed，根目录outputs/multilingual_480h_run_v1，
+run_plan SHA为d146173589b915a862344df12d6d3725ff5779067530a75cfd9d700ac8a32e99。
+训练清单SHA eae271e209a79ee6aff64356eb75a7e7b5f94c7069bd9e857cd8de00cb740c82、
+验证清单SHA d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499，
+均与0.126冻结配置一致。以下是用户终端报告值，未在本地读取H200缓存字节。
+
+| split | 样本 | shards | 基础帧 | 标签tokens | feature bytes | 提取秒数 |
+|---|---:|---:|---:|---:|---:|---:|
+| train | 958519 | 1873 | 67562173 | 45517837 | 138751395901 | 16232.49 |
+| validation | 8101 | 16 | 562779 | 370931 | 1155707472 | 151.22 |
+
+两split status=pass；encoder batch8、每shard512条、resumed_shards=0。
+单GPU进程/logical cuda:0，冻结Encoder参数317477504，test_set_used=false。
+合计特征139907103373 bytes（约139.91GB/130.30GiB），提取约4.55小时。
+total_frames为缓存基础帧，Head仍2x，不能直接把tokens/base_frames当有效CTC密度。
+formal_training_started=false；这证明特征准备完成，不是新模型PER改善证据。
+
+下一阶段复用cache/train及cache/validation，正式Head写入独立head/，不复用
+smoke_head权重。固定0.126参数，先5epoch完整数据训练，再审查分语言PER及收敛；
+继续时恢复同一Head/optimizer/scheduler到总计最多30epoch。正式入口必须重新
+核验清单、配置及每个cache shard SHA，不重提Encoder特征、不访问test。
+
 ## 0.137 2026-09-23 wave两语4000词表检索完成，16份下游文件已导出（H200回传）
 
 用户执行0.136入口 `python -B scripts/run_wave_keyword_retrieval.py --gpu 4`，
