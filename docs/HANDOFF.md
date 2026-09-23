@@ -1,5 +1,51 @@
 # 工作交接记录
 
+## 0.140 2026-09-23 三语480h首5epoch训练完成（H200回传）
+
+用户返回pilot_completed，head报告status=completed、epochs_requested=5、
+epochs_completed=5、early_stopped=false、best_epoch=5；因此本次是预设5轮预算
+用完正常结束，不是早停、报错或已证明收敛。输出仍在
+outputs/multilingual_480h_run_v1/head。run_plan SHA仍为
+d146173589b915a862344df12d6d3725ff5779067530a75cfd9d700ac8a32e99。
+回传cache_sha256_verified=true，test_set_used=false，all_samples_once，
+每epoch958519条，train shards1873/validation shards16，validation8101条。
+Head838746参数，Encoder冻结317477504参数，temporal2x/h512/k5/dropout0.1。
+
+| 语言 | 原150h三语基线PER | 本轮epoch5 PER | 变化（百分点） | 错误数/参考音素数 |
+|---|---:|---:|---:|---:|
+| en | 4.736% | 4.6743% | -0.0617 | 3632/77701 |
+| es | 3.910% | 4.1053% | +0.1953 | 5333/129906 |
+| pt | 9.662% | 9.6391% | -0.0229 | 15743/163324 |
+
+差值使用既有四舍五入基线；本轮分语言样本数en2808/es2631/pt2662与旧固定验证
+一致。葡语基本持平，英语略好、西语略差，尚未证明扩量能明显降低葡语PER。
+该对比是训练中间checkpoint与旧最终基线，不是等epoch/算力对照，不更换正式基线。
+Macro PER=6.1396%，音素加权overall PER=6.6611%；两种聚合权重不同，不能混用。
+train loss=0.264741、train PER=6.9654%、validation loss=0.253881。
+training_seconds=4147.59（约69.13分钟）；epoch5=815.3秒，LR仍3e-4。
+
+日志stale=1而best_epoch=5不矛盾：checkpoint可保存更小的Macro PER，但早停
+重置要求超过min_delta=0.001（0.1个百分点）的改善。本轮未早停，最佳在最后一轮，
+可按原配置继续观察；附件只有epoch5日志及两份一致汇总，没有完整metrics.jsonl，
+不能宣称前5轮单调下降或推断最终能达到的PER。报告无S/D/I，不能归因删除改善。
+
+本地核对重复head_report一致性、分语言errors/reference计算、Macro平均、样本数
+及run_plan身份。用户文本附件SHA256：
+0a69a4769f5651407fa05b6222f1a0c0d18732a9699b2045d10a014c3f19e270。
+尚未收到checkpoint SHA或独立metrics文件，不声称已读取H200权重字节。
+
+下一步在容器内项目根目录用已交付代码继续，4替换为空闲物理GPU编号：
+
+```bash
+python -B scripts/run_multilingual_480h.py formal --gpu 4
+```
+
+自动恢复第5轮Head/optimizer/scheduler，从第6轮开始，最多总计30轮，可按原规则
+提前停止，不另加30轮、不重新初始化、不重提特征。中断后同一命令恢复。此次仅
+文档结果提交，不需为执行已有formal入口更新代码。完成返回head/report.json和
+head/metrics.jsonl，再评估三语PER和葡语收益；不以CTC PER代替最终ASR WER。
+本次指标算术检查及git diff --check通过，未改训练配置/代码或现有outputs。
+
 ## 0.139 2026-09-23 全量缓存验收后交付5epoch训练及续训短入口
 
 缓存实测完成结果已在独立提交15028ce/0.138记录。用户授权进入训练下一阶段。
