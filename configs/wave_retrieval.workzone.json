@@ -1,0 +1,13 @@
+{
+  "tables": "outputs/wave_4000_keywords_v1_b566974527",
+  "inventory": "outputs/wave_keyword_inventory_v1_b704685dc1",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "checkpoint": "outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/ctc_head_best.pt",
+  "checkpoint_sha256": "bd9df8072b7efe7fafa599e958bbd7ca8405b289d0a353913d865340764d01a0",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "expected_keywords": 4000,
+  "expected_primary": {"es": 316, "pt": 295},
+  "expected_samples_per_group": 100,
+  "output": "outputs/wave_4000_retrieval_v1"
+}

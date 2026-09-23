@@ -13,6 +13,7 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
+from qwen_hotword.hotwords.capacity_assets import _normalize_language
 from qwen_hotword.hotwords.registry import HotwordEntry
 from qwen_hotword.hotwords.scoring import (
     HotwordScoringConfig,
@@ -49,6 +50,7 @@ class ExternalAudioRecord:
     source: str
     audio_path: Path
     reference_text: str
+    language: str = "pt-BR"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -56,7 +58,7 @@ class ExternalAudioRecord:
             "source": self.source,
             "audio_path": str(self.audio_path),
             "reference_text": self.reference_text,
-            "language": "pt-BR",
+            "language": self.language,
         }
 
 
@@ -91,11 +93,22 @@ def load_keyword_bias(
     *,
     vocab: PhonemeVocab,
     keyword_set: str = "hard_k266",
+    language: str = "pt-BR",
 ) -> KeywordBundle:
+    model_language = _normalize_language(language)
+    if model_language not in {"Spanish", "Portuguese"}:
+        raise ValueError("external keywords support Spanish or Portuguese")
+    language_tag = "es" if model_language == "Spanish" else "pt-BR"
+    id_tag = "es" if model_language == "Spanish" else "pt"
     source_path = Path(path).expanduser()
     raw = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("keyword bias root must be an object")
+    if "language" in raw and (
+        not isinstance(raw["language"], str)
+        or _normalize_language(raw["language"]) != model_language
+    ):
+        raise ValueError(f"keyword language mismatch: {raw['language']!r} != {language!r}")
     sets = raw.get("keyword_sets")
     phonemes = raw.get("keyword_phonemes")
     if not isinstance(sets, dict) or not isinstance(phonemes, dict):
@@ -133,8 +146,8 @@ def load_keyword_bias(
         selected_phonemes[surface] = pronunciation.strip()
         entries.append(
             HotwordEntry(
-                hotword_id=f"external_pt_{index:04d}",
-                language="pt-BR",
+                hotword_id=f"external_{id_tag}_{index:04d}",
+                language=language_tag,
                 surface=surface,
                 normalized=" ".join(key),
                 words=key,
@@ -174,6 +187,7 @@ def load_keyword_bias(
 
 def build_external_dataset(
     sources: Sequence[SourceSpec],
+    *, language: str = "pt-BR",
 ) -> tuple[tuple[ExternalAudioRecord, ...], dict[str, object]]:
     if not sources:
         raise ValueError("at least one source is required")
@@ -226,6 +240,7 @@ def build_external_dataset(
                     source=source.name,
                     audio_path=audio_by_id[sample_id],
                     reference_text=transcripts[sample_id],
+                    language=language,
                 )
             )
         source_audits.append(
@@ -243,7 +258,7 @@ def build_external_dataset(
         )
     return tuple(records), {
         "status": "pass",
-        "language": "pt-BR",
+        "language": language,
         "supported_audio_formats": ["FLAC", "WAV"],
         "sample_count": len(records),
         "unique_sample_ids": len(global_ids),
@@ -451,7 +466,7 @@ def _build_result_row(
         "source": record.source,
         "audio_path": str(record.audio_path),
         "reference_text": record.reference_text,
-        "language": "pt-BR",
+        "language": record.language,
         "audio": dict(audio_timing),
         "expected_hotword_ids": list(expected_ids),
         "expected_hotwords": [
@@ -549,6 +564,7 @@ def _load_detector(
     hotwords: tuple[HotwordEntry, ...],
     device: str,
     dtype: str,
+    language: str = "Portuguese",
 ) -> Any:
     from qwen_hotword.inference.streaming_backends import load_cumulative_ctc_detector
 
@@ -566,7 +582,7 @@ def _load_detector(
         checkpoint_path=checkpoint,
         vocab=vocab,
         hotwords=hotwords,
-        language="Portuguese",
+        language=_normalize_language(language),
         device=device,
         dtype=dtype,
         scoring_config=config,
@@ -580,7 +596,9 @@ def _load_detector(
     )
 
 
-def _retrieve_waveform(detector: Any, waveform: Any, vocab: PhonemeVocab) -> Mapping[str, object]:
+def _retrieve_waveform(
+    detector: Any, waveform: Any, vocab: PhonemeVocab, *, saved_raw_rank_depth: int = 20
+) -> Mapping[str, object]:
     import torch
 
     from qwen_hotword.modeling.audio_encoder import extract_padded_ln_post
@@ -589,7 +607,7 @@ def _retrieve_waveform(detector: Any, waveform: Any, vocab: PhonemeVocab) -> Map
     if detector.anchor_index is None:
         raise RuntimeError("external retrieval requires an Anchor index")
     processor_started = time.perf_counter()
-    prompt = build_audio_prompt(detector.wrapper.processor, "Portuguese")
+    prompt = build_audio_prompt(detector.wrapper.processor, detector.language)
     batch = detector.wrapper.processor(
         text=[prompt], audio=[waveform], return_tensors="pt", padding=True
     )
@@ -647,7 +665,9 @@ def _retrieve_waveform(detector: Any, waveform: Any, vocab: PhonemeVocab) -> Map
         "decoded_token_ids": list(scored.decoded_token_ids),
         "decoded_tokens": [vocab.tokens[token_id] for token_id in scored.decoded_token_ids],
         "decoded_confidences": list(scored.decoded_confidences),
-        "raw_ranked_matches": [match.to_dict() for match in scored.ranked_matches[:20]],
+        "raw_ranked_matches": [
+            match.to_dict() for match in scored.ranked_matches[:saved_raw_rank_depth]
+        ],
         "selected_matches": [match.to_dict() for match in scored.selected_matches],
         "suppressed_reason": scored.suppressed_reason,
         "shortlist_candidates": len(shortlist.candidates),
@@ -734,6 +754,8 @@ def _run_config(
     keyword_set: str,
     device: str,
     dtype: str,
+    language: str = "Portuguese",
+    saved_raw_rank_depth: int = 20,
 ) -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -752,7 +774,7 @@ def _run_config(
             }
             for source in sources
         ],
-        "language": "Portuguese",
+        "language": _normalize_language(language),
         "device": device,
         "dtype": dtype,
         "audio": {
@@ -776,7 +798,7 @@ def _run_config(
             "anchors_per_entry": 24,
             "anchor_offset_tolerance": 1,
             "rerank_start_radius": 2,
-            "saved_raw_rank_depth": 20,
+            "saved_raw_rank_depth": saved_raw_rank_depth,
         },
         "qwen_decoder_used": False,
         "transcripts_used_for_candidate_generation": False,

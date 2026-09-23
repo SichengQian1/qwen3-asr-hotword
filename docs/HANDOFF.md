@@ -1,5 +1,100 @@
 # 工作交接记录
 
+## 0.136 2026-09-23 wave Top5/Top7推理及16份下游导出入口交付（待H200运行）
+
+第一步词表实测成果见0.135（独立结果提交d47f78a）。第二步代码交付：
+configs/wave_retrieval.workzone.json、scripts/run_wave_keyword_retrieval.py、
+inference/wave_retrieval.py，复用external_keyword_retrieval和既有Top7精确重放函数。
+本地只跑合成数据/模拟检索回归，尚无本轮H200召回结果，不下载或运行完整Qwen。
+
+### 本轮运行契约
+
+- 使用已完成outputs/wave_4000_keywords_v1_b566974527的两份4000表，每语言四wave
+  共用同表。首先以sha256.txt核验report、词表和targets_by_wave；词面重分词检查
+  恰好4000、全部目标保留（ES316/PT295）。旧inventory报告也核验后绑定转写SHA。
+- 全部8组各100条的音文ID检查、所有800条音频文件SHA及输入身份检查完成后才
+  加载模型。音频字节身份写入run_config，resume重新比对；不依赖文件名判断未变。
+  模型config/index记录SHA，不声称对数GB全部模型权重重算SHA；基线Head/vocab精确绑定。
+- 固定原三语Head：en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1/
+  ctc_head_best.pt，SHA bd9df8072b7efe7fafa599e958bbd7ca8405b289d0a353913d865340764d01a0。
+  不使用失败original-only候选或尚未完成的480h新Head。模型路径仍
+  /glusterfs_103/models/Qwen3-ASR-1.7B；vocab仍v0.2。
+- 完整音频→冻结Encoder→temporal2x Head→Anchor检索，不运行Qwen文本decoder。
+  ES/Spanish与PT/Portuguese显式传入数据、词表ID和processor prompt。共享旧入口
+  默认仍pt-BR，旧PT ID/schema保持兼容；未改旧Top7脚本的MLS/Delivery来源映射。
+- Anchor ngrams2/3/4、每词24、offset1、start radius2、shortlist64；threshold0.75、
+  posterior weight0.25/minimum0.5、edit ratio0.35、margin0、minimum_phonemes1。
+  Top5/7来自同一次计算，不重跑Encoder或调门控。新wave保存完整shortlist排序
+  最多64条（旧入口默认20不变），仅增加记录量以保证Top7门控后排序精确重放。
+- 同语言四wave只加载一次模型，逐音频推理；两语顺序运行并释放前一语种模型。
+  用户用--gpu指定空闲物理卡，脚本在导入模型前设置CUDA_VISIBLE_DEVICES并使用
+  cuda:0。不自动挑卡，不与训练缓存任务共享指定卡。resume可换空闲物理卡，逻辑
+  device/dtype及全部输入/代码身份必须一致。
+- 每wave分别导出Top5与Top7，共16文件。样本ID保留stem，跨wave同名互不覆盖；
+  schema仍stem -> [{"word": ..., "phoneme": ...}]，空召回保留[]。Top5逐样本及
+  聚合指标必须与原选择完全复现，Top7保存排名充分性验证通过后才导出。
+
+### 评测口径
+
+每组top5/top7分别报告原wave目标的raw_target_recall和gated_target_recall；分母
+为“目标词×音频”唯一匹配对，不是词表总词数，也不将同一音频重复说词算多次。
+原目标词列表与参考transcript只用于检索后计算指标，不参与候选产生/筛选。
+单列full_4000_view，不把普通补词命中当成目标改善。误召回根据整张词表在转写中
+是否实际出现判断，不能因为某补词不在原目标清单就把正确召回算成误触发。
+本轮不测最终ASR WER或CTC PER；标签质量边界和同音不同词保留规则见0.135。
+
+### 拉取、执行和恢复
+
+分支codex/g2p-coverage-scan，最终远端SHA见交付回复。容器外项目目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目目录，以下4仅为示例，请替换为空闲物理GPU编号：
+
+```bash
+python -B scripts/run_wave_keyword_retrieval.py --gpu 4
+```
+
+可选仅CPU预检（不加载模型/不写输出），正式命令本身也会先完成同一预检：
+
+```bash
+python -B scripts/run_wave_keyword_retrieval.py --audit-only
+```
+
+默认新输出outputs/wave_4000_retrieval_v1。首次拒绝已有目录；明确恢复时：
+
+```bash
+python -B scripts/run_wave_keyword_retrieval.py --gpu 4 --resume
+```
+
+resume绑定代码commit、配置、词表、Head、vocab、transcript、音频SHA，只跳过完整
+且行内容SHA正确的逐样本分片；已存在导出文件比较一致才复用，不覆盖内容不同产物。
+中断发生在8组任何位置都可以续跑；新实验用--output-dir新目录，不删除旧输出。
+代码更新导致身份变化时不能强行resume，应保留原目录并选择新目录。
+
+### 下游文件与结果回传
+
+outputs/wave_4000_retrieval_v1/delivery/内恰好16份：
+wave1_es_top5.json、wave1_es_top7.json……wave4_pt_top5.json、wave4_pt_top7.json。
+每份100个stem，可直接供后续Context Learning读取。每组目录保留逐样本结果、排序、
+原4000口径summary、topk_metrics；根report汇总8组两K，sha256覆盖全部输出。
+
+请返回根report.json和sha256.txt两个小文件；16份delivery JSON交给下游流程。
+无需上传音频、特征缓存或权重。验证命令：
+
+```bash
+(cd outputs/wave_4000_retrieval_v1 && sha256sum -c sha256.txt)
+```
+
+10项新增流程测试覆盖8组/16文件、跨wave重名、空召回、原目标与补词分母分离、
+Top5/Top7精确重放、双语ID/语言绑定、全组预检、SHA漂移、断点恢复、输出拒绝覆盖。
+与旧外部检索/Top7回归合计23 passed；全仓425 passed/23 skipped。新增Ruff、定向
+strict Mypy、CLI help、git diff --check通过。全仓仍既有5处E501、3处unused-ignore。
+用户真实运行后，再以实测结果更新阶段进度，不把模拟推理数值当H200结果。
+
 ## 0.135 2026-09-23 wave两语4000词表构建完成（H200回传）
 
 用户在bb427aadc068804341cb78839e14dff5108b105a代码运行成功，输出目录：
