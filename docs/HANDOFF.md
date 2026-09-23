@@ -1,5 +1,17 @@
 # 工作交接记录
 
+## 0.133 2026-09-23 wave构建首跑失败：主词表使用英文语言名称
+
+用户在9868a52版本运行build_wave_4000_keywords.py，返回status=failed、
+error="wave1: primary language mismatch"。随后只读jq核对全部8份primary文件：
+wave1–4/es均为language="Spanish"，wave1–4/pt均为language="Portuguese"。
+这证明主词表元数据与脚本只接受语言代码的限制不兼容，不是词表混入另一种语言的
+证据，也不是音素质量结论。此前neighbors元数据使用es/pt，不应由它推断primary
+必定使用相同写法。失败在发布目录创建之前，未生成4000表或修改现有输出。
+本次用户仅返回终端内容；没有新的H200报告文件SHA可复核。
+下一提交限定修复primary语言别名兼容，并增强报错展示实际值及预期语言；词表配比、
+IPA处理、输入SHA校验、检索参数保持0.132规则。仍待H200成功构建后再进入Top5/7。
+
 ## 0.132 2026-09-23 两语固定4000词表构建入口（待H200 CPU运行）
 
 0.131库存结果单独提交4203474。本轮实现evaluation/wave_keywords.py、
