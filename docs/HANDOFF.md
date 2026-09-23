@@ -1,5 +1,83 @@
 # 工作交接记录
 
+## 0.115 2026-09-23 固定480h计划的文件身份隔离与正式清单入口
+
+新增spanish_480_freeze.py、scripts/freeze_es_480h_training.py及7项测试。
+默认输入为0.114的`outputs/es_480h_plan_v1_7022ece6f0`，不重新选样、不调整比例。
+0.114用户粘贴附件本地SHA为
+`3b665018be1f8e90803d528f639f9af915f11d0037490d96a8a237631e1236c4`。
+
+### 身份检查与输出门槛
+
+1. 核验plan report/config/proposed_ids清单SHA及plan记录的所有输入SHA，拒绝FAILED
+   计划、输入变化、重复选择、条数/时长不一致。读取原train及Noah ready/review
+   回填标签，逐条复核ID、路径、时长、密度、ratio和release可行性，先写pending清单。
+2. 用旧pool已校验的split_config、speaker assignment和其中绑定SHA的source TSV
+   建立validation/test保护路径集合。只使用来源表的audio/speaker/source_split列，
+   不使用转写做判断；同一heldout speaker的未释放源行亦纳入保护，形成保守超集。
+   验证所有实际validation路径在保护集合内、test保护数量不小于旧summary记录。
+   不打开sealed test manifest、不解析测试音素或使用测试答案，不做测试评测。
+3. 默认8线程、256文件一批，读取所有所选train及保护集合音频的完整文件字节计算
+   SHA，约每5120文件打印进度；因此**会读取test保护音频的字节用于机械身份核验**，
+   明确报告test_audio_bytes_read_for_identity_only=true。不是ASR/CTC推理或测试
+   调参。逐文件检查读取期间size/mtime稳定；新Noah必须与staging文件SHA一致。
+4. 任意train文件字节重复、train/heldout重复、保护集合validation/test之间字节
+   重复均阻断。已知路径交集亦阻断。不自动删副本、不改heldout、不补抽样凑时长。
+5. 所有身份检查完成且无冲突时，才把pending改名为full_ctc_train.jsonl，生成
+   split_summary和report，记录最终Manifest SHA。保持480.001822655h固定计划。
+   旧train标签/文本不改，仅统一recovery元数据别名并保存original_release_source；
+   Noah使用管线兼容language=es并保留source_language=es-419、原source_id、batch、
+   文件SHA和空speaker_id。统一Temporal 2x，不修改Head或特征提取算法。
+6. validation/test不复制不重分，只在新summary引用原路径、SHA、条数和小时。
+   成功仅表示本轮正式数据清单及所述文件身份检查通过，不代表已生成全量Encoder
+   cache或训练已开始。最终train已通过现有三语pool读取器的本地格式兼容测试。
+
+局限明确保留：字节SHA不识别重编码副本或同录音重叠片段；Noah speaker身份未知，
+不能保证跨来源speaker-disjoint。metadata保护超集可能因尚未释放的原始样本冲突
+而保守阻断，需根据返回证据处理，不悄悄放行。不认证每个G2P发音正确，也不新增
+音频解码质量评测。测试集的既有引用保持封存，test_set_used=false表示未作模型
+评测/调参，不能误读成从未读取任何test相关音频字节。
+
+### 工作区运行
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录：
+
+```bash
+python -B scripts/freeze_es_480h_training.py
+```
+
+这是约480h所选音频加heldout超集的存储读取任务，无GPU、无下载、不复制音频。
+默认写全新`outputs/es_480h_training_v1_<随机后缀>`，任何已有输出路径均拒绝。
+可用--workers调整1..32并发，--plan-dir指定其他经过审查的计划。无resume；失败
+保留所有当前产物，下一次使用新目录，不能删除/覆盖已有outputs。
+
+成功输出full_ctc_train.jsonl、split_summary.json、audio_fingerprints.jsonl、
+report.json、sha256.txt。冲突则report.status=blocked_audio_conflicts、
+training_manifest_ready=false，保留train.pending.jsonl，不产生正式train或pass
+summary。其他异常写FAILED.txt；带该标记或无完成report的目录不可用于训练。
+
+验证（R取实际输出目录）：
+
+```bash
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+仅回传终端JSON和sha256.txt；不要传音频、fingerprints大清单或训练Manifest。
+若冲突，返回聚合及Top10例子即可，之后根据证据修正/重选。本地测试不是H200实测，
+当前仍待用户执行，不能记录为480h正式train已冻结。
+
+验证：7项定向pytest通过；全量318 passed/23 skipped；新增文件Ruff、strict Mypy、
+CLI help和git diff --check通过。全仓仍有5处已知E501及3处已知unused-ignore，均在
+本轮未改文件，与0.113相同。未修改个人未跟踪文件或已有outputs。
+
 ## 0.114 2026-09-23 西语480h候选计划完成（用户返回）
 
 用户返回prepare_es_480h_plan.py结果，目录
