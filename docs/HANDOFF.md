@@ -1,5 +1,75 @@
 # 工作交接记录
 
+## 0.118 2026-09-23 英葡各480h分层ID计划工具（待H200执行）
+
+新增scripts/prepare_en_pt_480h_plan.py、training/en_pt_480_plan.py及
+configs/en_pt_480h_plan.workzone.json。输入绑定0.117英葡train/validation/test
+Manifest SHA与train条数/小时，另绑定0.116西语正式train的SHA/条数/小时。
+交付分支codex/g2p-coverage-scan；0.117实测库存记录为独立结果提交d669f33。
+
+本步生成待核对ID计划，不生成可直接训练的Manifest，不修改核心算法：
+
+- 英语只从已释放US Swift train中选择；葡语只从已释放五来源train中选择。
+  校验summary pass及test sealed/unused、train实际SHA、语言/来源、Temporal 2x、
+  唯一ID/解析路径、逐来源和总体条数小时；任意异常阻断，不静默跳过。
+- 复算label_length、相邻重复音素对应CTC minimum、effective frames及ratio，
+  检查original-ready的1x可行性和recovery既有2x/0.90规则。沿用已有音素标签。
+- 复用西语计划的stratified_select：source×release×时长×density×ratio联合分层，
+  按可用小时比例分配quota；层内SHA(seed,ID)确定顺序，补足剩余quota至480h。
+  seed=20260923。全音频不切割，最后一条可产生少量超时，不重复采样凑小时。
+- density=L/(2*T_est)，CTC ratio=(L+adjacent_repeats)/(2*T_est)，分别报告，不能混用。
+  时长bin边界3/6/10/20秒，density .2/.3/.4/.5/.6，ratio .5/.75/.9，上界包含。
+  这是Manifest估计帧口径，不宣称等于未来真实Encoder cache帧数。
+- 按现有PT来源小时计算的约数目标：Noah500h=284.22h、金融=111.84h、MLS=65.14h、
+  CV=14.75h、FLEURS=4.04h。实际值受整条音频和分层quota影响，以回传为准。
+  不固定recovery为27%，不按validation PER挑选，不强行匹配三语密度；按比例保留
+  是控制域分布变化的起点，不是质量最优保证。英语约保留98.44%的现有train小时。
+- 西语不重抽、不重写，仅核验已冻结SHA及全部ID/路径与新选英葡的交集；其正式
+  清单仍由0.116路径直接引用。跨语言选中ID/解析路径重复一律阻断。
+- 报告选前/选后各维度条数与小时、逐层quota偏差、已知来源内speaker数量/Top5小时
+  和缺失speaker条数。不杜撰speaker，也不宣称跨来源speaker-disjoint。
+- 不打开validation/test Manifest，不读音频字节，不推理，不下载，不训练。
+  从原train派生，保留原split；正式冻结前仍需完成所选音频身份/heldout保护检查，
+  本步不重新认证音文/G2P标签准确性，不宣称已完成内容去重。
+
+### 工作区执行与回传
+
+容器外项目目录更新（Git在容器外执行）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录：
+
+```bash
+python -B scripts/prepare_en_pt_480h_plan.py
+```
+
+仅CPU/Manifest读取，约扫描87万英葡候选行和29.6万固定西语行，不需要GPU。
+自动新建outputs/en_pt_480h_plan_v1_<随机后缀>，拒绝任何已存在目录（包括空目录）。
+没有resume；失败保留当前目录/FAILED.txt，重试使用新目录，不删除已有outputs。
+成功输出proposed_ids_en.jsonl、proposed_ids_pt.jsonl、config.json、report.json、
+sha256.txt；不会输出full_ctc_train.jsonl或训练缓存。输入SHA在结束前再次核验。
+仅status=plan_completed且无FAILED.txt才是完整计划；training_ready仍为false。
+
+终端打印剔除逐层明细后的紧凑报告；完整细分在report.json。返回终端JSON或小文件
+report.json和sha256.txt即可，不要上传ID大清单/音频/模型。R设为实际输出目录后：
+
+```bash
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+回传后核对实际来源比例、density/recovery变化、speaker缺失和quota偏差，再固化
+计划并做所选音频身份检查/生成三语正式清单，然后才安排特征提取和训练命令。
+
+本地验证：新13项+复用西语8项定向pytest通过；全量331 passed/23 skipped；新增
+Ruff与strict Mypy、CLI help、git diff --check通过。全仓Ruff仍5处已知E501
+（含个人PPT脚本2处），全仓Mypy仍3处既有unused-ignore，均与0.115一致、未触碰。
+这些为本地合成fixture验证，未执行H200真实选数，不能写成新英葡480h已完成。
+
 ## 0.117 2026-09-23 英葡完整train库存及实际SHA回传一致
 
 用户按0.116返回两个split_summary的精简字段和sha256sum结果。两份实际train

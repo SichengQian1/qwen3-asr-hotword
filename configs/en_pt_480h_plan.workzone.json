@@ -1,0 +1,34 @@
+{
+  "target_hours": 480.0,
+  "seed": 20260923,
+  "pools": {
+    "en": {
+      "pool": "outputs/en_us_swift_temporal2x_v1",
+      "records": 345820,
+      "hours": 487.6284422291665,
+      "sources": ["swift_us_english"],
+      "manifest_sha256": {
+        "train": "6882074371edfdc94a5ca66ff4ba487c0f965c5f7527b0026740af9b952f9dc8",
+        "validation": "66aa1d5bec0f714c2f1ee1ba4a2c39fb753c23bd19fff4fd62d4eca3a449b4d5",
+        "test": "d42c7e0411b61f0ce7a0636270b03fbda625d97ab66cacc96c91c2fdec9343c1"
+      }
+    },
+    "pt": {
+      "pool": "outputs/pt_combined_temporal2x_v1",
+      "records": 525189,
+      "hours": 783.2236366311114,
+      "sources": ["common_voice", "fleurs", "mls", "noah_500h", "noah_finance_200h"],
+      "manifest_sha256": {
+        "train": "47214e4bec638198fd0e00c929f113d8ad35dedfd13a904f1190f903f68b3fd4",
+        "validation": "196d6e760dbfd626caf566ad333afd999ce6d2770f562add372f657ce9500524",
+        "test": "9e396d1905763aee0c40bd05416cf898fe84c882b34e9179bf0da9d4d9ba3295"
+      }
+    }
+  },
+  "frozen_es": {
+    "train_manifest": "outputs/es_480h_training_v1_00d26e5c2e/full_ctc_train.jsonl",
+    "sha256": "145c16e2019c4966c450557a150333eea19bcafec37f5eca36ee6e4d8815b300",
+    "records": 296399,
+    "hours": 480.0018226552778
+  }
+}
