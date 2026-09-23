@@ -1,5 +1,79 @@
 # 工作交接记录
 
+## 0.109 2026-09-23 Noah独立G2P完成及残余修复计划（用户返回）
+
+用户执行0.108命令完成。源staging的sha256.txt列出的11项文件全部OK，包含
+report、inventory、candidates、source.tsv和词表。此为用户返回的工作区校验记录，
+不声称本地持有并重新计算这些原始文件。
+
+```text
+G2P模型 SHA256 58e0743cf364d8aa2cc8b419e7c95dd9127908268af670f305722c601f726b2a
+words SHA256 6eb90c4e058f04f0dd1d52a072420e72cba9efadca14c4454d64e5be86bdf1a2
+word_counts SHA256 c2237dfd169d204a1fafe19157a94758e2dd59033343bd0a22a583c50b96d3f7
+noah_raw.dict SHA256 20875b3e68debb6ea140227187df5c917f4dc5935bc0cb7593d9167536d9eeed
+```
+
+模型为现有spanish_latin_america_mfa.zip，top-1、16 jobs，日志耗时926.608秒。
+原始词典位于`outputs/es_noah_mobile_mfa_v1/noah_raw.dict`，新计划位于其同级
+`repair_plan`目录。词表/词频SHA与0.108返回一致。
+
+| 分类 | 不同词数 | 词次 |
+|---|---:|---:|
+| base_exact | 56,226 | 3,349,855 |
+| base_proxy | 2,230 | 270,285 |
+| mfa_proxy | 10,602 | 194,362 |
+| unresolved | 531 | 1,837 |
+| 合计 | 69,589 | 3,816,339 |
+
+去重代理词10,522个。计划词次覆盖99.9518649%，尚未解决占0.0481351%。
+相比旧CV词典计划，unresolved从21,088降到531，支持旧词典覆盖范围是之前大量
+unresolved的主要原因；这不是音频/文本标注修正或真实发音准确率提高的证据。
+仍为training_labels_ready=false；代理尚未跑、最终词典尚未做vocab审计，不能把
+计划覆盖当最终覆盖或小时保留率。现有531词会被finalize保留为unresolved，代理
+G2P失败或phone OOV还可能增加该数，不能期待本轮自动降到0。
+
+终端进度行停在82%、分母69,588，但MFA之后返回Done且prepare成功；进度刷新
+不作为完整性证据，真实覆盖以词表集合、逐词计划及下一轮审计为准，不假定少1词
+无害或凭进度条重跑全库。
+
+### 下一步命令（不改代码，不需为此重新pull）
+
+沿用原西语代理/phone cleanup/vocab规则。用户在H200容器项目根目录执行；仅G2P，
+不运行Qwen，不训练，不下载。新输出根F必须不存在，失败保留文件；中断后使用
+新的v2目录重跑此小阶段，无resume，不覆盖原词典或计划。
+
+```bash
+(
+set -e
+R=outputs/es_noah_mobile_source_v1_4bbc7edd5d
+G=outputs/es_noah_mobile_mfa_v1
+F=outputs/es_noah_mobile_mfa_repaired_v1
+M=models/mfa/g2p/spanish_latin_america_mfa.zip
+test -f "$M"
+(cd "$G/repair_plan" && sha256sum -c sha256.txt)
+test ! -e "$F"
+mkdir "$F"
+conda run --no-capture-output -n aligner mfa g2p \
+  --num_jobs 16 --num_pronunciations 1 \
+  "$G/repair_plan/proxy_words.txt" "$M" "$F/proxy.dict"
+python -B scripts/finalize_spanish_mfa_repairs.py \
+  --corpus "noah=$R/wordlist" --dictionary "noah=$G/noah_raw.dict" \
+  --repair-root "$G/repair_plan" --proxy-dictionary "$F/proxy.dict" \
+  --output-dir "$F/final"
+sort -k2,2nr "$F/final/noah/unresolved_words.tsv" | head -20
+)
+```
+
+返回终端finalize/audit汇总JSON、最后20行高频未解决词（字段word、corpus_count、
+proxy、rules、detail）及校验是否全OK；不传大词典/音频。新目录内保存输入SHA、
+词典SHA、逐词缺失原因和audit报告。status=pass仅表示程序完成，仍需检查
+training_labels_ready和missing/OOV。后续先区分残余词原因并统计影响样本/小时，
+不删掉句内缺词来伪造完整标签，不直接宣称整批500h可训练。
+主线仍为标签准备、CTC可用小时、cross-split隔离/去重，再选择西语480h train。
+
+本次仅结果型HANDOFF提交；git diff --check通过，既有代码、outputs、个人未跟踪
+文件均未修改。本地与origin交付分支检查一致后更新并推送。
+
 ## 0.108 2026-09-22 Noah旧词典增量计划结果与适用范围纠正（用户返回）
 
 用户返回`outputs/es_noah_mobile_g2p_plan_v1`的prepare结果。69,589个词、
