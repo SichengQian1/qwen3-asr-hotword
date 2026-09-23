@@ -426,3 +426,76 @@ def test_invalid_fillers_cannot_release_underfilled_table():
             seed="fixed",
             expected_primary=1,
         )
+
+
+@pytest.mark.parametrize(
+    "lang,tags",
+    [
+        ("pt", ["pt", "pt-BR", "Portuguese"]),
+        ("es", ["es", "es-419", "Spanish"]),
+        ("pt", ["PT", " pt_BR ", "PORTUGUESE"]),
+        ("es", ["ES", " es_419 ", "SPANISH"]),
+    ],
+)
+def test_mixed_old_and_neighbor_language_aliases(lang, tags):
+    primary, neighbors, fillers = inputs(lang)
+    for row, tag in zip(fillers, tags, strict=True):
+        row["language"] = tag
+    for wave, tag in zip(WAVES, tags + tags[:1], strict=True):
+        neighbors[wave]["language"] = tag
+    result = build_language(
+        lang, primary, neighbors, fillers, VOCAB, target_size=4, seed="fixed", expected_primary=1
+    )
+    baseline = build(lang)
+    assert [(e["normalized"], e["token_ids"]) for e in result["entries"]] == [
+        (e["normalized"], e["token_ids"]) for e in baseline["entries"]
+    ]
+    assert result["summary"]["old_table_language_counts"] == dict.fromkeys(tags, 1)
+    assert {r["old_language"] for r in result["audit"] if r["source"] == "old_table"} == set(tags)
+
+
+@pytest.mark.parametrize(
+    "lang,wrong", [("pt", "Spanish"), ("es", "Portuguese"), ("pt", "pt-PT"), ("es", "es-ES")]
+)
+def test_old_languages_all_audited_without_accepting_foreign_or_unknown_tags(lang, wrong):
+    primary, neighbors, fillers = inputs(lang)
+    fillers[0]["language"] = wrong
+    fillers[2]["language"] = None
+    with pytest.raises(ValueError) as exc:
+        build_language(
+            lang,
+            primary,
+            neighbors,
+            fillers,
+            VOCAB,
+            target_size=4,
+            seed="fixed",
+            expected_primary=1,
+        )
+    message = str(exc.value)
+    assert "2 rows" in message and "language_counts=" in message
+    assert "row 1" in message and "row 3" in message
+    assert repr(wrong) in message and "got None" in message
+
+
+def test_full_freeze_preserves_mixed_legacy_language_provenance(tmp_path):
+    config_path = fixture_files(tmp_path)
+    config = json.loads(config_path.read_text())
+    old = tmp_path / (
+        "outputs/en_es_pt_streaming_e2e_4k_formal100_v1/"
+        "capacity_pt/representative/size_4000/hotwords.jsonl"
+    )
+    rows = [json.loads(line) for line in old.read_text().splitlines()]
+    rows[-1]["language"] = "pt-BR"
+    old.write_text("\n".join(json.dumps(row) for row in rows))
+    config["filler_sha256"]["pt"] = _sha(old)
+    config_path.write_text(json.dumps(config))
+    output = tmp_path / "mixed_release"
+    result = freeze_wave_keywords(tmp_path, config_path, output)
+    assert result["languages"]["pt"]["old_table_language_counts"] == {"pt": 2, "pt-BR": 1}
+    entries = [json.loads(line) for line in (output / "pt/hotwords.jsonl").read_text().splitlines()]
+    assert all(e["language"] == "pt" for e in entries)
+    assert (
+        next(e for e in entries if e["normalized"] == "otro")["origins"][0]["old_language"]
+        == "pt-BR"
+    )

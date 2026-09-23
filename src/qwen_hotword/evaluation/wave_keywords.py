@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from qwen_hotword.evaluation.wave_inventory import _unique_object
+from qwen_hotword.hotwords.capacity_assets import _normalize_language
 from qwen_hotword.inference.hotword_prompt import normalize_match_words
 from qwen_hotword.phonemes.coverage import (
     PhonemeVocab,
@@ -20,6 +21,20 @@ from qwen_hotword.training.spanish_capacity import _sha, _verified
 from qwen_hotword.training.spanish_mfa_repair import repair_spanish_pronunciation
 
 WAVES = ("wave1", "wave2", "wave3", "wave4")
+
+
+def _check_language(value: Any, expected: str, context: str) -> None:
+    """Use the producer's aliases for every input, without accepting unknown dialects."""
+    try:
+        if not isinstance(value, str) or _normalize_language(value) != _normalize_language(
+            expected
+        ):
+            raise ValueError("different language")
+    except ValueError as error:
+        raise ValueError(
+            f"{context} language mismatch: got {value!r}; expected {expected} "
+            "or its supported capacity language alias"
+        ) from error
 
 
 def _json(path: Path) -> Any:
@@ -123,15 +138,7 @@ def build_language(
         if not isinstance(raw, dict):
             raise ValueError(f"{wave}: primary must be an object")
         declared_language = raw.get("language", lang)
-        aliases = {"es", "es-419", "spanish"} if lang == "es" else {"pt", "pt-br", "portuguese"}
-        if (
-            not isinstance(declared_language, str)
-            or declared_language.strip().casefold() not in aliases
-        ):
-            raise ValueError(
-                f"{wave}/{lang}: primary language mismatch: "
-                f"got {declared_language!r}; expected one of {sorted(aliases)}"
-            )
+        _check_language(declared_language, lang, f"{wave}/{lang}: primary")
         sets, phones = raw.get("keyword_sets"), raw.get("keyword_phonemes")
         if not isinstance(sets, dict) or not isinstance(phones, dict):
             raise ValueError(f"{wave}: invalid primary schema")
@@ -189,8 +196,9 @@ def build_language(
     ignored_parents = 0
     for wave in WAVES:
         raw = neighbors[wave]
-        if not isinstance(raw, dict) or raw.get("language") != lang:
-            raise ValueError(f"{wave}: neighbor language/schema mismatch")
+        if not isinstance(raw, dict):
+            raise ValueError(f"{wave}/{lang}: neighbor must be an object")
+        _check_language(raw.get("language"), lang, f"{wave}/{lang}: neighbor")
         mapping = raw.get("neighbors")
         if not isinstance(mapping, dict):
             raise ValueError(f"{wave}: expected neighbors[parent] lists")
@@ -212,11 +220,26 @@ def build_language(
                         "supplied_count": item.get("count"),
                     },
                 )
+    # Scan all legacy language declarations first. The capacity producer retains
+    # base-entry tags and train-candidate tags; pt and pt-BR may coexist legitimately.
+    language_counts: Counter[str] = Counter()
+    language_issues = []
     for index, row in enumerate(fillers):
-        if row.get("language") != lang:
-            raise ValueError(f"old table language mismatch: {lang}/{index}")
+        value = row.get("language") if isinstance(row, dict) else None
+        language_counts[str(value)] += 1
+        try:
+            _check_language(value, lang, f"old table {lang} row {index + 1}")
+        except ValueError as error:
+            language_issues.append(str(error))
+    if language_issues:
+        raise ValueError(
+            f"old table language audit failed: {len(language_issues)} rows; "
+            f"language_counts={dict(language_counts)}; examples={language_issues[:10]}"
+        )
+    for index, row in enumerate(fillers):
         origin = {
             "old_hotword_id": row.get("hotword_id"),
+            "old_language": row["language"],
             "old_row_number": index + 1,
             "old_normalized": row.get("normalized"),
             "old_phoneme_tokens": row.get("phoneme_tokens"),
@@ -300,6 +323,7 @@ def build_language(
             "ignored_non_target_parent_occurrences": ignored_parents,
             "optional_conflicting_surfaces": len(conflicts),
             "audit_decisions": dict(Counter(r["decision"] for r in audit)),
+            "old_table_language_counts": dict(language_counts),
             "old_table_validation_issue_counts": dict(
                 Counter(
                     reason
