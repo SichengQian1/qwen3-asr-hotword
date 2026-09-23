@@ -1,0 +1,17 @@
+project:
+  name: qwen3-asr-hotword
+model:
+  path: /glusterfs_103/models/Qwen3-ASR-1.7B
+  expected_name: Qwen3-ASR-1.7B
+  dtype: bfloat16
+  device: cuda:0
+  local_files_only: true
+paths:
+  work_root: /host_home/star/q00933266/qwen3-asr-hotword
+  data_root: /host_home/z00841352/27A/data
+  cache_dir: outputs/multilingual_480h_run_v1/cache
+  output_dir: outputs/multilingual_480h_run_v1
+runtime:
+  expected_python_major_minor: "3.12"
+  expected_gpu_name: NVIDIA H200
+  minimum_gpu_memory_gib: 40

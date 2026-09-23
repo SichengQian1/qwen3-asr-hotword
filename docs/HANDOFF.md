@@ -1,5 +1,117 @@
 # 工作交接记录
 
+## 0.126 2026-09-23 三语480h固定训练配置与H200 smoke/cache入口（待执行）
+
+用户同意进入训练配置及特征缓存准备。本次新增configs/480h_training.workzone.json、
+configs/480h_cache.workzone.yaml、training/multilingual_480_run.py及
+scripts/run_multilingual_480h.py。交付分支codex/g2p-coverage-scan。本地只运行
+合成测试、CLI help和show-training；没有下载/加载完整Qwen或运行H200实验。
+
+### 固定训练方案
+
+| 项目 | 本轮固定值 |
+|---|---|
+| train | 0.125 v2 combined，958,519条，三语各480h |
+| train SHA | eae271e209a79ee6aff64356eb75a7e7b5f94c7069bd9e857cd8de00cb740c82 |
+| validation | 历史en_es_pt_balanced_validation_4h_v1，8,101条 |
+| validation SHA | d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499 |
+| vocab | v0.2，SHA 0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4 |
+| backbone/tap | 冻结Qwen3-ASR-1.7B，thinker.audio_tower.ln_post，1024维bf16 |
+| Head | 随机初始化temporal_upsample，hidden512/kernel5/dropout0.1/time2 |
+| train batch / LR | 256 / 0.0003，与原三语基线相同 |
+| weight decay / clip | 0.0001 / 5 |
+| 采样 | all_samples_once；每epoch每条一次，不补抽、不删除recovery |
+| seed | 20260825，与原基线相同 |
+| checkpoint | 三语等权Macro PER，tie-break为worst-group PER再validation loss |
+| early stop | Macro PER，min delta 0.001（0.1个百分点），patience6，minimum5epochs |
+| LR scheduler | 保持既有validation loss驱动，patience2/factor0.5/floor1e-5 |
+| 预算 | 后续先5epoch pilot，再按相同参数resume至总计最多30epoch；本入口不执行 |
+
+保留原固定validation是为了与9.662%等历史值直接比较，不宣称它已成为公平跨语言
+clean validation。原完整validation与高密度视图仍保留，可作后续诊断，不混入本轮
+checkpoint选择。西语仍使用此前确认的拉美来源。等epoch的480h比150h约3.2倍音频
+曝光，因此这轮是扩量效果实验，不是严格等optimizer预算的单一数据多样性因果实验。
+保持结构/标签/优化参数固定；扩量不保证PER必降，回传后仍按PT PER及S/D/I、英西
+退化情况判断。smoke Head绝不用于正式Head初始化。
+
+### 准备与输入检查
+
+- 输入train、validation、vocab固定SHA；验证修复目录report/指纹/清单的sha256.txt。
+  扫描manifest的ID/路径、split、language bucket、2x时间因子、条数和估计帧数，
+  train/validation不重叠。固定旧validation的每条音频必须在0.125指纹的validation
+  保护集合中；不重扫153GB音频、不读取sealed test manifest/标签/音频。
+- 读取旧150h validation cache_config，要求model路径/dtype/tap、validation/vocab
+  SHA一致；当前Qwen config.json及weight index SHA须与旧缓存记录一致。这里只
+  哈希模型元数据，不重新哈希所有权重文件。新模型配置使用已确认H200模型路径，
+  local_files_only=true、bfloat16、cuda:0，不依赖可能缺失的workzone.local.yaml。
+- 将冻结顺序中每个language×release的前16条train、前8条validation存为smoke
+  清单（最多96/48条）；包含original/recovery，缺某层不伪造。它只用于链路检查，
+  不是统计评测或新基线，绝不按模型错误挑选。
+- run_plan.json保存完整配置、输入SHA、smoke清单SHA、估计基础帧数/存储需求。
+  帧估计不作为真实帧数；真实音频解码和CTC可行性由原cache pipeline严格核验。
+- 固定新根目录outputs/multilingual_480h_run_v1；首次prepare拒绝任何已有目录。
+  smoke/cache首次调用自动prepare；已有目录必须拥有匹配的run_plan和全部输入SHA。
+  改配置/输入不会误续旧目录；可用--output-dir显式选新的根目录，两阶段须相同。
+
+### 短命令：先少量链路检查，再全量缓存
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录，3仅为物理GPU示例，须换成已分配且有足够空闲显存的H200：
+
+```bash
+python -B scripts/run_multilingual_480h.py smoke --gpu 3
+```
+
+该步骤会加载完整Qwen提取少量smoke缓存，释放Qwen后随机初始化CTC Head并训练
+1epoch。max96train/48val不会被冒充为完整训练。沿用batch8提取、512samples/shard，
+真实Qwen只在工作区运行，建议该卡至少40GiB空闲；本地不运行。完成应返回
+status=smoke_completed及有限loss/PER；无需要求小样本1epoch达到任何质量阈值。
+
+smoke正常完成后，可直接执行全量缓存，无需等新代码：
+
+```bash
+python -B scripts/run_multilingual_480h.py cache --gpu 3
+```
+
+全量缓存严格要求smoke report已完成。提取958,519train和8,101validation；新目录
+cache/train、cache/validation，单GPU/单进程顺序分片。重新提取validation约1.2GB
+以保持本轮统一配置，不覆盖/搬移旧cache。预计train+val约140GB量级，实际以
+run_plan的基础帧估计和最终报告为准；缓存前检查空闲空间达到估计×1.25+10GiB，
+续跑扣除新目录已写入文件大小。没有磁盘/吞吐实测，不承诺完成时间。
+
+两个命令重复执行会校验输入身份和已完成shard SHA后续跑，不删除旧产物。
+smoke Head中断时恢复training_state_latest.pt；完成后不重新训练smoke Head。
+缓存沿用现有文件锁和分片一致性检查，另加任务级锁防止两个入口并发。
+若prepare因中断留下无run_plan的目录，保留现场并选新--output-dir，不能删目录
+或跳过身份门槛。解码/实际CTC长度失败时报告原ID，不自动删样本或改标签。
+
+### 验收与下一阶段
+
+回传两次终端最后JSON，含run_plan_sha256和固定train/validation SHA。若文件返回，
+只需run_plan.json、smoke_head/report.json、cache/feature_cache_report.json；不上传
+完整清单/缓存/模型。全量期望status=cache_completed，train sample_count958519，
+validation sample_count8101、两split status=pass，test_set_used=false。
+formal_training_started必须仍为false。
+
+`python -B scripts/run_multilingual_480h.py show-training`仅打印后续5epoch pilot和
+30epoch resume的参数数组，不执行。正式训练将在缓存验收后单独交付短命令；不将
+smoke Head续为正式Head，不跳过cache SHA核验、不读取test。未来正式输出head/
+与smoke_head/分离。当前无需运行任何长训练命令。
+
+本轮10项定向测试通过：身份/模型元数据变化阻断、未保护validation阻断、跨split
+路径交集、层覆盖、原输入不变、显式GPU、smoke恢复、全量前置/空间门槛、命令参数。
+包含子进程运行期间输入变化的结束复验。全量363 passed/23 skipped（本地无Torch）；
+新增Ruff、定向strict Mypy、CLI help、
+show-training、git diff --check通过。全仓Ruff仍5处既有E501，Mypy仍3处既有
+unused-ignore；未改相关旧文件及用户未跟踪产物。H200运行结果尚未产生。
+
 ## 0.125 2026-09-23 三语480h修复完成、正式训练清单发布（用户返回）
 
 用户执行0.124修复入口，返回status=completed、training_manifest_ready=true。
