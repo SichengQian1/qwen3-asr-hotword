@@ -1,5 +1,72 @@
 # 工作交接记录
 
+## 0.111 2026-09-23 Noah逐句标签/CTC容量通过：496.274765h候选（用户返回）
+
+用户返回0.110的full-manifest和temporal2x审计输出。粘贴附件
+`da4250a7-a40e-49ea-967d-ff75f30a921c/pasted-text.txt`本地SHA256为
+`43583347bbd81302bc057fee7c69dbbe7a5d51b6d19b0919eca47b17e9cace05`。
+本地解析两个JSON并核对样本分区和小时加总；这是回传附件身份，不是工作区原始
+summary的SHA。源staging及最终词典输出的SHA检查均由用户回传为全部OK。
+
+### 实测结果与结论
+
+`outputs/es_noah_mobile_full_manifest_v1`：58个分片，510.95685秒，未resume，
+286,821条音频metadata全部可读，总499.999970062778h，全部split=unsplit。
+`outputs/es_noah_mobile_temporal2x_audit_v1`：耗时3.27007秒，factor=2、q上限0.90。
+
+| 互斥分组 | 条数 | 小时 | 本轮处理 |
+|---|---:|---:|---|
+| original-ready | 241,948 | 445.400484 | 可进入后续隔离/选样 |
+| 纯时间问题，2x且q<=0.90 | 42,702 | 50.874281 | 可恢复候选 |
+| 2x可行但0.90<q<=1 | 10 | 0.007336 | 暂缓，保留 |
+| 2x仍不可行 | 119 | 0.080818 | 待检查，保留 |
+| 存在其他问题 | 2,042 | 3.637051 | 待检查，保留 |
+| 合计 | 286,821 | 499.999970 | 不删原始记录 |
+
+ready+review=241,948+44,873=286,821，review子分组合计一致。原始issue_counts为
+ctc_length_infeasible=42,876、dictionary_missing=2,124、standalone_h=131；这些是
+issue计数，可能同句多词/多原因，不能把2,124直接当作独立缺词句子数，更不能与
+其他issue简单相加当坏样本数。实际other-issue分组2,042条/3.637051h。
+
+按既定规则可用候选=284,650条/496.274765h，其中recovery占小时10.251233%。
+这是新Noah候选池的观察比例，不是三语或最终西语的固定配额。保持现有temporal2x
+结构及q规则，不因有足够original-ready就删掉全部recovery。
+
+与历史旧西语train 181.868358h相加，隔离/交叉去重之前的账面容量为678.143123h，
+高于480h目标198.143123h。保留旧多来源train时，只需从Noah新增298.131642h；
+当前无需用户再寻找西语语料。尚未创建最终480h，也未证明跨池唯一或speaker-disjoint。
+不把候选数当训练结果，不声称本次已改善PER或核实了每个音素的真实发音。
+
+### 下一步从容量检查转向480h选集准备
+
+计划优先保留已合格旧train以维持来源多样性，再从Noah补足298.131642h；以四个
+批次、时长、ref/frame与CTC ratio分层，纳入合法recovery，不按模型预测选样。
+实际配额在交叉去重/隔离后量化；Noah的directory_group_hint不是已验证speaker。
+既有严格拉美validation/test保持独立，不为凑train小时重分；未来若另建Noah域
+validation，先隔离再选train，使用新版本清单。
+
+当前还没收到0.101的旧西语train/validation范围复核结果。因此下一条短命令复用
+已有工具确认旧池身份和明确拉美元数据，不重新要求用户证明新Noah口音，也不再
+寻找MLS/CV来填容量。本工具只读，不加载模型/音频，不读取sealed test内容。
+容器内项目根目录运行，无需为本轮文档更新pull：
+
+```bash
+python -B scripts/audit_es_480h_capacity.py
+```
+
+返回终端JSON即可。该工具早于Noah新增池：它报告的容量/shortfall仅限旧来源，
+不会计入刚确认的496.274765h；若报告旧来源不足，不代表当前总容量不足。本轮
+关注existing train/validation身份、existing_latam_scope和scope问题，而非旧缺口。
+范围问题若被发现先明确报告，不自动移除或改写旧数据。现有outputs保持不变。
+
+取得结果后，下一实现阶段应保留候选旁表的来源/文件SHA/原ID，构建新旧池身份
+交叉检查和480h选择工具；使用新的输出目录，报告实际来源、recovery、密度、去重
+和留出集保护结果。不能把旧speaker切分器直接套给speaker_id为空的Noah。
+H200执行仍由用户完成，训练继续等待完整数据和配置就绪。
+
+本次仅结果型HANDOFF更新；本地已核对回传JSON计数、比例及小时分区，git diff
+--check通过；未修改代码、核心算法、outputs或用户未跟踪文件。
+
 ## 0.110 2026-09-23 Noah代理G2P与最终词典审计结果（用户返回）
 
 回传附件`7cc747c8-3378-4c86-8666-bb745954f9d8/pasted-text.txt` SHA256为
