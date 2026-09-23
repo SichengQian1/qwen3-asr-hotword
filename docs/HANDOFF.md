@@ -1,5 +1,76 @@
 # 工作交接记录
 
+## 0.116 2026-09-23 西语480h正式清单冻结成功（用户返回）
+
+用户返回freeze_es_480h_training.py结果：status=completed，
+training_manifest_ready=true；正式输出为
+`outputs/es_480h_training_v1_00d26e5c2e/full_ctc_train.jsonl`。
+回传Manifest SHA256：
+
+```text
+145c16e2019c4966c450557a150333eea19bcafec37f5eca36ee6e4d8815b300
+```
+
+本地核对回传条数、来源/分组小时及保护集合文件总数相加一致。该SHA来自工作区
+程序回传，本地未取得或重算完整Manifest，也未收到最终目录sha256.txt独立回传。
+不再将西语480h写成“只有候选计划”；正式清单已按0.115的门槛完成。
+
+| 分组 | 条数 | 小时 |
+|---|---:|---:|
+| 全部train | 296,399 | 480.001822655 |
+| original-ready | 263,195 | 440.216771076 |
+| temporal-2x recovery | 33,204 | 39.785051580 |
+
+recovery占小时8.288521%，与0.114计划一致。旧train约181.868358h、Noah约
+298.133465h，7个来源/批次的条数时长与计划一致；无冲突触发剔除或补抽。
+
+文件身份检查：
+
+- checked_files=302,239，bytes_read=41,669,411,266；
+- unique_train_file_hashes=296,399，恰等于训练条数；
+- conflict_groups_by_reason={}、conflict_examples=[]；
+- train_holdout_path_overlaps=0；
+- 保护集合validation=2,943路径、test=2,897路径；
+- 296,399+2,943+2,897=302,239，分区计数一致。
+
+保护集合是source/speaker元数据导出的保守超集，不能将2,943/2,897误写成实际
+validation/test样本条数。原西语validation仍2,871条/4.368367448611h，原test仍
+2,814条/4.139065h（历史summary），引用未改变：
+
+```text
+validation SHA256 6d1d77ad4ffb26c40d48995ff5902fe98dc2a5a65de05f87fdc6787f040cca77
+test SHA256 508f23cfa89533e6855d3545a706189a13208be8c83b0ed1fcae7a965f98e919
+```
+
+model_loaded=false、training_started=false、test_manifest_content_read=false、
+test_evaluation_performed=false；test_audio_bytes_read_for_identity_only=true。
+不把文件身份扫描称作测试模型评测。字节去重不覆盖重编码/重叠片段，Noah未知
+speaker不作跨来源speaker-disjoint保证；也未新增发音准确率或完整解码质量认证。
+Encoder cache和训练仍未开始；已就绪的是本版西语数据清单。
+
+### 下一步：确认英、葡现有train库存与来源，再派生各480h
+
+西语冻结版本应完整保留，不再交给旧三语随机采样器重新抽一次；旧采样器会重新
+排序ES且mandatory全保留会因480.0018>480而拒绝。后续三语汇合要直接引用这份
+西语清单。历史en US Swift train=487.628442h、pt train=783.223637h，尚未为本版
+派生480h，不应把原完整池或旧150h特征缓存当作新480h已准备好。
+
+用户在H200容器项目根目录读取最新现有摘要和实际train文件SHA（只读，无GPU）：
+
+```bash
+jq '{file:input_filename,status,split_records,split_audio_hours,
+  train_sources:(.corpus_metrics|map_values(.split_train)),manifest_sha256}' \
+  outputs/en_us_swift_temporal2x_v1/split_summary.json \
+  outputs/pt_combined_temporal2x_v1/split_summary.json
+sha256sum outputs/en_us_swift_temporal2x_v1/full_ctc_train.jsonl \
+  outputs/pt_combined_temporal2x_v1/full_ctc_train.jsonl
+```
+
+返回两个小JSON和两行SHA。先按实际现有source train小时设计分层选择；不强制葡语
+27% recovery，不删除全部高密度样本，不重复凑小时，不改变原验证集来选训练样本。
+未新增CV/MLS语料，不再要求寻找西语来源；本轮仅结果型文档提交，git diff --check
+通过。全部已有outputs、个人未跟踪文件保持不变。
+
 ## 0.115 2026-09-23 固定480h计划的文件身份隔离与正式清单入口
 
 新增spanish_480_freeze.py、scripts/freeze_es_480h_training.py及7项测试。
