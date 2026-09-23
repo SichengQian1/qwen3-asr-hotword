@@ -1,5 +1,38 @@
 # 工作交接记录
 
+## 0.117 2026-09-23 英葡完整train库存及实际SHA回传一致
+
+用户按0.116返回两个split_summary的精简字段和sha256sum结果。两份实际train
+文件SHA均与各自summary一致；该结论来自H200回传，本地未读取H200完整Manifest。
+
+| 语言/来源 | train条数 | train小时 |
+|---|---:|---:|
+| en / swift_us_english | 345,820 | 487.628442229 |
+| pt / 全部 | 525,189 | 783.223636631 |
+| pt / common_voice | 21,028 | 24.074124 |
+| pt / fleurs | 1,890 | 6.593617 |
+| pt / mls | 25,085 | 106.295530 |
+| pt / noah_500h | 343,286 | 463.766467 |
+| pt / noah_finance_200h | 133,900 | 182.493898 |
+
+```text
+en train 6882074371edfdc94a5ca66ff4ba487c0f965c5f7527b0026740af9b952f9dc8
+pt train 47214e4bec638198fd0e00c929f113d8ad35dedfd13a904f1190f903f68b3fd4
+```
+
+对应pool为outputs/en_us_swift_temporal2x_v1和outputs/pt_combined_temporal2x_v1。
+英语超480h约7.628442h，葡语超480h约303.223637h；现有已释放train库存数量上足够。
+尚不能把该库存确认写成新480h已冻结或新音频内容去重已完成。
+
+原heldout引用不变：en validation=7,187条/10.165238235556h，test=7,086条/
+10.165610728611h；pt validation=10,899条/16.239130696944h，test=10,958条/
+16.232128349444h。回传summary包含test聚合字段，不等于读取test答案或进行评测。
+
+后续基于各自train池做source×release×时长×density×CTC ratio按小时比例分层，
+固定seed；不预设葡语recovery比例、不按PER筛选、不统一三语density。此比例是
+尽量维持来源/压力构成的扩量起点，未经实验不能宣称最优。西语0.116正式清单整份
+引用。保持现有validation/test，不增加外部ASR、不训练、不改Head算法。
+
 ## 0.116 2026-09-23 西语480h正式清单冻结成功（用户返回）
 
 用户返回freeze_es_480h_training.py结果：status=completed，
