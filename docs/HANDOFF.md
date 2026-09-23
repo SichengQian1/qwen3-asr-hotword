@@ -1,5 +1,23 @@
 # 工作交接记录
 
+## 0.128 2026-09-23 wave盘点回传：800条音文对应、PT并集295，ES被音素映射阻断
+
+用户回传outputs/wave_keyword_inventory_v1_6c459d81a1的终端摘要，尚未回传该目录
+完整report.json/sha256.txt。8组wave×language均100条音频/100条转写，无源内ID
+对应错误，共800条；这仅证明文件/转写标识对应，不证明音文或发音标注准确。
+
+- PT complete_primary_files=4、counts_are_partial=false，规范化并集295词，距离
+  4000尚缺3705；未发现可映射音素序列冲突，四wave没有共享stem。
+- ES complete_primary_files=0、counts_are_partial=true，终端显示union=1是旧盘点
+  在首个OOV处提前停止产生的部分计数，不是实际西语并集。wave1/2首先遇到Adrián，
+  wave3/4首先遇到Aero Club Orán；这也不证明只有这两个异常词或四处OOV。
+- 当前终端没有给出原始IPA、具体OOV单元、近音词JSON结构及旧4000库存在性；
+  因此不能判断是符号格式还是发音标签差异，不能直接改全局音素规则、丢词或换
+  vocab来绕过错误。需要完整结构/异常证据才能继续两份正式4000词表。
+- tables_created=false、model_loaded=false；目前未生成4000表、未跑GPU检索，
+  与480h特征缓存任务保持独立。下一步修正只读盘点为逐词继续扫描，统计完整词面
+  并集并单列所有不可映射词、原始音素及Unicode信息，不更改源词表和原音素值。
+
 ## 0.127 2026-09-23 wave1–4西/葡4000热词与16份下游交付：输入盘点入口
 
 用户在480h缓存运行期间新增独立外部测试任务，最终使用另一张H200卡。宿主机仓库
