@@ -1,0 +1,9 @@
+{
+  "plan_dir": "outputs/en_pt_480h_plan_v1_ac14317963",
+  "target_hours": 480.0,
+  "proposed_ids_sha256": {
+    "en": "216d18d24fe4b6d3520def5a1a25840ab7e57491ad6b528163939cc1620b593e",
+    "pt": "791e3f3a8a43c90fc2a8de21723e09d3252e9a4aa41be8b1adf54538a7942d95"
+  },
+  "es_holdout_pool": "outputs/es_combined_temporal2x_v1"
+}

@@ -1,5 +1,90 @@
 # 工作交接记录
 
+## 0.120 2026-09-23 固定三语480h计划的正式清单入口（待H200执行）
+
+新增training/multilingual_480_freeze.py、scripts/freeze_multilingual_480h_training.py、
+configs/multilingual_480h_freeze.workzone.json。默认绑定0.119计划目录及英葡两个
+proposed_ids的SHA；0.119实测结果已独立提交c21539f。交付分支codex/g2p-coverage-scan。
+
+### 输入、身份核验与边界
+
+- 校验plan目录report/config/ID文件SHA，拒绝FAILED计划、非完成状态、目标小时
+  不一致、输入改变；ID摘要必须匹配用户回传的216d18d...和791e3f3...。重新汇总
+  全部ID的各维度条数/小时并与完整report一致，回填时逐条比对原train元数据。
+  不重新采样，不调整source/recovery/density，不改文本或音素标签。
+- 西语整份引用0.116正式清单，核验SHA与条数小时。原文件不写入；为了统一训练
+  格式，在新三语输出的西语副本中仅增补experiment、dataset_version和language
+  bucket等元数据。所有ES行均保留，未重新随机排序/选样。
+- 英语与旧西语留出保护复用0.115的source TSV+speaker assignments，核验各输入
+  SHA，得到包含未释放行的保守保护超集。不会借此声称Noah跨来源speaker隔离。
+- 葡语原pool是existing_stable_split_hash，不能套用speaker切分。读取split_config
+  所绑定SHA的ready/review来源文件，只使用身份、时长、split_hash、问题/长度
+  元数据，复用原ready/recovery释放规则与96/2/2边界重建留出身份。逐来源逐split
+  的条数小时必须与旧summary一致。源JSON被解析，其中含有文本/音素字段，但本步
+  不使用这些字段核验发音、评测或调参；sealed test Manifest本身不打开。
+- 三语原validation清单只用于核对路径是否全部在各自保护注册表中，并核验SHA/
+  条数。test保护数量不得小于旧summary。本轮不评测模型、不重新划分或更改heldout。
+  report中的heldout_references是原完整池的引用，不自动指定未来checkpoint选择
+  用哪个validation视图；原正式三语评测视图也不在本步重建。
+- 读取958,513条固定train及保护集合音频的完整文件字节SHA，默认8线程、256文件
+  一批、每5120文件输出进度；这会重新读ES音频，以完成三语之间的去重。test保护
+  音频亦仅为身份检查读字节，明确test_audio_bytes_read_for_identity_only=true。
+  不解码波形、不加载Qwen/MFA/外部ASR、不使用GPU、不开始训练。
+- 同一文件读取前后size/mtime须稳定；ES Noah已有文件SHA须匹配。训练ID/路径
+  重复、train/heldout路径相交直接停止；训练字节重复、train/heldout字节重复、
+  validation/test保护字节相交均使结果blocked_audio_conflicts，不自动删除/补抽。
+- 全部输入SHA在音频检查结束后再次校验。成功才输出per-language train和按累计
+  小时交错的combined train；字段与现有full-ctc-v1 feature/training parser兼容。
+  无重复采样；新dataset_version=en-es-pt-480h-fixed-plan-v1。
+
+限度：文件SHA不能识别重编码/重叠片段；葡语清单缺speaker，不作跨来源说话人隔离
+保证。保护超集若包含重复的未释放行亦会保守阻断。身份检查不认证标签/完整音频
+解码质量；训练特征缓存与模型训练仍属后续步骤。
+
+### 工作区执行
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录：
+
+```bash
+python -B scripts/freeze_multilingual_480h_training.py
+```
+
+这是全量文件读取任务，比前一步只读Manifest慢。不要并发重复运行；可用--workers
+调整1..32线程。自动新建outputs/multilingual_480h_training_v1_<随机后缀>，拒绝
+任何已有目录，无resume；失败保留产物，下次新目录，不删除覆盖旧outputs。
+前置输入/保护验证失败时可能尚未建目录；建目录后的异常会写FAILED.txt，含该
+标记或无完成report的目录不能用于特征或训练，即使已留下一部分清单文件。
+
+成功输出full_ctc_train.jsonl、full_ctc_train_en/es/pt.jsonl、report.json、
+input_config.json、input_identities.json、audio_fingerprints.jsonl、sha256.txt。
+冲突结果保留各语言pending清单，不发布正式train，退出码2。成功只代表所述正式
+train清单和身份检查通过，training_started仍false；预计958,513条/1440.003175h，
+必须由用户H200实际回传确认，不能拿本地测试冒充完成。
+
+R设为实际新目录，验证本次产物（不读sealed test Manifest）：
+
+```bash
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+返回终端JSON和sha256.txt或小report.json即可，不传音频/大Manifest/fingerprints。
+如blocked，只需聚合原因与自动Top10例子；先处理冲突，不直接跑训练。通过后再
+安排训练配置、固定评测引用与新三语Encoder特征提取。
+
+本地验证：新增9项测试含端到端合成freeze、真实训练Manifest解析器兼容、跨语言
+字节重复、validation/test字节冲突、计划/来源身份变化、PT恢复规则与分区统计、
+输出保护；相关29项pytest通过。全量340 passed/23 skipped；新增Ruff/strict Mypy、
+CLI help、git diff --check通过。全仓仍为5处既有E501和3处既有unused-ignore，
+位置与0.118一致，未改用户文件或其他outputs。本地测试未下载或加载任何模型。
+
 ## 0.119 2026-09-23 英葡480h分层计划完成（用户返回）
 
 回传附件SHA256=b5b9f5a5c04fd5231b7ec01fca7189d3327bb3f1894c9d12e527b65f1270f739。
