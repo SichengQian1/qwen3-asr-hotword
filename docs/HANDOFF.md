@@ -1,5 +1,50 @@
 # 工作交接记录
 
+## 0.123 2026-09-23 冲突全量诊断：拟移除154条，英缺5秒/葡缺11.96分钟
+
+用户回传audit_multilingual_480h_conflicts.py，status=completed，files_written=false；
+此时仍只是拟处理方案，没有删除数据、重写清单或开始训练。96个独立冲突SHA组，
+85个train重复组与12个train/heldout组中有1组重叠；影响189条训练记录，分为PT185条
+和EN4条，ES不受影响。不能再将全部冲突归为葡语或把组数当作待移除条数。
+
+| 拟处理动作 | 组数 | 移除条数 | 小时 |
+|---|---:|---:|---:|
+| 同音频但训练记录标签/时长不一致，整组隔离 | 49 | 104（PT） | 0.149702778 |
+| 一致副本每组保留一个，移除多余副本 | 35 | 37（PT35、EN2） | 0.035631944 |
+| 与heldout相同的所有train副本移除 | 12 | 13（PT） | 0.016664514 |
+| 合计 | 96 | 154 | 0.201999236 |
+
+标签判据为原文、音素序列、语言的联合签名；前几个例子显示training_label_mismatch
+为true，但不区分原文差异、标点差异还是实际音素差异，因此不能称104条已证实转写
+错误，也不能据此量化葡语历史PER有多少来自标签。整组隔离是保守的数据选择措施。
+
+所有PT冲突属于noah_500h，EN属于swift_us_english。train/validation交集4组/4条/
+0.005254167h；train/test交集8组/9条/0.011410347h。这里没有读取test文本或音素
+标签，也未做测试评测。原validation/test清单继续保留，不为消除泄漏而移动留出行。
+
+拟移除：PT152条/0.199921458h（original101条/0.127526319h、recovery51条/
+0.072395139h）；EN2条/0.002077778h，均original。拟处理后：
+
+- EN340,378条/479.998612269h，距离480h为0.001387731h≈4.996秒；
+- ES296,399条/480.001822655h，不动；
+- PT321,582条/479.800740957h，距离480h为0.199259043h≈11.9555分钟；
+- 合计958,359种唯一训练文件字节内容，尚待实际应用排除和补入后核验。
+
+回传身份：
+
+```text
+report.json dbfbb605019d2bed7f6a64478ae7b1ab0c7fbf6312af7b7783370bc0047b015e
+audio_fingerprints.jsonl a9d22b75f6b9ce8e3cceacca6cb4562a599912d670a0e9b36c4396a75a6161b1
+en.pending.jsonl bb2737c0266711fabaef19a2636868ba26f2893fa8b2f529dd8902b94fbadd59
+es.pending.jsonl 8486e688b9e4663109e6a6748da06d7e96eeef38e4e19386c54d0859859f71df
+pt.pending.jsonl 32dda41bb57a25c3432ccf74ee86388111cbbe0a74dfe113abfe727d025e43eb
+proposed_removed_ids_sha256 9f81aa34b54234f5c9401796aeb1500dbfc47726b80b4a1f765a997f9e451d1e
+```
+
+下一步新版本train应用上述排除，从原train池按被移除的source/release/时长/density/
+ratio层补齐EN/PT；ES不重新采样。补入必须避开原已选ID/路径以及全部已知训练、
+隔离和heldout文件SHA，不能把被隔离音频的另一副本补回来。既有outputs原封不动。
+
 ## 0.122 2026-09-23 复用指纹的只读冲突诊断入口（待H200执行）
 
 0.121结果已独立提交0e979a3；用户粘贴附件本地SHA为
