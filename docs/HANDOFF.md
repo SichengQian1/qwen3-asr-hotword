@@ -1,5 +1,82 @@
 # 工作交接记录
 
+## 0.132 2026-09-23 两语固定4000词表构建入口（待H200 CPU运行）
+
+0.131库存结果单独提交4203474。本轮实现evaluation/wave_keywords.py、
+scripts/build_wave_4000_keywords.py、configs/wave_4000_keywords.workzone.json。
+当前仅在本地合成数据测试；未读取H200真实wave数据、未创建真实4000表、未运行模型。
+
+### 固定构建规则
+
+- 绑定0.130 inventory目录wave_keyword_inventory_v1_b704685dc1，先核验其report
+  对应sha256.txt，再以report内SHA核验8份primary和8份neighbors输入；v0.2 vocab
+  与旧补充库SHA另外固定在配置。所有输入在写输出前再次核验，漂移即失败。
+- 四wave所有keyword_sets取规范化并集，必须得到ES316/PT295，全部保留。以现有
+  normalize_match_words规范化词面。相同词面处理后token序列不同则阻断；OOV、
+  无发音等不能静默删掉目标词。规范化计数不同也阻断，避免错用其他批次。
+- ES所有主词/补充词统一复用repair_spanish_pronunciation(..., rules=())，只用
+  现有西语训练去U+0303口径，不启用enye代理规则，不变更词面、共享vocab或源文件。
+  PT不调用西语清理，保留鼻元音。输出采用vocab规范token序列；保存原IPA、清理后
+  IPA、token IDs、清理计数及来源，兼容性通过不代表发音准确性得到人工认证。
+- 只取parent规范化词面属于本轮目标并集的近音词；用每项phoneme，不用根部
+  keyword_phonemes替代。邻词已有sim/count仅保留为来源信息，不按它们排序，
+  ES清理后不宣称原sim是重新计算的相似度。未知结构阻断，无效候选显式隔离。
+- 补充名额先一半近音词（ES1842、PT1852），再从旧库补满；旧库不足再用剩余近音
+  词。若近音词不足，由旧库填补；两者仍不足则失败，不能少于4000条发布。
+  候选按SHA256(seed:language:normalized)排序；seed=wave-4000-20260923-v1。
+  这是固定压力测试配比，不代表已证明最优或两语言难度完全相同。
+- 旧库读取实际4401/4403行，而非假定4000；验证语言、原IPA、token IDs、tokens和
+  词面规范化一致。可选词面出现发音冲突时所有可选变体隔离；目标词优先于补充库
+  同词面记录，差异写审计。同音异词全部保留，不能按发音去重而丢目标词。
+- 两语言都通过才开始发布，每语言恰好4000个唯一规范化词面。选择不读transcript、
+  音频、预测或召回结果。测试集目标词由用户明确提供作为运行词库，不据错误调词库。
+
+### 运行与回传
+
+交付分支codex/g2p-coverage-scan，容器外项目目录（最终远端SHA见交付消息）：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录：
+
+```bash
+python -B scripts/build_wave_4000_keywords.py
+```
+
+仅CPU，无模型下载/加载，不占训练缓存GPU。新目录
+outputs/wave_4000_keywords_v1_<随机后缀>；无resume，显式--output-dir拒绝已有目录，
+不会覆盖任何旧输出。仅发布后生成sha256.txt；发生失败不得使用任何不完整目录。
+每语种文件：
+
+- keyword_bias_phoneme.json：all_keywords恰好4000条及对应可映射IPA；供后续检索。
+- targets_by_wave.json：原四wave各自规范化目标词，用于独立目标召回分母。
+- hotwords.jsonl：规范化词、IPA/token IDs、来源与来源记录。
+- selection_audit.jsonl：逐输入词变换、未选中、无效/冲突/目标优先记录。
+
+根目录config.json、report.json、sha256.txt。report报告必留数、两种填充来源数量、
+候选冲突/异常、清理计数和同音词组；终端打印小摘要。请返回新目录report.json与
+sha256.txt，无需上传词库全集、音频、tensor或权重。可在输出目录核验：
+
+```bash
+sha256sum -c sha256.txt
+```
+
+下一阶段仍为原三语基线Head和0.127参数的8组Top5+Top7，输出16份Context Learning
+JSON。检索旧入口仍有PT硬编码，不要直接拿它运行ES；本轮不修改检索核心、不运行
+Qwen decoder。后续入口须显式支持ES/wave，并分别报告原目标词召回及4000词表结果。
+
+### 本地验证
+
+15项新增测试加7项inventory回归通过；覆盖ES清理/PT鼻化保留、必留主词异常阻断、
+发音冲突、相同词面优先级、无效补词、确定性顺序、近音词不足/旧库不足双向补齐、
+真实4000数量测试、同音异词保留、输入SHA漂移、只读输入和拒绝覆盖。全量385 passed、
+23 skipped（本地缺Torch等依赖）；新增文件Ruff、定向strict Mypy、CLI help及
+git diff --check通过。全仓Ruff仍有原有5处E501，Mypy仍有原有3处unused-ignore，
+本轮未改这些无关文件；不以合成测试冒充H200词表已发布。
+
 ## 0.131 2026-09-23 wave近音词结构和旧补充库实测库存
 
 用户从0.130同一inventory报告回传字段预览，本地粘贴附件SHA256：

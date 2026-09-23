@@ -1,0 +1,12 @@
+{
+  "inventory_dir": "outputs/wave_keyword_inventory_v1_b704685dc1",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "expected_primary_counts": {"es": 316, "pt": 295},
+  "filler_sha256": {
+    "es": "19d23505ad7719a404662b13b97481750bca549637028a7efc13de8a7ca08553",
+    "pt": "ac8f50fa6f6f14870d8ca97b7028a570f88ace81c31062c41da60228b2a5d4d3"
+  },
+  "target_size": 4000,
+  "seed": "wave-4000-20260923-v1"
+}
