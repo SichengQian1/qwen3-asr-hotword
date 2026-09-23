@@ -1,5 +1,72 @@
 # 工作交接记录
 
+## 0.113 2026-09-23 西语480h固定候选ID与分层配额计划入口
+
+0.112旧train/validation范围复核通过后，新增plan-only入口，不调用要求已验证speaker
+的旧切分器，不伪造Noah的speaker_id。新增config、spanish_480_plan.py、CLI及8项测试。
+
+规则：
+
+1. 固定0.112旧summary/train/validation SHA、0.110最终词典与vocab SHA、Noah源JSON
+   身份。核验staging文件清单、旧train/validation数量时长及summary记录SHA；新清单
+   记录各输入SHA并检查结束时未变化，作为本次计划的可复现身份。
+2. 逐条以规范化绝对audio_path回连candidates旁表，验证文本/时长一致、完整分区，
+   保留原source_id、批次、文件SHA、directory_group_hint及真实或空speaker_id。
+   拒绝旁表重复路径/ID/文件SHA，拒绝新清单重复/ID碰撞及与旧train/validation路径交集。
+3. 原ready必须无issues且1x可行；仅ctc_length_infeasible的review在2x ratio<=0.90时
+   入候选。重算标签长度+相邻重复需求，验证token ID在1..89范围，不使用部分缺词
+   标签。其他review不入选但保留原产物；不更改原文、词典、模型或release规则。
+4. 旧train全部保留，Noah补足480h差额。Noah按batch×release×时长×ref/frame×CTC
+   ratio联合分层，以每层可用小时占比确定配额，seed=20260923，层内按SHA(seed,ID)
+   排序无放回选样。先不超过各层配额，剩余差额逐条补给小时缺额最大的层，直至目标。
+   不裁切音频，数学上总量达到目标且超量小于最后一条音频时长（浮点误差容差1e-8秒）。
+5. 分箱为上界包含：时长3/6/10/20秒，density=L/(2*T_est)边界0.2/0.3/0.4/0.5/0.6，
+   ratio=(L+重复)/(2*T_est)边界0.5/0.75/0.9；这里是metadata估计帧，非实际缓存帧。
+   报告完整联合分层及边际小时分布，不人为固定27% recovery，不读取模型预测选样。
+
+生成proposed_ids.jsonl、report.json、config.json、sha256.txt，**不生成带训练标签的
+full_ctc_train.jsonl**。报告status=plan_completed、training_ready=false。未读取任何
+音频、模型或sealed test manifest；旧validation和test只保留原有身份，validation内容
+仅供路径/ID机械核对。Noah已有文件SHA内部唯一，但新旧池跨路径文件内容去重尚未做，
+sealed holdout的完整身份保护尚待补齐；speaker-disjoint亦不能因G目录而宣称通过。
+这些都是report.pending明示的后续条件，计划不能直接供训练使用。旧train如有后续
+内容重复/污染问题须重新处理并重选，不能因本阶段保留就免检。
+
+### H200交付
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录（无需GPU/新依赖/下载）：
+
+```bash
+python -B scripts/prepare_es_480h_plan.py
+```
+
+默认读取configs/es_480h_plan.workzone.json，写全新
+`outputs/es_480h_plan_v1_<随机后缀>`；显式--output-dir也拒绝任何已有路径。无resume，
+新一次运行使用新目录；输入验证不通过则不创建目录，写出期间失败保留部分文件并
+写FAILED.txt，禁止当成功计划使用。既有outputs、Manifest与用户文件不修改。
+
+验证（R为程序实际打印的计划目录）：
+
+```bash
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+返回终端JSON及计划sha256.txt即可；终端省略大的联合分层和输入身份列表，但完整
+内容保存在report.json。需要详细分布时仅回传该小JSON，不传原始Manifest或音频。
+本地mock不是H200结果，实际选择条数、四批次配额、整体recovery比例待用户回传。
+
+本地验证：定向8 passed；全量311 passed/23 skipped；新增Python文件Ruff/Mypy
+strict、CLI help及git diff --check通过。全仓Ruff仍为0.101所述5处既有E501（包括
+用户PPT临时脚本2处），全包Mypy仍3处既有unused-ignore；本轮未触碰这些文件。
+
 ## 0.112 2026-09-23 旧西语train/validation拉美范围复核通过（用户返回）
 
 用户返回audit_es_480h_capacity.py结果，scope_issue_count=0。

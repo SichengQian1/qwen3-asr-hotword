@@ -1,0 +1,15 @@
+{
+  "pool": "outputs/es_combined_temporal2x_v1",
+  "staging": "outputs/es_noah_mobile_source_v1_4bbc7edd5d",
+  "manifest": "outputs/es_noah_mobile_full_manifest_v1",
+  "target_hours": 480.0,
+  "seed": 20260923,
+  "source_json_sha256": "3a57177178368b1eae0ce0be659071e955edcde56a1227c830192a0adc90b93f",
+  "expected_sha256": {
+    "old_summary": "dfaaddc82ab8d35fb7aaf18ab818ad39523e6a17ad26aaf8fa7db9fdc7776040",
+    "old_train": "617ae3723527dcdfd4c04ea7799bb68c7cfd13cb4cdd8386758d5aa31a9faa25",
+    "old_validation": "6d1d77ad4ffb26c40d48995ff5902fe98dc2a5a65de05f87fdc6787f040cca77",
+    "dictionary": "0a23386028849772672d661fd9fa685a0f89fad7c041a9dcc6d46c41146e3269",
+    "vocab": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4"
+  }
+}
