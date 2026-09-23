@@ -1,5 +1,34 @@
 # 工作交接记录
 
+## 0.121 2026-09-23 三语480h冻结被音频字节冲突阻断（用户返回）
+
+工作区outputs/multilingual_480h_training_v1_ae7eae83de完成全部文件指纹扫描，
+status=blocked_audio_conflicts、training_manifest_ready=false、artifacts={}。
+这是数据身份检查触发的预期阻断，不是训练失败，也不能记录成三语正式清单已完成。
+保持全部pending产物；禁止跳过冲突门槛、直接训练或覆盖/删除该目录。
+
+- 所选EN/ES/PT仍为340,380/296,399/321,734条，合计958,513条，小时与0.119一致。
+- checked_files=1,000,483，bytes_read=153,693,478,469；训练958,513加保护集合
+  validation 21,029、test 20,941，恰等于文件总数，核对通过。
+- unique_train_file_hashes=958,420，比训练记录少93，即存在93个多余文件字节副本。
+  duplicate_train_file_bytes=85是冲突SHA组数，不是重复记录数。
+- train_holdout_file_overlap=12亦为SHA组数，不可直接当成12条待删除训练样本。
+  两类组可能重叠，不能直接将85+12当作独立问题总数。
+- train_holdout_path_overlaps=0；这说明路径/ID不重叠仍会漏掉不同路径下的同一
+  文件内容。此前“无路径重叠”的结论不等于内容无重叠，应以本次字节证据补充。
+- Top10展示路径均在葡语Noah500h目录内，包括100201/100227、200021/200025。
+  这不足以断言全部冲突都来自PT、同一个speaker或转写错误，也不能由此判断历史
+  Head训练是否使用了这些具体副本，需要逐条身份核对才可下结论。
+- EN保护=7,187/7,086，PT=10,899/10,958，ES保守超集=2,943/2,897；所有原heldout
+  引用未改动。未出现validation_test_protected_file_overlap原因。
+
+下一步只读复用该目录audio_fingerprints.jsonl和三个pending训练清单，统计全部
+冲突来源、语言、条数小时、train与validation/test分别相交的规模，比较训练副本
+之间的原文字段和音素标签是否一致。不再重扫153GB音频，不读sealed test标签，
+不根据模型预测筛选。原则为保留heldout，从新train剔除泄漏副本；纯train重复且
+文本/音素/语言/时长一致时才可提出保留一个副本；标注冲突提出全组隔离待核验。
+本轮尚未执行剔除或补抽，缺多少唯一小时和哪些语言需要补齐仍待统计。
+
 ## 0.120 2026-09-23 固定三语480h计划的正式清单入口（待H200执行）
 
 新增training/multilingual_480_freeze.py、scripts/freeze_multilingual_480h_training.py、
