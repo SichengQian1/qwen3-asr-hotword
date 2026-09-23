@@ -1,5 +1,85 @@
 # 工作交接记录
 
+## 0.124 2026-09-23 三语480h冲突修复与补齐入口（待H200执行）
+
+0.123实测结果已单独提交ba66f04。原回传附件SHA为
+9a303159b5d4c410ecf2429f61ac3a75177cc2bc5e57e95df5153988965d5ab9。
+新增scripts/repair_multilingual_480h_training.py、training/multilingual_480_repair.py
+和configs/480h_repair.workzone.json；交付分支codex/g2p-coverage-scan。
+
+本次仅准备新训练清单，尚未在H200运行。固定Qwen模型、音素标签、Head结构和
+原validation/test，不做训练、特征提取、G2P或任何模型推理。
+
+### 修复规则与放行条件
+
+1. 将0.123回传的report、指纹、三个pending清单SHA及154条排除ID集合SHA写入
+   配置；先重算诊断并逐项核对。不接受换目录/改清单后沿用旧结论。
+2. 新清单中排除154条：104条标签/时长不一致副本整组隔离、37条一致的多余副本、
+   13条与heldout字节相同的train副本。不是删除原音频，也不是断言104条全为错标。
+   原输出目录、原计划和原清单保持不变。ES没有排除项，全部原选择保持。
+3. EN/PT仅从原train池补足各480h，绑定68820743.../47214e4b...两个完整SHA。
+   只允许被移除行所属的source、release、时长桶、density桶、CTC ratio桶联合层；
+   因此当前EN只补Swift、PT只补Noah500h。按各层移除时长占比分配实际缺额，
+   层内以seed=20260923和ID稳定排序，优先填最大剩余配额。保留整条音频，因此
+   总时长可略超480h；分层不足时只在其他被移除层中补，并记录配额/实际时长，
+   不扩展到新的层。所有可用层均不足则停止，不重复抽样凑数。
+4. 排除所有旧选择ID/路径，包括本次被隔离行。每个补入文件读取字节SHA，避开
+   上次全部train、隔离副本、heldout指纹以及本次已接受补样，防止换路径补回。
+   source清单重新核验标签、CTC可行性及摘要；文本/音素值不改。
+5. 补齐后对完整修正版train及保护集合重新做文件字节核验，保留train文件SHA须
+   与上次一致，补入文件须与刚核验的SHA一致。文件在读取前后的size/mtime须稳定。
+   无训练内容重复、无train/heldout内容交集、无validation/test保护内容交集，
+   且唯一train SHA数等于train条数，才能发布正式manifest。此步需要再次读取约
+   153GB音频文件，耗时与原冻结的字节扫描相近；不使用GPU、不解码完整波形。
+6. 输入元数据结束前再验SHA；按累计小时交错输出combined，并输出三个语言的
+   manifest。仅更新dataset_version等版本字段，不改变保留样本的文本和音素。
+   新版本为en-es-pt-480h-content-dedup-v2。
+
+仍有的边界：SHA只能识别相同文件字节，不能识别重编码/重叠录音；不作标签正确率
+或跨来源speaker隔离认证。test音频只读取字节用于身份保护，不读取test manifest
+文本/音素、不评测。原heldout引用继续在report中保留，不修改验证或测试集合。
+
+### 工作区执行与返回
+
+容器外项目目录：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录：
+
+```bash
+python -B scripts/repair_multilingual_480h_training.py
+```
+
+默认8线程，--workers可设1..32。自动新建
+outputs/multilingual_480h_training_v2_<随机后缀>；拒绝已有目录，不支持resume。
+失败保留FAILED.txt和部分产物，不删除覆盖；修正原因后再运行会用新目录。
+不要同时重复运行，也不需要重跑旧freeze。先输出身份/选样进度，最终扫描每5120
+个文件报告进度。磁盘需容纳新的清单和指纹（数GB），不复制音频。
+
+成功时终端返回聚合JSON，需status=completed、training_manifest_ready=true、
+三语各不少于480h、audio_identity_audit.conflict_groups_by_reason为空。
+仅返回终端JSON即可；若使用文件，则返回新目录report.json和sha256.txt。
+用户可将R设为终端打印的新输出目录，再核验：
+
+```bash
+(cd "$R" && sha256sum -c sha256.txt)
+```
+
+保留excluded_rows.jsonl、replacement_ids.jsonl和完整report内strata以供复查；
+无需上传这些逐行文件、音频或模型。最终字节检查发现新冲突时返回FAILED.txt和
+audio_identity_audit.json；不能把失败目录中的pending清单用于训练。
+
+新增6项测试覆盖排除/同层补样/原输出不变、字节重复候选拒绝和不足、保留音频被
+修改、pending篡改、排除集合身份变化及已有输出拒绝；结合旧诊断7项定向测试
+13 passed。全量353 passed/23 skipped；本轮Ruff、strict Mypy、CLI help和
+git diff --check通过。全仓检查仍有既有5处E501和3处unused-ignore，未修改相关
+旧文件或用户未跟踪文件。这里只验证本地合成fixture，真实修复与小时数待H200回传。
+
 ## 0.123 2026-09-23 冲突全量诊断：拟移除154条，英缺5秒/葡缺11.96分钟
 
 用户回传audit_multilingual_480h_conflicts.py，status=completed，files_written=false；

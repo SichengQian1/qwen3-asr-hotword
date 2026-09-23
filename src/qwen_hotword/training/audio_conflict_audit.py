@@ -48,7 +48,9 @@ def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def audit_conflicts(root: Path, *, top_n: int = 3, target_hours: float = 480) -> dict[str, Any]:
+def inspect_conflicts(
+    root: Path, *, top_n: int = 3, target_hours: float = 480
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not 1 <= top_n <= 10 or not math.isfinite(target_hours) or target_hours <= 0:
         raise ValueError("invalid top_n or target_hours")
     if (root / "FAILED.txt").exists():
@@ -146,7 +148,8 @@ def audit_conflicts(root: Path, *, top_n: int = 3, target_hours: float = 480) ->
             raise ValueError("pending counts/hours disagree with report")
     if train_paths or any(len(g["train"]) != g["counts"][0] for g in groups.values()):
         raise ValueError("conflicting train fingerprints missing from pending manifests")
-    affected, removals = [], []
+    affected: list[dict[str, Any]] = []
+    removals: list[dict[str, Any]] = []
     actions: Counter[str] = Counter()
     action_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -174,7 +177,7 @@ def audit_conflicts(root: Path, *, top_n: int = 3, target_hours: float = 480) ->
             action, remove = "holdout_internal_conflict_requires_review", []
         lost_unique_groups += bool(train) and len(remove) == len(train)
         affected.extend(train)
-        removals.extend(remove)
+        removals.extend(dict(row, proposed_action=action) for row in remove)
         actions[action] += 1
         action_rows[action].extend(remove)
         if len(examples[action]) < top_n:
@@ -214,7 +217,7 @@ def audit_conflicts(root: Path, *, top_n: int = 3, target_hours: float = 480) ->
     for filename, identity in identities.items():
         if _sha(Path(filename)) != identity["sha256"]:
             raise ValueError("audit inputs changed")
-    return {
+    report = {
         "status": "completed",
         "scope": "read_only_conflict_diagnosis_and_proposed_exclusions",
         "freeze_dir": str(root),
@@ -247,3 +250,9 @@ def audit_conflicts(root: Path, *, top_n: int = 3, target_hours: float = 480) ->
         "files_written": False,
         "training_ready": False,
     }
+    return report, removals
+
+
+def audit_conflicts(root: Path, *, top_n: int = 3, target_hours: float = 480) -> dict[str, Any]:
+    report, _ = inspect_conflicts(root, top_n=top_n, target_hours=target_hours)
+    return report
