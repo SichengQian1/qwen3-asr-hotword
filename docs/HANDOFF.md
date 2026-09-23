@@ -1,5 +1,99 @@
 # 工作交接记录
 
+## 0.110 2026-09-23 Noah代理G2P与最终词典审计结果（用户返回）
+
+回传附件`7cc747c8-3378-4c86-8666-bb745954f9d8/pasted-text.txt` SHA256为
+`9897a482054be5d33854cb96064a816e7d3aafc87e2e56a99044d0878ea4e28d`；这是
+本地粘贴附件身份，不冒充工作区report身份。用户返回repair_plan的6项SHA检查
+全部OK，代理G2P耗时152.946秒，finalize和audit均执行完成。
+
+最终词典为
+`outputs/es_noah_mobile_mfa_repaired_v1/final/noah/noah_spanish_latin_america_repaired.v1.dict`。
+
+```text
+final dictionary SHA256 0a23386028849772672d661fd9fa685a0f89fad7c041a9dcc6d46c41146e3269
+proxy dictionary SHA256 0ab0f8c851f6385700c566cf1193cbdde9f502c17319722176b628be5e5d7116
+repair plan SHA256 79d92ca89d7b28fcfe9aa8ddb8fe9f4a72d8e41a144669d0e97de70108fd13a9
+vocab SHA256 0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4
+```
+
+base_dictionary/words/word_counts的回传SHA与0.109一致。
+最终68,930个词、68,930条单发音；missing=659，duplicate=0，extra=0，写入词典
+的phone OOV=0、weighted OOV=0，CTC输出90类。词类型覆盖99.0530113%，词次
+覆盖99.9440301%；未解决2,136词次，占0.0559699%。status=pass仅表示执行成功，
+training_labels_ready=false仍正确，不能称整批标签已经齐全或发音已人工核验。
+
+本次mfa_proxy成功10,474词/194,063词次，较计划少128词/299词次，故未解决从
+531增加到659。已输出词典OOV为0不代表所有原始发音无OOV；finalize会隔离失败项。
+沿用旧规则删除26,702个combining tilde、还原728个enye代理glide；这些是处理计数，
+不是新增发音质量证据，不扩展为葡语或全局规则。
+
+返回Top20中包括g(207)、h(134)、barça(57)、abad-lima(34)、resultados-futbol(29)、
+guinea-bis(20)、são(14)、schäuble(11)及多种连字符词。大多detail=no_safe_proxy；
+guinea-bisáu(14)为missing_proxy_pronunciation。尚无全量原因分布，不能说全部是
+连字符或坏标注；不删除单字母、不自动拆词、不改写外来专名来凑100%覆盖。
+
+### 下一步：逐句候选Manifest与Temporal-2x容量审计
+
+现阶段无需强行解决所有659词才能检查容量。复用full-manifest builder，将每条
+源记录保留在ready或needs_review：存在任何缺词的整句保持review，禁止删除缺词后
+将部分标签作为完整训练答案。此为全池候选清单，不是最终train；split=unsplit。
+这取代早期“全词表missing=0才允许任何Manifest扫描”的过强限制，但不放宽最终
+入选句子的完整标签要求。
+
+保持既有西语allow-exact-dictionary-connectors：仅词典提供唯一、无OOV的完整
+发音时允许连接词；不会修复缺失的连字符词。先记录原1x可行性，再独立计算2x
+纯时间压力恢复，沿用q=(L+相邻重复数)/(2*T_est)<=0.90的候选阈值；这不是要求
+固定recovery占比，也不是ref phoneme/frame密度。所有非时间问题继续阻止恢复。
+q>0.90但<=1的困难项仅计为deferred，不删除。时长/帧来自音频metadata估计，
+不能冒充之后Qwen特征缓存的精确有效帧数。
+
+此扫描重新读取音频header，不重新哈希全部音频、不复制音频、不加载Qwen。
+旧builder仅保留source.tsv行号/路径，批次、文件SHA、原始source_id和分组提示
+仍在不可变candidates.jsonl；后续选样必须按唯一audio_path回连并验证一对一，
+不得把Gxxxx当已验证speaker或丢掉这份来源旁表。本轮不生成最终480h，不检查
+现有holdout交集，也不读取sealed test，容量不是最终train承诺。
+
+用户在容器内项目根目录运行以下块，无需为本次文档更新pull：
+
+```bash
+(
+set -e
+R=outputs/es_noah_mobile_source_v1_4bbc7edd5d
+F=outputs/es_noah_mobile_mfa_repaired_v1/final
+B=outputs/es_noah_mobile_full_manifest_v1
+A=outputs/es_noah_mobile_temporal2x_audit_v1
+V=configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json
+(cd "$R" && sha256sum -c sha256.txt)
+(cd "$F" && sha256sum -c sha256.txt)
+test ! -e "$B"
+test ! -e "$A"
+python -B scripts/build_full_training_manifest.py \
+  --tsv "$R/source.tsv" --audio-root /host_home \
+  --dictionary "$F/noah/noah_spanish_latin_america_repaired.v1.dict" \
+  --vocab "$V" --output-dir "$B" --language es-419 \
+  --dataset noah_es_mobile --id-prefix noah_es_mobile_row \
+  --split unsplit --allow-exact-dictionary-connectors --workers 16
+python -B scripts/audit_temporal2x_recovery.py \
+  --corpus "noah=$B" --output-dir "$A" \
+  --time-upsampling-factor 2 --release-max-effective-ratio 0.90
+)
+```
+
+返回两个终端summary JSON及SHA检查是否全部OK；不传Manifest或音频。重点核对
+source_records=ready+review=286821，总时长约499.999970h，以及original_ready、
+recommended recovery、other-issue blocked和deferred的数量/小时分区。issue计数
+可重叠，不能简单相加当作坏样本数。完整分组结果保存在A/noah.json；需要时只取
+其issue_analysis.reason_totals等小聚合，不索取大文件。
+
+首次必须使用不存在的B/A目录。builder支持相同输入SHA/config的分片resume：若
+中断，重新设置相同变量后仅重跑上面的builder命令；它会验证配置和已完成分片，
+不修改输入或别的outputs。完成后在A尚不存在时执行audit。若audit已完成，读取
+结果，不覆盖重跑；改变标签/配置须新建版本目录。
+
+本次只更新结果和下一步命令，未改代码或算法；git diff --check通过，未触碰用户
+未跟踪文件。主线仍为准备480h唯一、严格拉美西语train及独立validation。
+
 ## 0.109 2026-09-23 Noah独立G2P完成及残余修复计划（用户返回）
 
 用户执行0.108命令完成。源staging的sha256.txt列出的11项文件全部OK，包含
