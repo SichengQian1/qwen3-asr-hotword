@@ -1,5 +1,26 @@
 # 工作交接记录
 
+## 0.131 2026-09-23 wave近音词结构和旧补充库实测库存
+
+用户从0.130同一inventory报告回传字段预览，本地粘贴附件SHA256：
+8cab964f817e398dd002e075eb3fa5f4040a635d06c4c143a958207911912660。
+这是终端摘录，未取得完整report/sha256文件，本地不能重新计算工作区源文件哈希。
+
+- ES/PT近音词均为neighbors[parent]列表，每项含word/sim/count/phoneme；候选词
+  发音必须取项内phoneme。根keyword_phonemes是目标词发音，不能当候选词映射。
+- wave1 ES共有908个parent、n_vocab4116；PT834个parent、n_vocab2664。这些不是
+  四wave去重后可用补充词数量；其余wave仍须构建时逐文件检查相同结构。
+- 旧capacity_es/representative/size_4000/hotwords.jsonl实际4401行，SHA256
+  19d23505ad7719a404662b13b97481750bca549637028a7efc13de8a7ca08553。
+  PT对应文件4403行，SHA256
+  ac8f50fa6f6f14870d8ca97b7028a570f88ace81c31062c41da60228b2a5d4d3。
+  均位于outputs/en_es_pt_streaming_e2e_4k_formal100_v1下；目录名不代表实际行数。
+- 旧记录含surface/language/pronunciation/phoneme_tokens/token_ids等，构建时应
+  重新核对共享vocab和语言，不能仅复制或靠目录名推断4000条。
+
+现已具备实现词表构建的信息。目标仍为ES316/PT295全部必留，余量从相关近音词和
+旧库确定性补齐；尚未创建两份4000表或运行模型，本记录与后续实现分开提交。
+
 ## 0.130 2026-09-23 wave v2回传：ES并集316、59词含U+0303；已有西语训练规则可复用
 
 用户回传outputs/wave_keyword_inventory_v1_b704685dc1终端摘要，非完整report。
