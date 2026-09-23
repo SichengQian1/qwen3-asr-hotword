@@ -1,5 +1,41 @@
 # 工作交接记录
 
+## 0.112 2026-09-23 旧西语train/validation拉美范围复核通过（用户返回）
+
+用户返回audit_es_480h_capacity.py结果，scope_issue_count=0。
+train=125,379条/181.868357963056h，validation=2,871条/4.368367448611h。
+SLR61/Rioplatense沿用已批准来源范围，CV辅助池逐条回连明确拉美元数据；这不是
+声学口音分类或每条转写准确率证明。
+
+| 来源 | train小时 | validation小时 |
+|---|---:|---:|
+| SLR61 | 7.532729 | 0.239668 |
+| CV Rioplatense v26 | 14.899401 | 0.437847 |
+| 明确拉美CV辅助池 | 159.436228 | 3.690852 |
+
+回传身份：
+
+```text
+split_summary dfaaddc82ab8d35fb7aaf18ab818ad39523e6a17ad26aaf8fa7db9fdc7776040
+speaker_assignments a027a59c4cd76351507c297e6e7ec8a9bc99bd530887aaab196339f205b6a510
+train 617ae3723527dcdfd4c04ea7799bb68c7cfd13cb4cdd8386758d5aa31a9faa25
+validation 6d1d77ad4ffb26c40d48995ff5902fe98dc2a5a65de05f87fdc6787f040cca77
+CV inventory 77b3e3c65fc2bbe5d9d1af2c6fb45c7539de4e3e7d2c4c228226a384448d390e
+MLS summary 6624aace27fe771b4e96b232e527b4bec00350b95ecb3ccbd6061f446c75a636
+```
+
+工具未读取test manifest内容、音频或模型，无文件写入。其insufficient_raw_capacity
+指旧来源：181.868358h现有train+73.405812h未完成标签的CV原始候选=255.274170h。
+该工具未计Noah新增496.274765h；不能将224.725830h旧缺口误报成当前仍缺数据。
+新旧候选合计约678.143123h，当前计划保留旧train，从Noah补298.131642h。
+新增CV 73.405812h及无拉美依据的MLS不纳入本轮，避免无必要扩大来源准备范围。
+
+下一阶段量化batch/时长/密度分层选择和实际recovery比例，保留旧验证集身份。
+现有speaker切分器要求speaker_id，不得伪造Noah speaker以强行复用；先生成明确
+标为plan-only的固定候选ID清单和配置统计，后续补齐跨池内容去重/heldout保护后
+才生成最终训练Manifest。不把候选计划宣称480h训练已交付。
+本节为独立结果提交，仅文档修改，git diff --check通过。
+
 ## 0.111 2026-09-23 Noah逐句标签/CTC容量通过：496.274765h候选（用户返回）
 
 用户返回0.110的full-manifest和temporal2x审计输出。粘贴附件
