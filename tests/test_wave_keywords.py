@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 
 import pytest
 
 from qwen_hotword.evaluation.wave_keywords import WAVES, build_language, freeze_wave_keywords
+from qwen_hotword.hotwords.capacity_assets import _materialize_train_candidates
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab, tokenize_ipa_to_vocab
 from qwen_hotword.training.spanish_capacity import _sha
 
@@ -208,12 +210,10 @@ def test_deterministic_selection_never_uses_supplied_similarity_or_input_order()
     ]
 
 
-@pytest.mark.parametrize("problem", ["capacity", "old_tokens", "neighbor_schema", "language"])
+@pytest.mark.parametrize("problem", ["capacity", "neighbor_schema", "language"])
 def test_invalid_inputs_fail(problem):
     primary, neighbors, fillers = inputs()
-    if problem == "old_tokens":
-        fillers[0]["token_ids"] = [0]
-    elif problem == "neighbor_schema":
+    if problem == "neighbor_schema":
         neighbors["wave4"] = {"language": "es", "items": []}
     elif problem == "language":
         neighbors["wave4"]["language"] = "pt"
@@ -325,3 +325,104 @@ def test_neighbor_fallback_when_old_pool_too_small():
         "es", primary, neighbors, [], VOCAB, target_size=4, seed="fixed", expected_primary=1
     )
     assert result["summary"]["selected_by_source"] == {"primary": 1, "neighbor": 3}
+
+
+@pytest.mark.parametrize(
+    "lang,surface,phone,key",
+    [
+        ("es", "teórico-práctico", "t e o r i k o", "teórico práctico"),
+        ("pt", "d'água", "d a ɡ w a", "d água"),
+    ],
+)
+def test_real_capacity_producer_punctuation_compatible(lang, surface, phone, key):
+    candidates, rejected = _materialize_train_candidates(
+        {surface: (surface,)},
+        occurrence_counts={surface: 3},
+        dictionary={surface: [phone]},
+        vocab=VOCAB,
+        base_entries=[],
+        seed=1,
+        language=lang,
+    )
+    assert not rejected and len(candidates) == 1
+    primary, neighbors, _ = inputs(lang)
+    result = build_language(
+        lang,
+        primary,
+        neighbors,
+        [candidates[0].entry.to_dict()],
+        VOCAB,
+        target_size=3,
+        seed="fixed",
+        expected_primary=1,
+    )
+    entry = next(e for e in result["entries"] if e["source"] == "old_table")
+    assert entry["normalized"] == key
+    assert entry["surface"] == surface
+    assert entry["origins"][0]["old_normalized"] == surface
+    assert entry["token_ids"] == list(candidates[0].entry.token_ids)
+    assert result["summary"]["old_table_surface_normalization_updates"] == 1
+    assert result["summary"]["old_table_validation_issue_counts"] == {}
+
+
+def test_unicode_equivalent_legacy_phones_and_surface_deduplication():
+    primary, neighbors, fillers = inputs("pt")
+    row = fillers[1]
+    row.update(
+        surface="irmã", normalized=unicodedata.normalize("NFD", "irmã"), pronunciation="i x m ɐ̃"
+    )
+    tok = tokenize_ipa_to_vocab(row["pronunciation"], VOCAB)
+    row["token_ids"] = tok.token_ids
+    row["phoneme_tokens"] = [unicodedata.normalize("NFC", p) for p in tok.tokens]
+    result = build_language(
+        "pt", primary, neighbors, [row], VOCAB, target_size=3, seed="fixed", expected_primary=1
+    )
+    assert result["summary"]["old_table_validation_issue_counts"] == {}
+    assert any(
+        e["normalized"] == "irmã" and e["token_ids"] == tok.token_ids for e in result["entries"]
+    )
+
+
+def test_all_invalid_optional_rows_audited_and_valid_later_rows_used():
+    primary, neighbors, fillers = inputs()
+    invalid = [
+        {**fillers[0], "token_ids": [0]},
+        {**fillers[0], "normalized": "different word"},
+        {**fillers[0], "phoneme_tokens": ["a"]},
+        {**fillers[0], "pronunciation": "☃"},
+        {**fillers[0], "pronunciation": None},
+    ]
+    result = build_language(
+        "es",
+        primary,
+        neighbors,
+        invalid + fillers,
+        VOCAB,
+        target_size=4,
+        seed="fixed",
+        expected_primary=1,
+    )
+    assert result["summary"]["total"] == 4
+    assert result["summary"]["all_targets_retained"]
+    bad = [r for r in result["audit"] if r.get("reasons")]
+    assert [r["old_row_number"] for r in bad] == [1, 2, 3, 4, 5]
+    assert "normalized_surface_mismatch" in result["summary"]["old_table_validation_issue_counts"]
+    assert "phoneme_tokens_mismatch" in result["summary"]["old_table_validation_issue_counts"]
+    assert len(result["summary"]["old_table_validation_issue_examples"]) == 5
+
+
+def test_invalid_fillers_cannot_release_underfilled_table():
+    primary, neighbors, fillers = inputs()
+    for row in fillers:
+        row["token_ids"] = [False]
+    with pytest.raises(ValueError, match="old_table_issues=.*pronunciation_token_ids_mismatch"):
+        build_language(
+            "es",
+            primary,
+            neighbors,
+            fillers,
+            VOCAB,
+            target_size=4,
+            seed="fixed",
+            expected_primary=1,
+        )

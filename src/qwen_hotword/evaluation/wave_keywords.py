@@ -13,6 +13,7 @@ from qwen_hotword.inference.hotword_prompt import normalize_match_words
 from qwen_hotword.phonemes.coverage import (
     PhonemeVocab,
     load_phoneme_vocab,
+    normalization_key,
     tokenize_ipa_to_vocab,
 )
 from qwen_hotword.training.spanish_capacity import _sha, _verified
@@ -56,6 +57,43 @@ def _entry(surface: Any, phone: Any, lang: str, vocab: PhonemeVocab) -> dict[str
         "cleaned_pronunciation": cleaned,
         "cleanup": dict(cleanup),
     }
+
+
+def _old_entry_issues(row: dict[str, Any], vocab: PhonemeVocab) -> list[str]:
+    """Compare identities in their own domains; legacy surface punctuation is valid."""
+    issues = []
+    try:
+        # Capacity assets preserve intra-word apostrophes/hyphens. External matching
+        # separates punctuation. Compare both surfaces under the same matching rule.
+        if _key(row.get("surface")) != _key(row.get("normalized")):
+            issues.append("normalized_surface_mismatch")
+    except ValueError:
+        issues.append("invalid_surface_or_normalized")
+    phone = row.get("pronunciation")
+    if not isinstance(phone, str) or not phone.strip():
+        issues.append("missing_pronunciation")
+        return issues
+    original = tokenize_ipa_to_vocab(phone, vocab)
+    if original.oov_units or not original.token_ids:
+        issues.append("pronunciation_oov_or_empty")
+    ids = row.get("token_ids")
+    if (
+        not isinstance(ids, list)
+        or not ids
+        or any(type(i) is not int for i in ids)
+        or ids != original.token_ids
+    ):
+        issues.append("pronunciation_token_ids_mismatch")
+    phones = row.get("phoneme_tokens")
+    if (
+        not isinstance(phones, list)
+        or not phones
+        or any(not isinstance(p, str) for p in phones)
+        or [normalization_key(p) for p in phones] != [normalization_key(p) for p in original.tokens]
+    ):
+        # Match registry._entry_from_dict: NFC/NFD-equivalent phones are identical.
+        issues.append("phoneme_tokens_mismatch")
+    return issues
 
 
 def build_language(
@@ -177,20 +215,29 @@ def build_language(
     for index, row in enumerate(fillers):
         if row.get("language") != lang:
             raise ValueError(f"old table language mismatch: {lang}/{index}")
-        # Validate the old table against its original IPA before ES language cleanup.
-        phone = row.get("pronunciation")
-        if not isinstance(phone, str):
-            raise ValueError(f"old table missing pronunciation: {index}")
-        original = tokenize_ipa_to_vocab(phone, vocab)
-        if (
-            original.oov_units
-            or not original.token_ids
-            or original.token_ids != row.get("token_ids")
-            or [vocab.tokens[i] for i in original.token_ids] != row.get("phoneme_tokens")
-            or _key(row.get("surface")) != row.get("normalized")
-        ):
-            raise ValueError(f"old table vocab/normalization mismatch: {lang}/{index}")
-        add_optional(row["surface"], phone, "old_table", {"old_hotword_id": row.get("hotword_id")})
+        origin = {
+            "old_hotword_id": row.get("hotword_id"),
+            "old_row_number": index + 1,
+            "old_normalized": row.get("normalized"),
+            "old_phoneme_tokens": row.get("phoneme_tokens"),
+            "old_token_ids": row.get("token_ids"),
+        }
+        # Old entries are optional fillers. Audit every bad row, never silently
+        # accept incompatible IDs or stop the entire scan at the first bad filler.
+        issues = _old_entry_issues(row, vocab)
+        if issues:
+            audit.append(
+                {
+                    **origin,
+                    "source": "old_table",
+                    "surface": row.get("surface"),
+                    "original_pronunciation": row.get("pronunciation"),
+                    "decision": "excluded_invalid",
+                    "reasons": issues,
+                }
+            )
+            continue
+        add_optional(row["surface"], row["pronunciation"], "old_table", origin)
 
     for key in conflicts:
         for pool in pools.values():
@@ -216,7 +263,11 @@ def build_language(
     take("old_table", target_size - len(selected))
     take("neighbor", target_size - len(selected))  # shortage fallback; never duplicate a surface
     if len(selected) != target_size:
-        raise ValueError(f"insufficient valid unique words: {lang}={len(selected)}/{target_size}")
+        rejected = Counter(reason for r in audit for reason in r.get("reasons", []))
+        raise ValueError(
+            f"insufficient valid unique words: {lang}={len(selected)}/{target_size}; "
+            f"old_table_issues={dict(rejected)}; optional_conflicts={len(conflicts)}"
+        )
     for record in audit:
         key = record.get("normalized")
         if record["decision"] == "candidate":
@@ -249,6 +300,23 @@ def build_language(
             "ignored_non_target_parent_occurrences": ignored_parents,
             "optional_conflicting_surfaces": len(conflicts),
             "audit_decisions": dict(Counter(r["decision"] for r in audit)),
+            "old_table_validation_issue_counts": dict(
+                Counter(
+                    reason
+                    for r in audit
+                    if r["source"] == "old_table"
+                    for reason in r.get("reasons", [])
+                )
+            ),
+            "old_table_validation_issue_examples": [
+                r for r in audit if r["source"] == "old_table" and r.get("reasons")
+            ][:5],
+            "old_table_surface_normalization_updates": sum(
+                r["source"] == "old_table"
+                and "normalized" in r
+                and r["normalized"] != r.get("old_normalized")
+                for r in audit
+            ),
             "primary_cleanup_occurrences": dict(
                 sum((Counter(r["cleanup"]) for r in audit if r["source"] == "primary"), Counter())
             ),
