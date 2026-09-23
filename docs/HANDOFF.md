@@ -1,5 +1,79 @@
 # 工作交接记录
 
+## 0.127 2026-09-23 wave1–4西/葡4000热词与16份下游交付：输入盘点入口
+
+用户在480h缓存运行期间新增独立外部测试任务，最终使用另一张H200卡。宿主机仓库
+wave1、wave2、wave3、wave4各有es/pt，容器内仓库前缀为/host_home/star/q00933266/
+qwen3-asr-hotword。每组wav/、transcripts.txt、LANG_keyword_bias_phoneme.json及
+LANG_phonetic_neighbors_phoneme.json；不解包同级RAR，不改这些原文件。
+
+用户授权两步：第一步每语言取四wave目标热词并集，再由近音词和旧4000词表补到
+恰好4000个规范化词面，PT/ES各固定一份，供四个同语种wave共用；第二步按旧配置
+测试Top5/Top7，生成4wave×2语言×2K=16份Context Learning输入。不同wave即使有
+同名音频也必须分开交付，不合并为会覆盖stem的全局JSON。
+
+已核对0.76、0.78–0.79、0.82和external_keyword_retrieval/topk_replay源码：
+
+- 旧Context Learning完整音频路径为冻结Qwen encoder + 原三语temporal2x Head +
+  Anchor检索；不运行Qwen文本decoder，不属于暂停中的新机器纯推理移植。
+- 固定参数threshold0.75、Top5/7、posterior weight0.25/minimum0.5、edit ratio上限
+  0.35、margin0、minimum_phonemes1、Anchor ngrams2/3/4、per-entry24、offset1、
+  start radius2、shortlist64、保存raw排名深度20。不能与旧4k流式0.86门控混淆。
+- 下游schema保持音频stem -> [{"word": ..., "phoneme": ...}]；空召回保留[]。
+  Top7优先从同一次已存排名精确重放，先验证排名充分，避免重复Encoder工作。
+- 老入口硬编码pt-BR/Portuguese及external_pt ID，Top7出口来源映射仅支持MLS/
+  Delivery。后续须最小范围显式支持es及wave来源，不能把西语伪装成葡语直接运行。
+  本轮尚未修改检索核心/语言入口或生成任何16份结果，也不使用未完成的新480h Head。
+- 后续召回至少单列各wave原始目标词与transcript匹配的真值口径，另外报告4000词表
+  的整体结果/误触发，不能让新增普通填充词提高召回分母后冒充原目标热词结果。
+
+### 本轮交付：CPU输入结构与并集盘点
+
+本地没有新wave文件内容，仅有用户目录拓扑，尤其neighbors JSON结构尚未知。
+新增scripts/inspect_wave_keyword_inputs.py、evaluation/wave_inventory.py，先读取
+工作区实际结构，避免猜测字段、遗漏目标热词或静默挑一个冲突发音。
+
+- 读取8份primary和8份neighbor JSON，记录SHA、大小、有限深度的字段/样例；重复
+  JSON键报告问题，避免Python默认覆盖。未知primary schema报告需审查，不猜字段。
+- 对已知keyword_sets/keyword_phonemes结构，盘点所有声明set的并集（不默认选
+  空baseline），用现有匹配规范化去重，逐词检查IPA能否映射v0.2。报告完整文件数、
+  每语言并集数、距离4000缺额、同规范化词面不同token序列的冲突和有限示例。
+  任何某文件部分失败均标counts_are_partial，不将部分计数当完整并集。
+- wav/递归数WAV/FLAC文件，仅文件系统元数据；复用旧transcripts解析器，报告
+  源内stem重复、音频/文本缺配、各wave同名stem规模。跨wave同名只记录，后续分开
+  输出；不改ID。转写仅有前两条截断示例，不在本步运行召回。
+- 查找已记录旧库outputs/en_es_pt_streaming_e2e_4k_formal100_v1/capacity_LANG/
+  representative/size_4000/hotwords.jsonl，记录存在性、SHA、条数、两条样例。
+  找不到时不把库存当零或另找不明语言词表；回传后再明确补词来源。
+- 原始输入只读，输出新outputs/wave_keyword_inventory_v1_<随机后缀>/report.json
+  与sha256.txt；不读音频字节、不加载模型、不占GPU、不碰训练/cache输出。
+  status=inventory_completed仅表示盘点完成；tables_created=false是预期状态，
+  不能称两份4000表已经生成。近音词抽样配比待实际库存明确后固定并记录来源与seed，
+  不根据本次测试预测/错误来挑补充词或调门控。
+
+工作分支codex/g2p-coverage-scan；容器外项目根目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录只需一条，不选GPU：
+
+```bash
+python -B scripts/inspect_wave_keyword_inputs.py
+```
+
+回传终端return_files指向的report.json与sha256.txt两个小文件。终端仅打印数量与
+问题，完整结构样例在report内，因此需要report而非只有终端摘要。不上传wav、RAR、
+完整neighbors文件或模型。可在新目录内sha256sum -c sha256.txt核验。无resume，
+重复运行创建新目录；显式--output-dir拒绝已有目录，原所有outputs保持。
+
+6项定向测试通过，覆盖两语四wave并集、两类释放文件结构、发音冲突/OOV/未知schema、
+音文缺配、重复JSON键、有限preview、原始输入不变；全量369 passed/23 skipped。
+新增Ruff/strict Mypy及CLI help通过，git diff --check通过；全仓仍既有5处E501、
+3处unused-ignore，无新增。后续需用户回传结构才能完成第一步4000词表正式发布。
+
 ## 0.126 2026-09-23 三语480h固定训练配置与H200 smoke/cache入口（待执行）
 
 用户同意进入训练配置及特征缓存准备。本次新增configs/480h_training.workzone.json、
