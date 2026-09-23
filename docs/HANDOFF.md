@@ -1,5 +1,73 @@
 # 工作交接记录
 
+## 0.139 2026-09-23 全量缓存验收后交付5epoch训练及续训短入口
+
+缓存实测完成结果已在独立提交15028ce/0.138记录。用户授权进入训练下一阶段。
+本次仅扩展scripts/run_multilingual_480h.py的pilot/formal执行入口，调用原有
+train_full_ctc.py，不改Head、CTC算法、采样、冻结配置或既有outputs。
+分支codex/g2p-coverage-scan，最终推送SHA见回复。
+
+先在容器外项目目录拉取：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录，4替换为用户分配的空闲物理H200编号：
+
+```bash
+python -B scripts/run_multilingual_480h.py pilot --gpu 4
+```
+
+这里pilot是完整958519条/1440小时数据训练5epoch，不是小样本smoke。使用
+0.126固定的随机新Head、temporal2x/h512/k5/dropout0.1、batch256、LR3e-4、
+seed20260825、all_samples_once，每轮每条一次；验证8,101条，三语Macro PER
+选择checkpoint，原LR scheduler/early stopping不变。不加载完整Qwen、不做新
+Encoder推理，只读取既有冻结缓存；test不参与。首次缓存SHA核验需读取约140GB，
+在进入训练前有存储I/O等待属于预期。随后逐shard读取，单GPU，显存建议20–30GiB。
+未实测本次训练耗时，不以缓存提取耗时推算训练完成时间。
+
+入口要求既有run_plan及配置/所有输入SHA一致、smoke完成、cache根报告和两split
+status/count/path匹配、test_set_used=false。原trainer继续严格核验所有shard
+SHA、manifest/vocab身份、分片完成度和恢复指纹；不传skip校验选项。使用新的
+outputs/multilingual_480h_run_v1/head/，与smoke_head/隔离。已有head目录首次命令
+拒绝，不自动覆盖或随机重启；中断且存在training_state_latest.pt时明确恢复：
+
+```bash
+python -B scripts/run_multilingual_480h.py pilot --gpu 4 --resume
+```
+
+恢复Head、optimizer和scheduler，从最近完整epoch继续；未完成epoch会重跑。
+若尚无state文件则恢复拒绝，保留现场诊断，不删除输出。正式5epoch完成后返回
+pilot_completed及head_report，检查分语言PER、Macro PER、loss和耗时，再决定继续。
+5epoch结果不能直接用作最终扩量有效/无效结论。后续经结果审查使用：
+
+```bash
+python -B scripts/run_multilingual_480h.py formal --gpu 4
+```
+
+formal要求head状态文件及已完成至少5epoch的report，自动传--resume，总预算30epoch
+（不是另加30）。中断后同一formal命令恢复，不重新初始化；不自动从pilot跳转formal。
+配置文件未改，所以既有run_plan和缓存可复用。每次训练前后复核已冻结输入身份。
+
+用户完成pilot后只需返回以下小文件，不上传缓存或权重：
+
+- outputs/multilingual_480h_run_v1/head/report.json
+- outputs/multilingual_480h_run_v1/head/metrics.jsonl
+
+可一并回传身份摘要：
+
+```bash
+sha256sum outputs/multilingual_480h_run_v1/head/{report.json,metrics.jsonl,ctc_head_best.pt}
+```
+
+新增9项用例验证fresh/resume、正式阶段前置、缓存数量/状态/路径、test标记、输入
+与配置漂移、运行后复验及不调用Encoder；定向19 passed，全量434 passed/23 skipped。
+修改范围Ruff/strict Mypy、CLI help及git diff --check通过。全仓Ruff仍5处既有E501，
+全仓Mypy仍3处既有unused-ignore；无新增错误。本地为模拟流程测试，不冒充H200
+真实训练结果。下一次用户回传后再单独记录训练实测里程碑。
+
 ## 0.138 2026-09-23 三语480h全量特征缓存完成（H200回传）
 
 用户返回status=cache_completed，根目录outputs/multilingual_480h_run_v1，

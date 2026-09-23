@@ -272,6 +272,61 @@ def verify_smoke(output: Path) -> dict[str, Any]:
     return report
 
 
+def run_training_stage(
+    config: dict[str, Any], output: Path, stage: str, gpu: str, *, resume: bool = False
+) -> dict[str, Any]:
+    """Train only the Head from completed caches; never implicitly start or rebuild a run."""
+    if stage not in {"pilot", "formal"} or not gpu.isdecimal():
+        raise ValueError("choose pilot/formal and exactly one physical GPU integer")
+    with exclusive_feature_cache_run(output.parent / f".{output.name}.orchestration"):
+        plan = json.loads((output / "run_plan.json").read_text())
+        if plan["config"] != config:
+            raise ValueError("run configuration changed; use a new run directory")
+        for filename, digest in plan["input_sha256"].items():
+            _pin(Path(filename), digest, {})
+        verify_smoke(output)
+        cache = json.loads((output / "cache/feature_cache_report.json").read_text())
+        if cache["status"] != "pass" or cache.get("test_set_used") is not False:
+            raise ValueError("completed train/validation cache required")
+        for split in ("train", "validation"):
+            if (
+                cache[split]["status"] != "pass"
+                or cache[split]["sample_count"] != plan[split]["records"]
+                or Path(cache[split]["output_dir"]).resolve() != output / "cache" / split
+            ):
+                raise ValueError(f"cache count/status/path mismatch: {split}")
+        head = output / "head"
+        if stage == "formal" or resume:
+            if not (head / "training_state_latest.pt").is_file():
+                raise FileNotFoundError("Head training state required for resume")
+        elif head.exists():
+            raise FileExistsError("head output exists; use pilot --resume, never overwrite")
+        if stage == "formal":
+            pilot = json.loads((head / "report.json").read_text())
+            if pilot["status"] != "completed" or pilot["epochs_completed"] < 5:
+                raise ValueError("complete the five-epoch pilot before formal continuation")
+        cmd = commands(config, output, stage)[0]
+        if resume and "--resume" not in cmd:
+            cmd.append("--resume")
+        # The trainer verifies every shard SHA and the cache manifest/vocab identities itself.
+        # No skip-verification flag, model extraction, or smoke weights are supplied here.
+        print("Running: " + " ".join(cmd), flush=True)
+        subprocess.run(cmd, env=dict(os.environ, CUDA_VISIBLE_DEVICES=gpu), check=True)
+        for filename, digest in plan["input_sha256"].items():
+            _pin(Path(filename), digest, {})
+        report = json.loads((head / "report.json").read_text())
+        if report["status"] != "completed":
+            raise ValueError("Head training did not complete")
+        return {
+            "status": f"{stage}_completed",
+            "output_dir": str(head),
+            "run_plan_sha256": _sha(output / "run_plan.json"),
+            "head_report": report,
+            "return_files": [str(head / name) for name in ("report.json", "metrics.jsonl")],
+            "test_set_used": False,
+        }
+
+
 def run_stage(config: dict[str, Any], output: Path, stage: str, gpu: str) -> dict[str, Any]:
     if stage not in {"smoke", "cache"}:
         raise ValueError("only smoke and cache execute here; formal training is a separate step")
