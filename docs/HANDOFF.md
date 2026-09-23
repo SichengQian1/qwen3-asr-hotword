@@ -1,5 +1,46 @@
 # 工作交接记录
 
+## 0.130 2026-09-23 wave v2回传：ES并集316、59词含U+0303；已有西语训练规则可复用
+
+用户回传outputs/wave_keyword_inventory_v1_b704685dc1终端摘要，非完整report。
+本地粘贴附件SHA为6c6395187745578a2c20964524538bd9667961ce89f0d6bfa453e54e6b40ab25。
+8组仍各100条音频/转写，无ID对应错误；两语言的四个primary文件都已完整扫描。
+
+- ES规范化并集316，补到4000缺3684；59个规范化词至少有一项不可映射，唯一
+  OOV单元为U+0303 COMBINING TILDE。127是所有wave记录累计的OOV单元出现次数，
+  不是127个唯一词。每wave异常词面32/32/28/31，包含跨wave重复。
+- 已映射发音冲突为0，但phoneme_conflict_check_incomplete=true，不能在修复并
+  重新核验全部316词之前宣称全部发音一致。PT并集295、缺3705、不可映射0、
+  冲突0，primary_phonemes_ready=true。两语言均无跨wave共享stem。
+- 样例Adrián为/a ð ɾ j ã n/；v0.2共享vocab有PT的ɐ̃、ĩ、õ等，但无ã，
+  tokenizer按NFD匹配时得到a及独立未识别U+0303。因此不是一般NFC/NFD编码
+  转换就能解决，不能给西语随意映射到PT的ɐ̃或扩大已有Head输出类别。
+- 已核对training/spanish_mfa_repair.py的repair_spanish_pronunciation及历史
+  西语G2P诊断：原训练字典已使用语言限定的去鼻化标记规则。后续新ES热词表
+  应复用该函数rules=()（无代理拼写glide规则），保存原IPA/处理后IPA和变更计数；
+  必须对所有ES发音使用同一训练口径，而非仅改报OOV的59词。PT不调用此清理，
+  保留PT鼻元音；不改共享tokenizer/vocab、词面拼写、训练标签或现有输出。
+- 本地仅对回传的5个不同发音样例调用已有函数，全部转换后OOV=0；例如Adrián
+  变为/a ð ɾ j a n/。这验证了示例兼容性，不能冒充对工作区全316词的检查，也
+  不证明音频实际发音正确。本轮没有新增算法代码或创建4000词表。
+
+剩余信息仅在用户已有report里：neighbors结构与旧4000表库存。无需再次扫描或
+更新工作区代码。在容器内项目目录只读提取以下字段并回传即可：
+
+```bash
+R=outputs/wave_keyword_inventory_v1_b704685dc1/report.json
+jq '{
+  es_neighbors: .json_files["wave1/es/phonetic_neighbors_phoneme"].root_fields,
+  pt_neighbors: .json_files["wave1/pt/phonetic_neighbors_phoneme"].root_fields,
+  old_4000_tables
+}' "$R"
+```
+
+也可直接返回完整report.json与sha256.txt。得到实际字段后继续4000表构建，构建
+时仍要逐wave校验schema，不根据wave1盲猜所有文件；主词全部保留、冲突阻断、
+补词规范化去重、来源/seed/变更审计及SHA固定。16份Top5/Top7交付仍待下一阶段。
+本轮仅新增此结果记录；已有函数的5项实际样例验证及git diff --check通过。
+
 ## 0.129 2026-09-23 wave盘点v2：OOV逐词继续，分离词面并集与音素可用性
 
 0.128用户实测摘要已独立提交2a36189。本轮只修复evaluation/wave_inventory.py的
