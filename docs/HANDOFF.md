@@ -1,5 +1,59 @@
 # 工作交接记录
 
+## 0.122 2026-09-23 复用指纹的只读冲突诊断入口（待H200执行）
+
+0.121结果已独立提交0e979a3；用户粘贴附件本地SHA为
+346e6a78da415e3df18f6d1d1358e17db6d81d9b665b3b22f24a4239483e2a2e。
+新增scripts/audit_multilingual_480h_conflicts.py、training/audio_conflict_audit.py，
+默认配置configs/480h_conflict_audit.workzone.json绑定ae7eae83de冲突目录。
+
+此步只读已有report、audio_fingerprints和en/es/pt.pending.jsonl；分别对照原目录
+sha256.txt验证身份，并在结束前复验。不会再次读取153.69GB音频，不运行模型，
+不写任何文件，不修改/删除清单或音频，也不打开validation/test文本或音素标签。
+fingerprints仍代表0.121扫描时的文件内容，不宣称重新校验了此刻的音频字节。
+
+1. 从完整指纹重算总文件数、字节数、唯一训练SHA数和全部冲突组数，要求与冻结
+   report完全一致；按SHA合并组，因此两类冲突重叠不会重复计入待处理训练行。
+2. 关联所有冲突train路径到三个pending清单，核验split/language及完整条数小时；
+   缺失关联阻断。报告影响范围和拟剔除范围的language/source/release条数小时。
+3. train/validation与train/test分别报告组数及涉及train条数小时；同组同时关联
+   val和test单独列出。保护路径可能是未释放源行组成的超集，不据此断言每个冲突
+   都已进入某次模型评测。当前仍不能据Top10判断所有来源或历史Head的数据污染。
+4. 只提出以下处理方案，不实际执行：
+   - 含heldout副本：保留heldout，提出移除该SHA组全部train副本；
+   - 纯train重复且language/text/phoneme_token_ids完全相同、时长一致：按ID/路径
+     固定排序提出保留第一个、移除其余副本；
+   - 纯train重复但上述标签或时长存在差异：提出全组隔离，不猜哪个标签正确；
+   - 仅heldout内部冲突：单独标记需处理，不能靠删除train解决。
+5. 原文完全相同是保守判据；标点/大小写不同也会标为差异，而非宣称转写已错。
+   原文及音素序列不打印，Top-N仅返回必要ID/路径/来源/小时和差异布尔值。
+6. 输出拟剔除后的每语种条数小时、达到480h所缺小时、拟剔除ID集合SHA和每类最多
+   3组例子（每组最多3个train/heldout例子）。任何补入音频以后仍须与保留train和
+   全部heldout做内容去重，不能凭不同路径或剩余库存足够直接放行。
+
+工作分支codex/g2p-coverage-scan。容器外项目目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录：
+
+```bash
+python -B scripts/audit_multilingual_480h_conflicts.py
+```
+
+返回终端JSON即可。此次无新输出目录、无resume、无GPU或音频读取；可重复只读
+运行。不要重跑freeze来获得同样的阻断。status=completed仅指诊断完成，最终
+training_ready仍false。待回传影响小时/标签差异后，在新版本计划中处理train，
+按原source/release/density层补足，并保持原validation/test不改。
+
+新增7项pytest验证含原因重叠去重计数、同音频文本/音素/时长差异、完整来源关联、
+只读输入不变、损坏指纹/摘要/计划阻断；定向通过。全量347 passed/23 skipped；
+新增Ruff/strict Mypy、CLI help和git diff --check通过。全仓仍5处既有E501和
+3处既有unused-ignore，无新增问题。未触碰用户未跟踪文件或已有outputs。
+
 ## 0.121 2026-09-23 三语480h冻结被音频字节冲突阻断（用户返回）
 
 工作区outputs/multilingual_480h_training_v1_ae7eae83de完成全部文件指纹扫描，
