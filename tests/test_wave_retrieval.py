@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -383,3 +384,82 @@ def test_checked_in_480h_config_changes_only_head_provenance_and_output():
         assert old[key] == new[key]
     assert old["output"] != new["output"]
     assert new["checkpoint"].endswith("multilingual_480h_run_v1/head/ctc_head_best.pt")
+
+
+def table_comparison_fixture(root):
+    trained = trained_fixture(root)
+    near_plan, _ = prepare_run(root, trained)
+    write(root / "near/run_config.json", near_plan)
+    shutil.copytree(root / "tables", root / "old_only_tables")
+    report = {"status": "completed", "tables_created": True, "languages": {}}
+    for lang in ("es", "pt"):
+        p = root / "old_only_tables" / lang / "keyword_bias_phoneme.json"
+        data = json.loads(p.read_text())
+        words = data["keyword_sets"]["all_keywords"]
+        words.remove("word0")
+        words.append("zzz filler")
+        del data["keyword_phonemes"]["word0"]
+        data["keyword_phonemes"]["zzz filler"] = "a"
+        write(p, data)
+        report["languages"][lang] = {
+            "filler_policy": "old_only_exclude_supplied",
+            "selected_optional_supplied_neighbor_overlap": 0,
+            "selected_by_source": {"primary": 1, "old_table": 7},
+        }
+    write(root / "old_only_tables/report.json", report)
+    sign(root / "old_only_tables")
+    cfg = json.loads(trained.read_text())
+    cfg.update(
+        tables="old_only_tables",
+        comparison_change="keyword_table",
+        comparison_run_config="near/run_config.json",
+        expected_filler_policy="old_only_exclude_supplied",
+    )
+    config = root / "old_only_config.json"
+    write(config, cfg)
+    return config, near_plan
+
+
+def test_table_comparison_reindexes_targets_and_preserves_delivery_schema(tmp_path, monkeypatch):
+    cfg, previous = table_comparison_fixture(tmp_path)
+    plan, _ = prepare_run(tmp_path, cfg)
+    assert plan["groups"]["wave1_es"]["target_ids"] != previous["groups"]["wave1_es"]["target_ids"]
+    calls, factory, retrieve = mocks(monkeypatch)
+    output = tmp_path / "new_run"
+    report = run_waves(tmp_path, cfg, output, detector_factory=factory, retrieve_function=retrieve)
+    assert report["delivery_file_count"] == 16 and report["top7_exact_replay"]
+    for path in (output / "delivery").glob("*.json"):
+        data = json.loads(path.read_text())
+        assert set(data) == {"same", "empty"} and data["empty"] == []
+        assert all(set(r) == {"word", "phoneme"} for r in data["same"])
+
+
+@pytest.mark.parametrize("kind", ["head", "phones", "targets", "overlap", "gate"])
+def test_table_comparison_rejects_other_changes(tmp_path, kind):
+    cfg, _ = table_comparison_fixture(tmp_path)
+    tables = tmp_path / "old_only_tables"
+    if kind == "head":
+        (tmp_path / "new_head.pt").write_bytes(b"different head")
+    elif kind == "phones":
+        p = tables / "es/keyword_bias_phoneme.json"
+        data = json.loads(p.read_text())
+        data["keyword_phonemes"]["word6"] = "e"
+        write(p, data)
+        sign(tables)
+    elif kind == "targets":
+        p = tables / "es/targets_by_wave.json"
+        write(p, {f"wave{i}": ["word5"] for i in range(1, 5)})
+        sign(tables)
+    elif kind == "overlap":
+        p = tables / "report.json"
+        data = json.loads(p.read_text())
+        data["languages"]["es"]["selected_optional_supplied_neighbor_overlap"] = 1
+        write(p, data)
+        sign(tables)
+    else:
+        p = tmp_path / "near/run_config.json"
+        data = json.loads(p.read_text())
+        data["groups"]["wave1_es"]["config"]["gate"]["threshold"] = 0.9
+        write(p, data)
+    with pytest.raises(ValueError):
+        prepare_run(tmp_path, cfg)

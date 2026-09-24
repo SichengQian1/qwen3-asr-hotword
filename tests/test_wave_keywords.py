@@ -499,3 +499,93 @@ def test_full_freeze_preserves_mixed_legacy_language_provenance(tmp_path):
         next(e for e in entries if e["normalized"] == "otro")["origins"][0]["old_language"]
         == "pt-BR"
     )
+
+
+@pytest.mark.parametrize("lang", ["es", "pt"])
+def test_old_only_excludes_all_supplied_neighbors_but_keeps_targets(lang):
+    primary, neighbors, fillers = inputs(lang)
+    neighbors["wave1"]["neighbors"]["unrelated"] += [
+        {"word": "Mesa", "phoneme": "☃"},
+        {"word": " CASA ", "phoneme": "☃"},
+    ]
+    result = build_language(
+        lang,
+        primary,
+        neighbors,
+        fillers,
+        VOCAB,
+        target_size=2,
+        seed="fixed",
+        expected_primary=1,
+        filler_policy="old_only_exclude_supplied",
+    )
+    assert {e["normalized"] for e in result["entries"]} == {"casa", "otro"}
+    summary = result["summary"]
+    assert summary["selected_by_source"] == {"primary": 1, "old_table": 1}
+    assert summary["excluded_old_supplied_neighbor_surfaces"] == 2
+    assert summary["selected_optional_supplied_neighbor_overlap"] == 0
+    assert summary["mandatory_supplied_neighbor_overlap"] == 1
+    assert summary["neighbor_target"] == 0
+    assert all(r["source"] != "neighbor" for r in result["audit"])
+
+
+def test_old_only_no_neighbor_fallback_and_aggregated_capacity_no_outputs(tmp_path):
+    path = fixture_files(tmp_path)
+    cfg = json.loads(path.read_text())
+    cfg["filler_policy"] = "old_only_exclude_supplied"
+    path.write_text(json.dumps(cfg))
+    output = tmp_path / "not_released"
+    result = freeze_wave_keywords(tmp_path, path, output)
+    assert result["status"] == "insufficient_capacity"
+    assert not result["tables_created"] and not output.exists()
+    for summary in result["languages"].values():
+        assert summary["available_total"] == 3 and summary["missing"] == 1
+        assert summary["excluded_old_supplied_neighbor_surfaces"] == 1
+
+
+def test_old_only_4000_deterministic_and_old_phone_used_without_neighbor_conflicts():
+    primary, neighbors, _ = inputs()
+    template = inputs()[2][1]
+    fillers = [{**template, "surface": f"item {i}", "normalized": f"item {i}"} for i in range(4401)]
+    neighbors["wave1"]["neighbors"]["casa"].append({"word": "ITEM 0", "phoneme": "☃"})
+    kwargs = dict(
+        target_size=4000,
+        seed="fixed",
+        expected_primary=1,
+        filler_policy="old_only_exclude_supplied",
+    )
+    result = build_language("es", primary, neighbors, fillers, VOCAB, **kwargs)
+    other = build_language("es", primary, neighbors, list(reversed(fillers)), VOCAB, **kwargs)
+    assert result["summary"]["selected_by_source"] == {"primary": 1, "old_table": 3999}
+    assert result["summary"]["selected_optional_supplied_neighbor_overlap"] == 0
+    assert [(e["normalized"], e["token_ids"]) for e in result["entries"]] == [
+        (e["normalized"], e["token_ids"]) for e in other["entries"]
+    ]
+    assert "item 0" not in {e["normalized"] for e in result["entries"]}
+
+
+def test_old_only_full_freeze_preserves_schema_hashes_and_original_files(tmp_path):
+    path = fixture_files(tmp_path)
+    cfg = json.loads(path.read_text())
+    cfg.update(filler_policy="old_only_exclude_supplied", target_size=3)
+    path.write_text(json.dumps(cfg))
+    before = {p: _sha(p) for p in tmp_path.rglob("*") if p.is_file()}
+    out = tmp_path / "release"
+    report = freeze_wave_keywords(tmp_path, path, out)
+    assert report["tables_created"]
+    for lang in ("es", "pt"):
+        table = json.loads((out / lang / "keyword_bias_phoneme.json").read_text())
+        assert set(table["keyword_sets"]["all_keywords"]) == {"Casa", "Mesa", "Otro"}
+        assert report["languages"][lang]["selected_optional_supplied_neighbor_overlap"] == 0
+    assert before == {p: _sha(p) for p in before}
+    for line in (out / "sha256.txt").read_text().splitlines():
+        digest, name = line.split(maxsplit=1)
+        assert _sha(out / name) == digest
+
+
+def test_old_only_configs_pin_expected_counts_and_reuse_seed():
+    old = json.loads(Path("configs/wave_4000_keywords.workzone.json").read_text())
+    new = json.loads(Path("configs/wave_4000_keywords_old_only.workzone.json").read_text())
+    assert new["filler_policy"] == "old_only_exclude_supplied"
+    assert all(new[k] == v for k, v in old.items())
+    assert new["expected_primary_counts"] == {"es": 316, "pt": 295}

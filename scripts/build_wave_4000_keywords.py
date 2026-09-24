@@ -23,10 +23,11 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
-    output = (
-        args.output_dir or args.root / "outputs" / f"wave_4000_keywords_v1_{uuid.uuid4().hex[:10]}"
-    )
     try:
+        cfg = json.loads(args.config.read_text())
+        output = args.output_dir or args.root / cfg.get(
+            "output", f"outputs/wave_4000_keywords_v1_{uuid.uuid4().hex[:10]}"
+        )
         report = freeze_wave_keywords(args.root.resolve(), args.config, output.resolve())
     except (ValueError, OSError, KeyError, TypeError) as error:
         print(json.dumps({"status": "failed", "error": str(error)}, ensure_ascii=False, indent=2))
@@ -34,7 +35,7 @@ def main() -> int:
     print(
         json.dumps({k: v for k, v in report.items() if k != "inputs"}, ensure_ascii=False, indent=2)
     )
-    return 0
+    return 0 if report["tables_created"] else 1
 
 
 if __name__ == "__main__":

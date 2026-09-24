@@ -1,0 +1,24 @@
+{
+  "tables": "outputs/wave_4000_keywords_old_only_v1",
+  "inventory": "outputs/wave_keyword_inventory_v1_b704685dc1",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "checkpoint": "outputs/multilingual_480h_run_v1/head/ctc_head_best.pt",
+  "training_provenance": {
+    "run_plan": "outputs/multilingual_480h_run_v1/run_plan.json",
+    "run_plan_sha256": "d146173589b915a862344df12d6d3725ff5779067530a75cfd9d700ac8a32e99",
+    "report": "outputs/multilingual_480h_run_v1/head/report.json",
+    "best_epoch": 25
+  },
+  "comparison_run_config": "outputs/wave_4000_retrieval_480h_v1/run_config.json",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "expected_keywords": 4000,
+  "expected_primary": {
+    "es": 316,
+    "pt": 295
+  },
+  "expected_samples_per_group": 100,
+  "output": "outputs/wave_4000_retrieval_480h_old_only_v1",
+  "comparison_change": "keyword_table",
+  "expected_filler_policy": "old_only_exclude_supplied"
+}

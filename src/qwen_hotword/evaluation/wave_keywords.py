@@ -23,6 +23,14 @@ from qwen_hotword.training.spanish_mfa_repair import repair_spanish_pronunciatio
 WAVES = ("wave1", "wave2", "wave3", "wave4")
 
 
+class InsufficientWaveCapacity(ValueError):
+    """A complete scan found too few optional words; never publish a partial table."""
+
+    def __init__(self, message: str, summary: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.summary = summary
+
+
 def _check_language(value: Any, expected: str, context: str) -> None:
     """Use the producer's aliases for every input, without accepting unknown dialects."""
     try:
@@ -121,10 +129,13 @@ def build_language(
     target_size: int,
     seed: str,
     expected_primary: int,
+    filler_policy: str = "mixed_neighbors",
 ) -> dict[str, Any]:
     """Mandatory targets first; conflicting optional pronunciations are quarantined."""
     if lang not in {"es", "pt"} or target_size < 1:
         raise ValueError("invalid language/target size")
+    if filler_policy not in {"mixed_neighbors", "old_only_exclude_supplied"}:
+        raise ValueError("unknown filler policy")
     if set(primary) != set(WAVES) or set(neighbors) != set(WAVES):
         raise ValueError("all four waves are required")
     mandatory: dict[str, dict[str, Any]] = {}
@@ -132,6 +143,7 @@ def build_language(
     audit: list[dict[str, Any]] = []
     pools: dict[str, dict[str, dict[str, Any]]] = {"neighbor": {}, "old_table": {}}
     conflicts: set[str] = set()
+    supplied_neighbors: set[str] = set()
 
     for wave in WAVES:
         raw = primary[wave]
@@ -205,6 +217,11 @@ def build_language(
         for parent, candidates in sorted(mapping.items()):
             if not isinstance(candidates, list) or any(not isinstance(c, dict) for c in candidates):
                 raise ValueError(f"{wave}/{parent}: malformed neighbor list")
+            for item in candidates:
+                supplied_neighbors.add(_key(item.get("word")))
+            if filler_policy != "mixed_neighbors":
+                # All supplied neighbor surfaces are excluded, regardless of parent or IPA.
+                continue
             if _key(parent) not in mandatory:
                 ignored_parents += 1
                 continue
@@ -262,6 +279,11 @@ def build_language(
             continue
         add_optional(row["surface"], row["pronunciation"], "old_table", origin)
 
+    excluded_supplied = set()
+    if filler_policy == "old_only_exclude_supplied":
+        excluded_supplied = set(pools["old_table"]) & supplied_neighbors
+        for key in excluded_supplied:
+            pools["old_table"].pop(key)
     for key in conflicts:
         for pool in pools.values():
             pool.pop(key, None)
@@ -281,21 +303,39 @@ def build_language(
                 selected[key] = pools[source][key]
                 count += 1
 
-    neighbor_target = (target_size - len(mandatory)) // 2
+    neighbor_target = (
+        (target_size - len(mandatory)) // 2 if filler_policy == "mixed_neighbors" else 0
+    )
     take("neighbor", neighbor_target)
     take("old_table", target_size - len(selected))
-    take("neighbor", target_size - len(selected))  # shortage fallback; never duplicate a surface
+    if filler_policy == "mixed_neighbors":
+        take("neighbor", target_size - len(selected))  # never duplicate a surface
     if len(selected) != target_size:
         rejected = Counter(reason for r in audit for reason in r.get("reasons", []))
-        raise ValueError(
+        raise InsufficientWaveCapacity(
             f"insufficient valid unique words: {lang}={len(selected)}/{target_size}; "
-            f"old_table_issues={dict(rejected)}; optional_conflicts={len(conflicts)}"
+            f"old_table_issues={dict(rejected)}; optional_conflicts={len(conflicts)}; "
+            f"missing={target_size - len(selected)}",
+            {
+                "status": "insufficient_capacity",
+                "mandatory": len(mandatory),
+                "available_total": len(selected),
+                "target_size": target_size,
+                "missing": target_size - len(selected),
+                "eligible_optional_by_source": {k: len(v) for k, v in pools.items()},
+                "excluded_old_supplied_neighbor_surfaces": len(excluded_supplied),
+                "mandatory_supplied_neighbor_overlap": len(set(mandatory) & supplied_neighbors),
+                "old_table_issues": dict(rejected),
+                "optional_conflicts": len(conflicts),
+            },
         )
     for record in audit:
         key = record.get("normalized")
         if record["decision"] == "candidate":
             record["decision"] = (
-                "excluded_conflict"
+                "excluded_supplied_neighbor"
+                if key in excluded_supplied
+                else "excluded_conflict"
                 if key in conflicts
                 else "selected_origin"
                 if key in selected and selected[key]["source"] == record["source"]
@@ -316,6 +356,13 @@ def build_language(
         "targets_by_wave": by_wave,
         "summary": {
             "total": len(entries),
+            "filler_policy": filler_policy,
+            "excluded_old_supplied_neighbor_surfaces": len(excluded_supplied),
+            "supplied_neighbor_unique_surfaces": len(supplied_neighbors),
+            "selected_optional_supplied_neighbor_overlap": len(
+                (set(selected) - set(mandatory)) & supplied_neighbors
+            ),
+            "mandatory_supplied_neighbor_overlap": len(set(mandatory) & supplied_neighbors),
             "mandatory": len(mandatory),
             "selected_by_source": dict(Counter(e["source"] for e in entries)),
             "neighbor_target": neighbor_target,
@@ -373,6 +420,7 @@ def freeze_wave_keywords(root: Path, config_path: Path, output: Path) -> dict[st
         raise ValueError("inventory vocab identity mismatch")
     vocab = load_phoneme_vocab(vocab_path)
     built = {}
+    shortages = {}
     for lang in ("es", "pt"):
         inputs: dict[str, dict[str, Any]] = {
             "keyword_bias_phoneme": {},
@@ -393,19 +441,33 @@ def freeze_wave_keywords(root: Path, config_path: Path, output: Path) -> dict[st
             for s in old_path.read_text(encoding="utf-8").splitlines()
             if s.strip()
         ]
-        built[lang] = build_language(
-            lang,
-            inputs["keyword_bias_phoneme"],
-            inputs["phonetic_neighbors_phoneme"],
-            fillers,
-            vocab,
-            target_size=config["target_size"],
-            seed=config["seed"],
-            expected_primary=config["expected_primary_counts"][lang],
-        )
+        try:
+            built[lang] = build_language(
+                lang,
+                inputs["keyword_bias_phoneme"],
+                inputs["phonetic_neighbors_phoneme"],
+                fillers,
+                vocab,
+                target_size=config["target_size"],
+                seed=config["seed"],
+                expected_primary=config["expected_primary_counts"][lang],
+                filler_policy=config.get("filler_policy", "mixed_neighbors"),
+            )
+        except InsufficientWaveCapacity as error:
+            shortages[lang] = error.summary
     for input_name, identity in identities.items():
         if _sha(Path(input_name)) != identity["sha256"]:
             raise ValueError(f"input changed during build: {input_name}")
+    if shortages:
+        return {
+            "status": "insufficient_capacity",
+            "tables_created": False,
+            "languages": {**{k: v["summary"] for k, v in built.items()}, **shortages},
+            "inputs": identities,
+            "files_written": False,
+            "model_loaded": False,
+            "audio_read": False,
+        }
     # No output is opened until validation and selection pass for both languages.
     output.mkdir(parents=True, exist_ok=False)
 
@@ -443,7 +505,15 @@ def freeze_wave_keywords(root: Path, config_path: Path, output: Path) -> dict[st
         "inputs": identities,
         "languages": {k: v["summary"] for k, v in built.items()},
         "policy": (
-            "all_targets; half_remaining_neighbors_of_targets; old_table_fill; neighbor_fallback"
+            (
+                "all_targets; old_table_fill_only; "
+                "exclude_all_supplied_neighbor_surfaces_except_targets"
+            )
+            if config.get("filler_policy") == "old_only_exclude_supplied"
+            else (
+                "all_targets; half_remaining_neighbors_of_targets; "
+                "old_table_fill; neighbor_fallback"
+            )
         ),
         "seed": config["seed"],
         "model_loaded": False,
@@ -453,6 +523,7 @@ def freeze_wave_keywords(root: Path, config_path: Path, output: Path) -> dict[st
             "Vocabulary compatibility is not pronunciation accuracy certification.",
             "Similarity values are supplied provenance, not recomputed after ES cleanup.",
             "Homophones with distinct surfaces are retained, not collapsed.",
+            "Old-table fillers may have natural phonetic similarities; no acoustic filtering.",
             "Top5/Top7 inference and 16 downstream exports are separate work.",
         ],
         "return_files": [str(output / "report.json"), str(output / "sha256.txt")],

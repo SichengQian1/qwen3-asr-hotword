@@ -1,5 +1,85 @@
 # 工作交接记录
 
+## 0.144 2026-09-24 目标全保留、旧表补词排除提供近音词的4000词对照（待H200构建/评测）
+
+用户最新要求覆盖先前“重合可保留”的临时回答：ES316/PT295目标全部保留，
+剩余仅从原旧表选择，并排除旧表中与提供近音词重合的补词。采用
+old_only_exclude_supplied，不提供“词数不足时重新加近音词”的自动回退。
+此前混合表ES1842、PT1279条neighbor来源；本轮neighbor来源必须0。
+
+### 固定规则和边界
+
+- 原primary四wave并集不变，ES316/PT295；沿用已有ES音素清理、PT原标签和
+  标准化词面去重。目标优先级最高，即使目标出现在近音文件也保留。
+- 四wave的phonetic_neighbors_phoneme.json中全部neighbors[parent]候选word
+  规范化后构成排除集合，不限parent是否属于本轮目标，不依赖phoneme有效或sim值。
+  近音文件仅用于词面排除及计数，绝不作为发音/补词来源。
+- 旧表路径/SHA、语言别名/vocab一致性、冲突隔离、排序seed仍与原构建相同。
+  非目标旧表词面命中排除集合即剔除；剩余按固定哈希顺序选取，不看转写/模型预测。
+  成功必须ES316+3684、PT295+3705，均4000唯一词面。
+- summary记录excluded_old_supplied_neighbor_surfaces、mandatory重合数及
+  selected_optional_supplied_neighbor_overlap（必须0），selection_audit逐旧表
+  记录excluded_supplied_neighbor。这不是“音素相似度绝对为零”的认证：未被
+  提供词面清单列出的自然近音/同音仍可能存在，不额外改动音素等价规则。
+- 先扫描两语，再决定发布；任一语种不足，stdout status=insufficient_capacity、
+  tables_created=false、两语容量/缺口汇总，退出1、不创建输出、不发布残缺表。
+  不重复凑词、不用近音fallback、不修改旧表。真实容量待H200，不能预先保证够数。
+
+### 构建、评测和导出
+
+交付分支codex/g2p-coverage-scan。新增两份独立配置，旧配置不改，最终commit见回复。
+容器外项目目录拉取：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+先在容器内项目目录构建（只用CPU）：
+
+```bash
+python -B scripts/build_wave_4000_keywords.py \
+  --config configs/wave_4000_keywords_old_only.workzone.json
+```
+
+新词表目录outputs/wave_4000_keywords_old_only_v1，已有目录拒绝覆盖，构建不支持
+resume。成功应tables_created=true、两语total4000、mandatory316/295、可选重合0、
+selected_by_source仅primary和old_table。返回report.json/sha256.txt；若不足，只返回
+终端两语容量汇总，先解决缺口，不继续GPU评测。
+
+仅在构建成功后运行；4替换为空闲物理GPU：
+
+```bash
+python -B scripts/run_wave_keyword_retrieval.py --gpu 4 \
+  --config configs/wave_retrieval_480h_old_only.workzone.json
+```
+
+该对照要求上一轮新Head近音表运行已产生
+outputs/wave_4000_retrieval_480h_v1/run_config.json。使用同一新480h epoch25 best
+权重字节，复核旧运行全部输入、音频/转写、语言/模型/门控/检索参数，仅允许
+keyword_bias与代码版本不同。每wave目标词面/发音必须相同。词表位置型hotword_id
+允许随排序改变，因此比较目标词面和token序列，按新表ID正确统计，不拿旧索引套新表。
+此入口不修改仍在运行的旧实验输出；如旧实验需resume，请先用其原代码完成再更新。
+
+新结果outputs/wave_4000_retrieval_480h_old_only_v1；中断后同命令追加--resume，
+校验固定输入/代码/权重身份，仅补缺失样本。--audit-only可选预检，不创建输出。
+delivery/仍16份wave1_es_top5.json……wave4_pt_top7.json，每份100个音频stem，
+值为[{"word": ..., "phoneme": ...}]，空召回保留[]；新旧目录分开交付避免同名混淆。
+
+```bash
+(cd outputs/wave_4000_keywords_old_only_v1 && sha256sum -c sha256.txt)
+(cd outputs/wave_4000_retrieval_480h_old_only_v1 && sha256sum -c sha256.txt)
+```
+
+评测返回根report.json/sha256.txt，16份delivery文件给下游；对比同新Head的混合表
+结果，观察每wave目标Top5/Top7召回和整表干扰，不将换表后的提升归因于Head改进。
+本地仅测试，未生成真实H200词表或召回结果。用户返回后再独立提交成果记录。
+
+新增12项测试覆盖补词交集排除/目标例外、非目标parent及无效近音IPA、容量不足
+两语汇总且不写文件、4000唯一且确定性、源文件保留/哈希、目标ID重排、16文件格式、
+Head/目标发音/门控变化阻断。定向88 passed，全量454 passed/23 skipped；改动范围
+Ruff、strict Mypy及git diff --check通过。全仓仍既有5处E501/3处unused-ignore。
+
 ## 0.143 2026-09-24 新480h Head复测四wave并导出16份Context Learning文件（待H200执行）
 
 用户授权使用新的CTC Head重跑昨日四wave。新增独立配置

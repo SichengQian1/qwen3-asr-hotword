@@ -46,6 +46,15 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
     table_report = _read(_verified(tables, "report.json", identities))
     if table_report.get("status") != "completed" or not table_report.get("tables_created"):
         raise ValueError("keyword table release is not completed")
+    if "expected_filler_policy" in cfg:
+        for lang in LANGUAGES:
+            summary = table_report["languages"][lang]
+            if (
+                summary["filler_policy"] != cfg["expected_filler_policy"]
+                or summary["selected_optional_supplied_neighbor_overlap"] != 0
+                or summary["selected_by_source"].get("neighbor", 0) != 0
+            ):
+                raise ValueError("strict old-table-only release required")
     inventory = _read(_verified(root / cfg["inventory"], "report.json", identities))
     vocab_path, checkpoint, model = (root / cfg[k] for k in ("vocab", "checkpoint", "model"))
     identify(vocab_path, cfg["vocab_sha256"])
@@ -146,6 +155,12 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
         for filename, identity in previous["inputs"].items():
             identify(Path(filename), identity["sha256"])
         old_cfg = previous["configuration"]
+        change = cfg.get("comparison_change", "checkpoint")
+        if change not in {"checkpoint", "keyword_table"}:
+            raise ValueError("unknown comparison change")
+        table_comparison = change == "keyword_table"
+        if table_comparison and cfg["checkpoint_sha256"] != old_cfg["checkpoint_sha256"]:
+            raise ValueError("table comparison requires the same checkpoint bytes")
         for key in (
             "tables",
             "inventory",
@@ -156,23 +171,48 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
             "expected_primary",
             "expected_samples_per_group",
         ):
+            if key == "tables" and table_comparison:
+                continue
             if cfg[key] != old_cfg[key]:
                 raise ValueError(f"comparison input configuration changed: {key}")
+        if table_comparison:
+            for lang in LANGUAGES:
+                old_tables = root / old_cfg["tables"]
+                old_targets = _read(old_tables / lang / "targets_by_wave.json")
+                new_targets = _read(tables / lang / "targets_by_wave.json")
+                if old_targets != new_targets:
+                    raise ValueError("comparison wave targets changed")
+                old_bundle = external.load_keyword_bias(
+                    old_tables / lang / "keyword_bias_phoneme.json",
+                    vocab=vocab,
+                    keyword_set="all_keywords",
+                    language=lang,
+                )
+                targets = {s for values in new_targets.values() for s in values}
+
+                def target_labels(
+                    bundle: external.KeywordBundle, surfaces: set[str]
+                ) -> dict[str, Any]:
+                    return {
+                        e.normalized: (e.surface, e.token_ids)
+                        for e in bundle.entries
+                        if e.normalized in surfaces
+                    }
+
+                if target_labels(old_bundle, targets) != target_labels(bundles[lang], targets):
+                    raise ValueError("comparison target pronunciations changed")
+        allowed_config_changes = {
+            "git_commit",
+            "keyword_bias" if table_comparison else "ctc_checkpoint",
+        }
         for name, group in groups.items():
             old_group = previous["groups"][name]
             if (
-                {
-                    k: v
-                    for k, v in group["config"].items()
-                    if k not in {"git_commit", "ctc_checkpoint"}
-                }
-                != {
-                    k: v
-                    for k, v in old_group["config"].items()
-                    if k not in {"git_commit", "ctc_checkpoint"}
-                }
+                {k: v for k, v in group["config"].items() if k not in allowed_config_changes}
+                != {k: v for k, v in old_group["config"].items() if k not in allowed_config_changes}
                 or group["records"] != old_group["records"]
-                or group["target_ids"] != old_group["target_ids"]
+                # IDs are table-position-based; compare surfaces/labels above when table changes.
+                or (not table_comparison and group["target_ids"] != old_group["target_ids"])
             ):
                 raise ValueError(f"comparison retrieval/data contract changed: {name}")
     plan = {
