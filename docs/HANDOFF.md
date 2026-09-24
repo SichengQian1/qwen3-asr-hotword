@@ -1,5 +1,67 @@
 # 工作交接记录
 
+## 0.143 2026-09-24 新480h Head复测四wave并导出16份Context Learning文件（待H200执行）
+
+用户授权使用新的CTC Head重跑昨日四wave。新增独立配置
+configs/wave_retrieval_480h.workzone.json，复用run_wave_keyword_retrieval.py，
+新目录outputs/wave_4000_retrieval_480h_v1，绝不覆盖昨日wave_4000_retrieval_v1。
+本地未加载完整Qwen、未执行真实GPU评测；新Head召回结果待用户返回。
+
+### 固定对照与身份
+
+- 仅换multilingual_480h_run_v1/head/ctc_head_best.pt，训练报告best_epoch必须25、
+  status=completed、cache_sha256_verified=true、test_set_used=false、best路径
+  与配置一致，训练/验证数量须与run_plan一致，vocab SHA不变。
+- run_plan SHA固定d146173589b915a862344df12d6d3725ff5779067530a75cfd9d700ac8a32e99。
+  尚未收到新权重外部SHA，因此首次在H200对指定best文件计算SHA，写入run_config
+  和report；这是本轮首次身份绑定，不声称已有独立可信权重摘要。resume必须保持
+  权重、训练report、run_plan、输入及代码身份相同，变化即拒绝。
+- 核对昨日outputs/wave_4000_retrieval_v1/run_config.json的全部输入SHA，包括
+  两份4000词表、目标列表、800条音频、转写、模型元数据、旧配置和旧Head。
+  每组配置除git_commit/ctc_checkpoint外须与昨日相同；包括gate、retrieval、
+  audio、language/device/dtype，样本记录和target IDs也必须一致。没有调参数。
+- 原三语Head默认配置不修改。仍4wave×2语言×Top5/7=16文件；全音频冻结Encoder
+  加新CTC Head与Anchor，完整Qwen仅在H200加载，不执行最终文本decoder。
+- 依旧复现D5并精确重放Top7。门控threshold0.75、posterior weight0.25/min0.5、
+  edit ratio0.35、shortlist64等沿用0.136；新Head概率校准差异是固定门控实验的一部分。
+
+### 执行和回传
+
+交付分支codex/g2p-coverage-scan，最终远端commit SHA见回复。容器外项目目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录，4换成空闲物理GPU编号：
+
+```bash
+python -B scripts/run_wave_keyword_retrieval.py --gpu 4 \
+  --config configs/wave_retrieval_480h.workzone.json
+```
+
+若中断，在同一命令后追加--resume；固定身份校验后只补缺失样本。新实验可用
+--output-dir新目录，禁止删除旧产物或把旧Head结果目录传给新Head继续写入。
+首次命令自动完成预检；可选--audit-only在CPU检查且不创建输出，不需要先跑一次。
+
+输出delivery/内wave1_es_top5.json、wave1_es_top7.json……wave4_pt_top7.json。
+每文件100个音频stem，值为[{"word": ..., "phoneme": ...}]，空召回保留[]，
+与昨日下游格式一致。新旧目录必须分别交付，不能因同名文件混淆模型版本。
+
+```bash
+(cd outputs/wave_4000_retrieval_480h_v1 && sha256sum -c sha256.txt)
+```
+
+用户返回根report.json和sha256.txt两个小文件；delivery/16文件交下游。
+收到后与0.137逐wave目标Top5/Top7召回、整表未匹配转写比例对照，不将填充词
+命中当目标提升，不将CTC指标改善代替最终WER结论。当前未生成任何H200新结果。
+
+新增8项测试覆盖新Head身份绑定、16文件schema/空列表、恢复及权重变化阻断、
+训练epoch/path/plan漂移、音频/词表/门控对照变化、两配置差异范围。定向wave及
+旧检索/replay测试31 passed；全量442 passed/23 skipped。改动范围Ruff和strict
+Mypy、git diff --check通过；全仓仍既有5处E501/3处unused-ignore，无新增问题。
+
 ## 0.142 2026-09-24 480h Head在固定密度匹配葡语子集上改善（H200回传）
 
 用户返回diagnose_frozen_ctc.py的JSON：status=pass、test_set_used=false、

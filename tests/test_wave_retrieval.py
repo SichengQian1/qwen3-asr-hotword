@@ -280,3 +280,106 @@ def test_spanish_entries_and_language_contract(tmp_path):
             keyword_set="all_keywords",
             language="pt",
         )
+
+
+def trained_fixture(root):
+    original = fixture(root)
+    baseline, _ = prepare_run(root, original)
+    write(root / "baseline/run_config.json", baseline)
+    cfg = json.loads(original.read_text())
+    (root / "new_head.pt").write_bytes(b"new trained head mock")
+    write(
+        root / "training/run_plan.json",
+        {
+            "config": {"vocab_sha256": cfg["vocab_sha256"]},
+            "train": {"records": 100},
+            "validation": {"records": 20},
+        },
+    )
+    write(
+        root / "training/report.json",
+        {
+            "status": "completed",
+            "test_set_used": False,
+            "cache_sha256_verified": True,
+            "best_epoch": 25,
+            "best_checkpoint_path": str(root / "new_head.pt"),
+            "train_sample_count": 100,
+            "validation_sample_count": 20,
+        },
+    )
+    cfg.pop("checkpoint_sha256")
+    cfg.update(
+        checkpoint="new_head.pt",
+        comparison_run_config="baseline/run_config.json",
+        training_provenance={
+            "run_plan": "training/run_plan.json",
+            "run_plan_sha256": _sha(root / "training/run_plan.json"),
+            "report": "training/report.json",
+            "best_epoch": 25,
+        },
+    )
+    path = root / "new_config.json"
+    write(path, cfg)
+    return path
+
+
+def test_new_head_preserves_baseline_inputs_and_sixteen_delivery_schema(tmp_path, monkeypatch):
+    config = trained_fixture(tmp_path)
+    calls, factory, retrieve = mocks(monkeypatch)
+    output = tmp_path / "new_run"
+    report = run_waves(
+        tmp_path, config, output, detector_factory=factory, retrieve_function=retrieve
+    )
+    assert report["checkpoint_sha256"] == _sha(tmp_path / "new_head.pt")
+    assert report["delivery_file_count"] == 16
+    assert report["top5_reproduced"] and report["top7_exact_replay"]
+    for path in (output / "delivery").glob("*.json"):
+        data = json.loads(path.read_text())
+        assert data["empty"] == [] and set(data) == {"empty", "same"}
+        assert all(set(x) == {"word", "phoneme"} for x in data["same"])
+    run_waves(
+        tmp_path, config, output, resume=True, detector_factory=factory, retrieve_function=retrieve
+    )
+    assert calls["retrievals"] == 16
+    (tmp_path / "new_head.pt").write_bytes(b"changed head")
+    with pytest.raises(ValueError, match="resume input/config/code"):
+        run_waves(tmp_path, config, output, resume=True, detector_factory=factory)
+
+
+@pytest.mark.parametrize("kind", ["epoch", "path", "plan", "audio", "gate", "tables"])
+def test_new_head_rejects_provenance_or_comparison_drift(tmp_path, kind):
+    config = trained_fixture(tmp_path)
+    report = tmp_path / "training/report.json"
+    if kind in {"epoch", "path"}:
+        data = json.loads(report.read_text())
+        data["best_epoch" if kind == "epoch" else "best_checkpoint_path"] = (
+            26 if kind == "epoch" else str(tmp_path / "head.pt")
+        )
+        write(report, data)
+    elif kind == "plan":
+        (tmp_path / "training/run_plan.json").write_text("{}")
+    elif kind == "audio":
+        (tmp_path / "wave1/es/wav/same.wav").write_bytes(b"new audio")
+    elif kind == "gate":
+        p = tmp_path / "baseline/run_config.json"
+        data = json.loads(p.read_text())
+        data["groups"]["wave1_es"]["config"]["gate"]["threshold"] = 0.9
+        write(p, data)
+    else:
+        p = tmp_path / "tables/es/keyword_bias_phoneme.json"
+        data = json.loads(p.read_text())
+        data["keyword_phonemes"]["word0"] = "e"
+        write(p, data)
+        sign(tmp_path / "tables")
+    with pytest.raises(ValueError):
+        prepare_run(tmp_path, config)
+
+
+def test_checked_in_480h_config_changes_only_head_provenance_and_output():
+    old = json.loads(Path("configs/wave_retrieval.workzone.json").read_text())
+    new = json.loads(Path("configs/wave_retrieval_480h.workzone.json").read_text())
+    for key in set(old) - {"checkpoint", "checkpoint_sha256", "output"}:
+        assert old[key] == new[key]
+    assert old["output"] != new["output"]
+    assert new["checkpoint"].endswith("multilingual_480h_run_v1/head/ctc_head_best.pt")

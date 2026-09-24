@@ -49,6 +49,29 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
     inventory = _read(_verified(root / cfg["inventory"], "report.json", identities))
     vocab_path, checkpoint, model = (root / cfg[k] for k in ("vocab", "checkpoint", "model"))
     identify(vocab_path, cfg["vocab_sha256"])
+    provenance = cfg.get("training_provenance")
+    if provenance is not None:
+        # First bind the user-selected completed training run; its new Head hash is
+        # captured on H200 and persisted in run_config, then required unchanged on resume.
+        plan_path = root / provenance["run_plan"]
+        report_path = root / provenance["report"]
+        identify(plan_path, provenance["run_plan_sha256"])
+        identify(report_path)
+        trained = _read(report_path)
+        training_plan = _read(plan_path)
+        if (
+            trained.get("status") != "completed"
+            or trained.get("test_set_used") is not False
+            or trained.get("cache_sha256_verified") is not True
+            or trained.get("best_epoch") != provenance["best_epoch"]
+            or Path(trained["best_checkpoint_path"]).resolve() != checkpoint.resolve()
+            or trained["train_sample_count"] != training_plan["train"]["records"]
+            or trained["validation_sample_count"] != training_plan["validation"]["records"]
+            or training_plan["config"]["vocab_sha256"] != cfg["vocab_sha256"]
+        ):
+            raise ValueError("completed training provenance does not match selected best Head")
+        identify(checkpoint, cfg.get("checkpoint_sha256"))
+        cfg["checkpoint_sha256"] = identities[str(checkpoint)]["sha256"]
     identify(checkpoint, cfg["checkpoint_sha256"])
     identify(model / "config.json")
     # Bind model metadata/index, not all multi-GB weights. Actual load remains H200-only.
@@ -116,6 +139,42 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
                 "target_ids": sorted(by_normalized[t] for t in targets[wave]),
             }
             records_by_group[name] = records
+    if "comparison_run_config" in cfg:
+        previous_path = root / cfg["comparison_run_config"]
+        identify(previous_path)
+        previous = _read(previous_path)
+        for filename, identity in previous["inputs"].items():
+            identify(Path(filename), identity["sha256"])
+        old_cfg = previous["configuration"]
+        for key in (
+            "tables",
+            "inventory",
+            "model",
+            "vocab",
+            "vocab_sha256",
+            "expected_keywords",
+            "expected_primary",
+            "expected_samples_per_group",
+        ):
+            if cfg[key] != old_cfg[key]:
+                raise ValueError(f"comparison input configuration changed: {key}")
+        for name, group in groups.items():
+            old_group = previous["groups"][name]
+            if (
+                {
+                    k: v
+                    for k, v in group["config"].items()
+                    if k not in {"git_commit", "ctc_checkpoint"}
+                }
+                != {
+                    k: v
+                    for k, v in old_group["config"].items()
+                    if k not in {"git_commit", "ctc_checkpoint"}
+                }
+                or group["records"] != old_group["records"]
+                or group["target_ids"] != old_group["target_ids"]
+            ):
+                raise ValueError(f"comparison retrieval/data contract changed: {name}")
     plan = {
         "schema_version": 1,
         "git_commit": external._git_commit(),
@@ -225,7 +284,7 @@ def run_waves(
     if output.exists() and not resume and not audit_only:
         raise FileExistsError(f"output exists; use --resume for this identical run: {output}")
     print(
-        "Verifying tables, baseline Head, transcripts and all 800 audio identities...", flush=True
+        "Verifying tables, selected Head, transcripts and all 800 audio identities...", flush=True
     )
     plan, runtime = prepare_run(root, config_path)
     if audit_only:
