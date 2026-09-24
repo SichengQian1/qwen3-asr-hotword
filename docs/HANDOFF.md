@@ -1,5 +1,63 @@
 # 工作交接记录
 
+## 0.141 2026-09-24 三语480h训练早停完成，最佳epoch25（H200回传）
+
+用户返回formal_completed，resumed_from_epoch=5、epochs_requested=30、
+epochs_completed=26、early_stopped=true、best_epoch=25。选择ctc_head_best.pt，
+不是epoch26的ctc_head_latest.pt。run_plan SHA仍为
+d146173589b915a862344df12d6d3725ff5779067530a75cfd9d700ac8a32e99。
+Head/采样/训练与验证数量均延续0.139，cache_sha256_verified=true、test_set_used=false。
+
+| 语言 | 旧150h基线PER | 480h最佳PER | 降低百分点 | 相对错误率降低 |
+|---|---:|---:|---:|---:|
+| en | 4.736% | 3.9111% | 0.8249 | 17.42% |
+| es | 3.910% | 3.7389% | 0.1711 | 4.38% |
+| pt | 9.662% | 8.8560% | 0.8060 | 8.34% |
+
+差值基于既有四舍五入基线。best分语言错误/reference为en3039/77701、
+es4857/129906、pt14464/163324；样本en2808/es2631/pt2662。Macro PER=5.5020%，
+overall PER=6.0281%，validation loss=0.233729。epoch26的pt PER=8.8793%，
+Macro PER=5.5217%，应使用epoch25作为本轮选定候选。葡语比旧专用9.032%也低约
+0.176个百分点，但数据量/域/预算不同，不能据此证明多语结构更优。
+
+这次三语均改善，葡语较基线约8.34%相对错误率下降；仍明显弱于英西。不从PER
+推断热词召回或最终WER必然改善，也不能把扩量实验全部收益归因于唯一数据多样性。
+总training_seconds=15544.30（累计约4.32小时，含最初5轮；不含特征提取），
+最终LR=3.75e-5。stale=6达到patience6，早停min_delta为Macro PER的0.001；
+最佳出现在25而26早停不矛盾：微小改善可保存best却不重置早停计数。不建议为凑
+30轮反复执行formal。无完整metrics.jsonl，不能复原全部epoch曲线或断言无提升空间。
+
+### 验证集身份与下一步
+
+本报告仍是在旧固定8101条验证集上（葡语2662条），并非新选的西语密度匹配
+葡语2631条，也不是16小时全池。此前0.98新子集原三语PER=8.207343%、旧葡语
+7.617954%；本次480h Head在新子集尚无实测值，禁止将8.8560%与8.207343%跨集
+直接判断变差。新子集也未获得标签准确性认证。
+
+下一步复用已完成evaluation_oja96zhl/validation_cache，在同一个新子集同时
+评估旧三语基线及新480h最佳Head。已有diagnose_frozen_ctc.py接受多个checkpoint，
+核验所有cache shard SHA，输出PER/S/D/I和混淆；无需提取Qwen特征或重新训练。
+容器内项目根目录执行以下命令，4替换为空闲物理GPU：
+
+```bash
+R=outputs/pt_es_density_match_v1
+H=outputs/multilingual_480h_run_v1/head
+B=outputs/en_es_pt_balanced_150h_temporal2x_ctc_formal_macro_v1
+O=$(mktemp -d outputs/pt_480h_matched_eval_XXXXXXXX)
+sha256sum "$H/ctc_head_best.pt" "$B/ctc_head_best.pt" > "$O/checkpoints.sha256"
+CUDA_VISIBLE_DEVICES=4 python -B scripts/diagnose_frozen_ctc.py \
+  --validation-cache "$R/evaluation_oja96zhl/validation_cache" \
+  --validation-manifest "$R/full_ctc_validation.jsonl" \
+  --checkpoint "$B/ctc_head_best.pt" --checkpoint "$H/ctc_head_best.pt" \
+  --output "$O/report.json"
+```
+
+每次独立新目录，不覆盖旧outputs。执行后返回该目录report.json和checkpoints.sha256。
+本次只核对用户训练回传，尚未运行该新子集评测；H200命令由用户执行。
+回传附件SHA256：a7124402fc898b8a36251082943e3ede1e5692ae066f0fe791fd4914c40dc4ad。
+本地已验证重复head_report一致、分语言PER算术；未收到独立checkpoint SHA及完整
+metrics，不声称已验证H200权重字节。仅文档里程碑记录，git diff --check通过。
+
 ## 0.140 2026-09-23 三语480h首5epoch训练完成（H200回传）
 
 用户返回pilot_completed，head报告status=completed、epochs_requested=5、
