@@ -1,5 +1,45 @@
 # 工作交接记录
 
+## 0.146 2026-09-28 排除提供近音词的旧表补词版本构建完成（H200回传）
+
+用户运行0.144构表命令返回status=completed、tables_created=true，目录
+outputs/wave_4000_keywords_old_only_v1。政策old_only_exclude_supplied，
+seed仍wave-4000-20260923-v1，不读取音频/转写/预测，不加载模型。
+
+| 语言 | 总词数 | 保留目标 | 旧表补词 | 排除旧表重合词面 | 可用旧表补词池 | 最终补词重合 |
+|---|---:|---:|---:|---:|---:|---:|
+| es | 4000 | 316 | 3684 | 168 | 4225 | 0 |
+| pt | 4000 | 295 | 3705 | 171 | 4229 | 0 |
+
+两语all_targets_retained=true、OOV=0、neighbor来源0、optional冲突0，旧表身份
+校验问题计数均空。ES剩余541个未选可用补词，PT524个，无需扩充来源或回退。
+近音文件归一化词面并集ES3451/PT2187；目标中ES14/PT12个也出现在近音清单，
+按目标全保留规则保留，不计入补词重合。PT excluded_supplied_neighbor有173条
+来源记录，对应171个唯一词面，两个统计单位不同，并非遗漏排除。
+
+旧表语言记录ES4401个es，PT3949个pt加454个pt-BR。ES规范化更新3次，primary
+去组合tilde累计288次，与旧表构建一致；不能把来源重复次数当唯一目标数。
+保留相同标签序列组ES1/PT3（如entre rios/entre ríos、belem/belém），因此本实验
+应称“排除提供近音词的补词对照”，不是所有自然近音或同音都不存在的词表。
+
+本次证据为用户直接粘贴终端摘要，未收到独立report.json/sha256.txt，未在本地
+重算H200词表文件SHA。摘要中316+3684=4000、295+3705=4000及候选余量一致。
+已有评测入口会在模型加载前核验该目录sha256.txt及与0.145的固定实验输入。
+
+下一步在容器内项目根目录运行，4换为空闲物理GPU，无需重新构表或修改配置：
+
+```bash
+python -B scripts/run_wave_keyword_retrieval.py --gpu 4 \
+  --config configs/wave_retrieval_480h_old_only.workzone.json
+```
+
+固定同一新480h epoch25 Head、四wave各ES/PT100条、Top5/Top7和全部门控参数，
+只改变词表。输出outputs/wave_4000_retrieval_480h_old_only_v1，delivery/仍16份
+同格式JSON，旧混合表结果保留。中断后同命令追加--resume，身份变化则拒绝恢复。
+校验及返回根report.json/sha256.txt按0.144；当前尚无这套新词表的召回实测。
+对照0.145：新Head混合表ES Top5/7=31.3536%/45.4420%，PT=29.0761%/41.9837%。
+本轮仅结果型文档更新，git diff --check通过，不改代码或outputs。
+
 ## 0.145 2026-09-24 新480h Head配原近音混合4000表评测完成（H200回传）
 
 用户回传命令使用configs/wave_retrieval_480h.workzone.json，输出为
