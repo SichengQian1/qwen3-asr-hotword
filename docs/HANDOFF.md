@@ -1,5 +1,80 @@
 # 工作交接记录
 
+## 0.148 2026-09-28 SD362扩展4000词、MLS/SD双来源评测入口交付（待H200）
+
+用户明确选择后来的pt_keyword_bias_phoneme_sd.json之all_keywords 362词作为
+唯一目标集合，不加入MLS hard_k266，也不用165词in/out版本。保留两套测试音频：
+MLS871条、SD/Delivery2071条，总2942条；同一葡语4000表用于两来源。
+原始SD表保持不变，既有加载器只剥离词面首尾空格，兼容已核实的Dra. /Dra.映射。
+全部目标音素保持不变；标准化重复、OOV、缺失音素、目标数量变化均阻塞。
+
+新增scripts/run_sd_4000.py的build/audit/run三个阶段，配置
+configs/sd_4000.workzone.json。build只读SD目标和旧葡语capacity表，不读音频、
+转写或预测；以固定seed sd-4000-20260928-v1从旧表确定性补足3638词。
+旧表沿用0.146来源，SHA ac8f50fa6f6f14870d8ca97b7028a570f88ace81c31062c41da60228b2a5d4d3。
+目标优先；旧表同规范词面发音冲突全部排除；检查语言别名pt/pt-BR、IPA及token一致性。
+不使用提供的近音文件作为补词来源，但不声称旧词与这362词不存在天然近音关系。
+不把上一轮wave近音清单当作SD362的声学近音定义，也不按本次转写反向筛补词。
+
+固定新480h epoch25 Head，SHA
+320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265。
+复用已有完整音频Anchor检索和Top5复现/Top7精确重放逻辑，不改模型或门控：
+threshold .75，posterior weight/min .25/.5，max edit .35，margin0，shortlist64，
+anchor2/3/4、24个/entry、offset1、radius2、minimum phonemes1。保存全部64候选。
+报告分开给362目标召回和full_4000_view，并给参考文本未匹配输出词的比例。
+共享指标字段declared_wave_target_count在本入口表示SD目标数，而非wave集合。
+MLS的目标分母变为SD362，且Head也不同，不能直接与历史MLS266+旧Head的召回作
+词表单因素比较。当前未运行H200，无新召回率、WER或PER结论。
+
+### 工区操作
+
+交付分支codex/g2p-coverage-scan，提交SHA以交付消息为准。容器外更新：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录；旧/home_91挂载须可见（配置沿用0.76/0.81确证的两来源路径）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_sd_4000.py build
+python -B scripts/run_sd_4000.py audit
+python -B scripts/run_sd_4000.py run --gpu 4
+```
+
+4替换为空闲物理GPU，映射为逻辑cuda:0；audit不加载模型、不创建运行目录。
+build预期mandatory362、old_table_fillers3638、total4000、OOV0；audit预期
+MLS871/Delivery2071，并显示各来源362目标词的文本出现对数，模型加载前核实。
+任一步失败即停，不绕过身份检查。完整推理仅在H200由用户执行。
+
+新输出目录（不得删除旧实验或覆盖）：
+outputs/sd_4000_keywords_v1 与 outputs/sd_4000_retrieval_480h_v1。
+构表拒绝已有目录；运行中断后用同一命令加--resume，逐样本恢复，绑定配置、代码
+commit、词表/目标/Head/转写/音频SHA并校验结果行摘要。换词表或Head不能resume。
+已完成的相同运行不会再次加载模型。新实验修改配置中的新输出路径，不复用旧目录。
+
+下游四文件位于运行目录delivery/：
+mls_portuguese_top5.json、mls_portuguese_top7.json、
+delivery_20260706_ptbr_top5.json、delivery_20260706_ptbr_top7.json。
+每个音频stem映射到[{word,phoneme}]，无召回保留[]；两来源分开，跨来源同名不丢失。
+
+```bash
+(cd outputs/sd_4000_keywords_v1 && sha256sum -c sha256.txt)
+(cd outputs/sd_4000_retrieval_480h_v1 && sha256sum -c sha256.txt)
+cat outputs/sd_4000_retrieval_480h_v1/report.json
+```
+
+回传构表摘要和运行目录report.json/sha256.txt即可；下游取delivery四文件，不传
+音频、权重、样本分片或完整rank详情。得到H200结果后再作独立结果型HANDOFF提交。
+
+本地验证：定向33项通过；全量458通过/23跳过；新增模块/CLI/tests Ruff通过，
+新增模块Mypy(--follow-imports=silent)通过，git diff --check通过。全仓Ruff仍有
+既有5个E501（scan_g2p_coverage3处、用户PPT脚本2处）；全仓Mypy仍有既有训练模块
+3个unused-ignore，与本次无关，不修改这些文件。模型调用为mock，仅证明工具链。
+
 ## 0.147 2026-09-28 排除提供近音词补词后的四wave召回结果完成（H200回传）
 
 用户附件同时展示run_config摘要、report状态和完整report：tables为
