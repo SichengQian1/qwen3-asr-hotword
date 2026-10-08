@@ -33,6 +33,10 @@ def _read(path: Path) -> Any:
 def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate all eight groups and bind audio bytes before loading a model."""
     cfg = _read(config_path)
+    if "audio_root" in cfg and (
+        cfg.get("comparison_change") != "audio" or "comparison_run_config" not in cfg
+    ):
+        raise ValueError("alternate audio requires a fixed clean comparison run")
     identities: dict[str, Any] = {}
 
     def identify(path: Path, expected: str | None = None) -> None:
@@ -121,7 +125,8 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
             base = root / wave / lang
             transcripts = base / "transcripts.txt"
             identify(transcripts, inventory["datasets"][f"{wave}/{lang}"]["transcripts_sha256"])
-            source = external.SourceSpec(name, base / "wav", transcripts)
+            audio_base = root / cfg.get("audio_root", ".") / wave / lang
+            source = external.SourceSpec(name, audio_base / "wav", transcripts)
             records, audit = external.build_external_dataset((source,), language=TAGS[lang])
             if len(records) != cfg["expected_samples_per_group"]:
                 raise ValueError(f"{name}: wrong audio/transcript count: {len(records)}")
@@ -156,11 +161,14 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
             identify(Path(filename), identity["sha256"])
         old_cfg = previous["configuration"]
         change = cfg.get("comparison_change", "checkpoint")
-        if change not in {"checkpoint", "keyword_table"}:
+        if change not in {"checkpoint", "keyword_table", "audio"}:
             raise ValueError("unknown comparison change")
         table_comparison = change == "keyword_table"
-        if table_comparison and cfg["checkpoint_sha256"] != old_cfg["checkpoint_sha256"]:
-            raise ValueError("table comparison requires the same checkpoint bytes")
+        audio_comparison = change == "audio"
+        if (table_comparison or audio_comparison) and (
+            cfg["checkpoint_sha256"] != old_cfg["checkpoint_sha256"]
+        ):
+            raise ValueError("table/audio comparison requires the same checkpoint bytes")
         for key in (
             "tables",
             "inventory",
@@ -201,16 +209,44 @@ def prepare_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str
 
                 if target_labels(old_bundle, targets) != target_labels(bundles[lang], targets):
                     raise ValueError("comparison target pronunciations changed")
-        allowed_config_changes = {
-            "git_commit",
-            "keyword_bias" if table_comparison else "ctc_checkpoint",
-        }
+        allowed_config_changes = {"git_commit"}
+        if not audio_comparison:
+            allowed_config_changes.add("keyword_bias" if table_comparison else "ctc_checkpoint")
         for name, group in groups.items():
             old_group = previous["groups"][name]
+            new_config, old_config = dict(group["config"]), dict(old_group["config"])
+            new_records, old_records = group["records"], old_group["records"]
+            if audio_comparison:
+                # Only the audio directory/path may differ. Keep stem, text, language,
+                # source, target IDs, table bytes, Head bytes and every gate identical.
+                new_config["sources"] = [
+                    {k: v for k, v in s.items() if k != "audio_dir"} for s in new_config["sources"]
+                ]
+                old_config["sources"] = [
+                    {k: v for k, v in s.items() if k != "audio_dir"} for s in old_config["sources"]
+                ]
+                new_records = [
+                    {k: v for k, v in r.items() if k != "audio_path"} for r in new_records
+                ]
+                old_records = [
+                    {k: v for k, v in r.items() if k != "audio_path"} for r in old_records
+                ]
+                changed = sum(
+                    identities[n["audio_path"]]["sha256"]
+                    != previous["inputs"][o["audio_path"]]["sha256"]
+                    for n, o in zip(group["records"], old_group["records"], strict=True)
+                )
+                if changed == 0:
+                    raise ValueError(f"{name}: alternate audio bytes are all identical to baseline")
+                group["audio_comparison"] = {
+                    "changed_files": changed,
+                    "identical_files": len(group["records"]) - changed,
+                    "snr_verified": False,
+                }
             if (
-                {k: v for k, v in group["config"].items() if k not in allowed_config_changes}
-                != {k: v for k, v in old_group["config"].items() if k not in allowed_config_changes}
-                or group["records"] != old_group["records"]
+                {k: v for k, v in new_config.items() if k not in allowed_config_changes}
+                != {k: v for k, v in old_config.items() if k not in allowed_config_changes}
+                or new_records != old_records
                 # IDs are table-position-based; compare surfaces/labels above when table changes.
                 or (not table_comparison and group["target_ids"] != old_group["target_ids"])
             ):
@@ -335,6 +371,11 @@ def run_waves(
             "keyword_counts": {k: len(v.entries) for k, v in runtime["bundles"].items()},
             "model_loaded": False,
             "files_written": False,
+            **(
+                {"audio_comparison": {k: g["audio_comparison"] for k, g in plan["groups"].items()}}
+                if "audio_root" in plan["configuration"]
+                else {}
+            ),
         }
     if output.exists():
         if not (output / "run_config.json").is_file() or _read(output / "run_config.json") != plan:
@@ -434,6 +475,10 @@ def run_waves(
         ],
         "return_files": [str(output / "report.json"), str(output / "sha256.txt")],
     }
+    if "audio_root" in plan["configuration"]:
+        report["audio_root"] = plan["configuration"]["audio_root"]
+        report["audio_comparison"] = {k: g["audio_comparison"] for k, g in plan["groups"].items()}
+        report["limitations"].append("Noise level is user supplied, not measured by this run.")
     external._write_or_verify_json(output / "report.json", report)
     # The final checksum list is deterministic; resume verifies rather than replacing it.
     lines = "".join(

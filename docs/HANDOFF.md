@@ -1,5 +1,64 @@
 # 工作交接记录
 
+## 0.149 2026-10-08 四wave带噪10dB、排除近音旧表补齐评测入口（待H200）
+
+用户提供新音频根目录：
+/host_home/star/两波验证集-可直接推理/2026-09-29-带噪10dB。
+新增配置configs/wave_retrieval_480h_old_only_noise10db.workzone.json，复用
+outputs/wave_4000_keywords_old_only_v1（ES316/PT295目标，各4000词）、新480h
+best Head以及0.147全部检索/门控参数。只替换音频，不重建词表、不训练、不跑Qwen文本生成。
+对照身份绑定outputs/wave_4000_retrieval_480h_old_only_v1/run_config.json。
+
+wave_retrieval新增受控audio_root及comparison_change=audio。参考转写仍读取仓库
+原wave1..4/es,pt/transcripts.txt，并校验原inventory SHA；要求带噪wav/中的
+stem与原转写一一对应、每组100条，不自动剥离文件名后缀、不静默漏样本。
+只允许音频路径/字节变化，要求Head字节、完整词表字节、目标ID、参考文本、
+source/语言及全部门控完全一致。逐组记录changed_files/identical_files；若一组
+全部与旧音频字节相同则停止，防止指回干净数据。10dB为用户提供的条件名称，
+未测实际SNR；字节变化不证明SNR准确或语音内容一致。
+
+新输出outputs/wave_4000_retrieval_480h_old_only_noise10db_v1。输出16份
+wave1_es_top5.json等文件，格式stem→[{word,phoneme}]，无召回保留[]。
+旧wave/SD产物不修改。--resume只接受相同代码/输入/配置/音频SHA，不能恢复旧干净运行。
+
+分支codex/g2p-coverage-scan，提交SHA见交付消息。容器外更新：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内（4替换为空闲物理GPU），预检通过才开始推理：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+C=configs/wave_retrieval_480h_old_only_noise10db.workzone.json
+python -B scripts/run_wave_keyword_retrieval.py --config "$C" --audit-only &&
+python -B scripts/run_wave_keyword_retrieval.py --config "$C" --gpu 4
+```
+
+audit_only不创建目录/加载模型，报告8组800条、每语种4000词和音频变化计数。
+文件名不匹配时返回错误，不猜映射；先由用户确认实际命名再适配。中断时原run命令
+追加--resume；已完成同配置重放会验证输出，不重新推理。不得删除输出绕过校验。
+
+验证与回传：
+
+```bash
+R=outputs/wave_4000_retrieval_480h_old_only_noise10db_v1
+(cd "$R" && sha256sum -c sha256.txt)
+cat "$R/report.json"
+```
+
+交下游$R/delivery/16文件；回传report.json及sha256.txt即可，不需音频、权重或
+rank详情。本地尚无带噪实测，不声称召回结果。收到H200报告后，与0.147同目标
+分母的干净音频召回逐组比较，单独记结果型HANDOFF。
+
+验证：定向31项通过（含带噪路径实用、原转写、16导出、恢复、拒绝相同音频/错误
+文件名/换Head/词表/门控/目标）；全量465通过/23跳过。修改文件Ruff、定向Mypy、
+git diff --check通过。全仓仍仅既有5个Ruff E501及训练模块3个Mypy unused-ignore，
+未修改用户文件或无关模块。本地模型均mock，不代替H200实测。
+
 ## 0.148 2026-09-28 SD362扩展4000词、MLS/SD双来源评测入口交付（待H200）
 
 用户明确选择后来的pt_keyword_bias_phoneme_sd.json之all_keywords 362词作为

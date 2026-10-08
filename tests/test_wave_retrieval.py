@@ -14,6 +14,99 @@ from qwen_hotword.training.spanish_capacity import _sha
 VOCAB = Path("configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json").resolve()
 
 
+def noisy_fixture(root):
+    config = fixture(root)
+    baseline, _ = prepare_run(root, config)
+    write(root / "clean/run_config.json", baseline)
+    noisy = root / "带噪 10dB"
+    for wave in range(1, 5):
+        for lang in ("es", "pt"):
+            dest = noisy / f"wave{wave}" / lang / "wav"
+            shutil.copytree(root / f"wave{wave}" / lang / "wav", dest)
+            (dest / "same.wav").write_bytes(b"positive with noise")
+    cfg = json.loads(config.read_text())
+    cfg.update(
+        audio_root=str(noisy),
+        comparison_change="audio",
+        comparison_run_config="clean/run_config.json",
+    )
+    config = root / "noise.json"
+    write(config, cfg)
+    return config, noisy
+
+
+def test_noisy_audio_uses_clean_references_and_exports_sixteen(tmp_path, monkeypatch):
+    config, noisy = noisy_fixture(tmp_path)
+    calls, factory, retrieve = mocks(monkeypatch)
+    seen = []
+
+    def capture(detector, audio, vocab):
+        seen.append(audio)
+        return retrieve(detector, audio, vocab)
+
+    output = tmp_path / "noisy_run"
+    report = run_waves(
+        tmp_path, config, output, detector_factory=factory, retrieve_function=capture
+    )
+    assert report["audio_root"] == str(noisy)
+    assert report["delivery_file_count"] == 16
+    assert set(seen) == {b"empty", b"positive with noise"}
+    assert all(
+        g == {"changed_files": 1, "identical_files": 1, "snr_verified": False}
+        for g in report["audio_comparison"].values()
+    )
+    plan = json.loads((output / "run_config.json").read_text())
+    for group in plan["groups"].values():
+        for r in group["records"]:
+            assert Path(r["audio_path"]).is_relative_to(noisy)
+    assert (
+        run_waves(
+            tmp_path,
+            config,
+            output,
+            resume=True,
+            detector_factory=factory,
+            retrieve_function=capture,
+        )
+        == report
+    )
+    assert calls["retrievals"] == 16
+    (noisy / "wave1/es/wav/same.wav").write_bytes(b"different noisy file")
+    with pytest.raises(ValueError, match="resume input/config/code"):
+        run_waves(tmp_path, config, output, resume=True, detector_factory=factory)
+
+
+@pytest.mark.parametrize("change", ["same_audio", "stem", "gate", "head", "target", "table"])
+def test_noise_control_refuses_other_changes_before_model(tmp_path, monkeypatch, change):
+    config, noisy = noisy_fixture(tmp_path)
+    baseline_path = tmp_path / "clean/run_config.json"
+    baseline = json.loads(baseline_path.read_text())
+    cfg = json.loads(config.read_text())
+    if change == "same_audio":
+        (noisy / "wave1/es/wav/same.wav").write_bytes(b"positive")
+    elif change == "stem":
+        (noisy / "wave1/es/wav/same.wav").rename(noisy / "wave1/es/wav/renamed.wav")
+    elif change == "gate":
+        baseline["groups"]["wave1_es"]["config"]["gate"]["threshold"] = 0.9
+        write(baseline_path, baseline)
+    elif change == "target":
+        baseline["groups"]["wave1_es"]["target_ids"] = []
+        write(baseline_path, baseline)
+    elif change == "table":
+        baseline["groups"]["wave1_es"]["config"]["keyword_bias"]["sha256"] = "changed"
+        write(baseline_path, baseline)
+    else:
+        (tmp_path / "other.pt").write_bytes(b"different head")
+        cfg.update(checkpoint="other.pt", checkpoint_sha256=_sha(tmp_path / "other.pt"))
+        write(config, cfg)
+    calls, factory, retrieve = mocks(monkeypatch)
+    with pytest.raises(ValueError):
+        run_waves(
+            tmp_path, config, tmp_path / "run", detector_factory=factory, retrieve_function=retrieve
+        )
+    assert not calls["loads"] and not (tmp_path / "run").exists()
+
+
 def write(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False))
