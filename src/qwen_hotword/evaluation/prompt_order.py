@@ -162,7 +162,22 @@ def _model_files(model: Path, cfg: dict[str, Any], identities: dict[str, Any]) -
     shards = set(index["weight_map"].values())
     if not shards:
         raise ValueError("empty model weight index")
-    required = {"preprocessor_config.json", "tokenizer_config.json", "tokenizer.json"}
+    required = {"preprocessor_config.json", "tokenizer_config.json"}
+    # Qwen2TokenizerFast also supports the official Qwen3-ASR vocab/merges layout.
+    # tokenizer_config.json describes settings; it is not the vocabulary itself.
+    if (model / "tokenizer.json").is_file():
+        tokenizer_files = {"tokenizer.json"}
+    else:
+        tokenizer_files = {"vocab.json", "merges.txt"}
+        missing = sorted(name for name in tokenizer_files if not (model / name).is_file())
+        if missing:
+            raise ValueError(
+                "tokenizer assets incomplete: require tokenizer.json OR both vocab.json and "
+                f"merges.txt; missing BPE files: {', '.join(missing)}. "
+                "tokenizer_config.json alone is not sufficient"
+            )
+    required.update(tokenizer_files)
+    print(f"Tokenizer storage: {' + '.join(sorted(tokenizer_files))}", flush=True)
     for filename in sorted(required | shards):
         path = model / filename
         if not path.resolve().is_relative_to(model.resolve()):

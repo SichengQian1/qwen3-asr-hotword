@@ -28,6 +28,12 @@ inference/prompt_order_experiment.py、prompt_order_runtime.py。
   仅核对来源，不加载CTC Head。
 - 完整模型：/glusterfs_103/models/Qwen3-ASR-1.7B。配置中固定已知config/index SHA，
   prepare逐字节计算所有权重分片及tokenizer/processor/模板等资产SHA，后续audit/run重验。
+  分词器接受tokenizer.json，或vocab.json+merges.txt；tokenizer_config.json两种布局都
+  必须存在，不能独自替代词表。所有实际存在的分词器文件继续参与SHA256和恢复校验。
+  用户首次prepare因旧预检错误地强制要求tokenizer.json而停止；
+  [官方模型文件清单](https://huggingface.co/Qwen/Qwen3-ASR-1.7B/tree/7278e1e70fe206f11671096ffdd38061171dd6e5)
+  实际采用vocab.json+merges.txt。修复只调整资产布局识别，不改实验定义或模型加载。
+  该失败发生在freeze创建目录之前；拉取修复后直接重跑prepare，无需删除输出或--resume。
 - 新输出：outputs/english_prompt_order_v1。prepare拒绝已有目录；不同模板、顺序规则或
   输入使用另一个新目录，不能借--resume混入旧结果。
 
@@ -192,6 +198,11 @@ Qwen边界用轻量替身测试真实封装逻辑，覆盖context改写、额外
 全仓Ruff仍有5个既有E501：用户PPT辅助脚本2处、scripts/scan_g2p_coverage.py 3处；
 全仓Mypy仍有ctc_overfit.py:260、sharded_ctc.py:989、unfrozen_encoder_ctc.py:813的
 3个既有unused-ignore。未修改无关代码。本轮尚无排序/优先级有效性的实测结论。
+
+分词器布局回归新增10例：fast/BPE/两者共存、配置独存及BPE缺件拒绝、分词器变化
+或新增tokenizer.json时禁止恢复。修复后定向41通过、全量540通过/23跳过；本轮Ruff、
+定向Mypy、diff --check通过，全仓仍仅上述既有5个Ruff和3个Mypy问题。
+本次仅完善本节点兼容说明，不新立实验阶段，不记录为H200推理成功。
 
 ## 0.154 2026-10-12 三套英语10dB带噪Top5/Top7对照入口交付（待H200）
 

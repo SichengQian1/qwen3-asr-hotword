@@ -408,3 +408,57 @@ def test_insufficient_frozen_plan_blocks_inference(assets, monkeypatch):
 
     with pytest.raises(ValueError, match="insufficient"):
         experiment.run(root, config, probe=probe, factory=forbidden)
+
+
+@pytest.mark.parametrize("layout", ["fast", "bpe", "both"])
+def test_tokenizer_layouts_are_frozen_and_audited(assets, layout):
+    root, config = assets
+    model = root / "model"
+    if layout != "fast":
+        write(model / "vocab.json", {"a": 0})
+        (model / "merges.txt").write_text("#version: 0.2\n", encoding="utf-8")
+    if layout == "bpe":
+        (model / "tokenizer.json").unlink()
+    report = experiment.prepare(root, config, probe=probe)
+    assert report["status"] == "frozen"
+    plan, _ = experiment.audit(root, config, probe=probe)
+    names = {"tokenizer_config.json"}
+    if layout != "bpe":
+        names.add("tokenizer.json")
+    if layout != "fast":
+        names.update(("vocab.json", "merges.txt"))
+    for name in names:
+        assert plan["inputs"][str(model / name)]["sha256"] == _sha(model / name)
+    if layout == "bpe":
+        assert str(model / "tokenizer.json") not in plan["inputs"]
+
+
+@pytest.mark.parametrize("present", [None, "vocab.json", "merges.txt"])
+def test_incomplete_tokenizer_fails_without_creating_outputs(assets, present):
+    root, config = assets
+    (root / "model/tokenizer.json").unlink()
+    if present is not None:
+        (root / "model" / present).write_text("mock", encoding="utf-8")
+    with pytest.raises(ValueError, match="tokenizer assets incomplete"):
+        experiment.prepare(root, config, probe=probe)
+    assert not (root / "run").exists()
+
+
+@pytest.mark.parametrize(
+    "changed", ["vocab.json", "merges.txt", "tokenizer_config.json", "tokenizer.json"]
+)
+def test_bpe_tokenizer_changes_block_resume_before_model_load(assets, changed):
+    root, config = assets
+    model = root / "model"
+    (model / "tokenizer.json").unlink()
+    write(model / "vocab.json", {"a": 0})
+    (model / "merges.txt").write_text("#version: 0.2\n", encoding="utf-8")
+    experiment.prepare(root, config, probe=probe)
+    # Adding tokenizer.json changes loader precedence as well as the asset fingerprint.
+    write(model / changed, {"changed": True})
+
+    def forbidden(*args):
+        pytest.fail("tokenizer change must fail before loading the model")
+
+    with pytest.raises(ValueError, match="identity changed"):
+        experiment.run(root, config, resume=True, probe=probe, factory=forbidden)
