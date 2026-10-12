@@ -369,3 +369,124 @@ def test_english_loader_aliases_keep_phonemes(tmp_path, language):
     assert bundle.entries[0].hotword_id == "external_en_0000"
     assert bundle.entries[0].normalized == "touch"
     assert bundle.phonemes["'Touch'"] == "/tʰ ɐ tʃ/"
+
+
+def noisy_fixture(tmp_path, monkeypatch):
+    config, cfg = fixture(tmp_path)
+    build_english_table(tmp_path, config, tmp_path / "tables")
+    calls, factory, retrieve = mocks(monkeypatch)
+    kw = {"detector_factory": factory, "retrieve_function": retrieve}
+    clean = run_english_retrieval(tmp_path, config, tmp_path / "run", **kw)
+    noisy = json.loads(json.dumps(cfg))
+    noisy.update(
+        audio_root=str(tmp_path / "noisy"),
+        comparison_run_config="run/run_config.json",
+        output="noise_run",
+    )
+    for name in DATASETS:
+        audio = tmp_path / "noisy" / name / "en/wav"
+        audio.mkdir(parents=True)
+        for stem in ("same", "empty"):
+            (audio / f"{stem}.wav").write_bytes(f"noise {name} {stem}".encode())
+    path = tmp_path / "noise_config.json"
+    write(path, noisy)
+    return path, noisy, clean, calls, kw
+
+
+def test_noise_reuses_table_reruns_audio_and_delivers_six_files(tmp_path, monkeypatch):
+    config, cfg, clean, calls, kw = noisy_fixture(tmp_path, monkeypatch)
+    clean_checks = (tmp_path / "run/sha256.txt").read_bytes()
+    table_checks = (tmp_path / "tables/sha256.txt").read_bytes()
+    output = tmp_path / cfg["output"]
+    audit = run_english_retrieval(tmp_path, config, output, audit_only=True, **kw)
+    assert not output.exists() and calls == {"loads": 1, "retrieved": 6}
+    assert audit["audio_comparison"] == {
+        name: {"changed_files": 2, "identical_files": 0} for name in DATASETS
+    }
+    assert audit["snr_verified"] is False
+    report = run_english_retrieval(tmp_path, config, output, **kw)
+    assert report["sample_count"] == 6 and report["delivery_file_count"] == 6
+    assert report["checkpoint_sha256"] == clean["checkpoint_sha256"]
+    assert report["table_sha256"] == clean["table_sha256"]
+    assert report["audio_comparison"] == audit["audio_comparison"]
+    assert calls == {"loads": 2, "retrieved": 12}
+    for name in DATASETS:
+        for k in (5, 7):
+            delivered = json.loads((output / "delivery" / f"{name}_top{k}.json").read_text())
+            assert set(delivered) == {"same", "empty"}
+            # Clean 'empty' audio had []; noisy mock audio is retrieved afresh.
+            assert len(delivered["empty"]) == k
+            assert all(set(item) == {"word", "phoneme"} for item in delivered["empty"])
+            assert report["groups"][name][f"top{k}"]["expected_target_sample_pairs"] == (
+                clean["groups"][name][f"top{k}"]["expected_target_sample_pairs"]
+            )
+        for path in (output / name / "sample_shards").glob("*.json"):
+            row = json.loads(path.read_text())
+            assert Path(row["audio_path"]).is_relative_to(tmp_path / "noisy")
+    assert (tmp_path / "run/sha256.txt").read_bytes() == clean_checks
+    assert (tmp_path / "tables/sha256.txt").read_bytes() == table_checks
+    for line in (output / "sha256.txt").read_text().splitlines():
+        digest, name = line.split(maxsplit=1)
+        assert _sha(output / name) == digest
+    assert run_english_retrieval(tmp_path, config, output, resume=True, **kw) == report
+    assert calls == {"loads": 2, "retrieved": 12}
+    audio = tmp_path / "noisy/en_mexico/en/wav/same.wav"
+    audio.write_bytes(b"different noisy version")
+    with pytest.raises(ValueError, match="resume input/config/code identity differs"):
+        run_english_retrieval(tmp_path, config, output, resume=True, **kw)
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["missing", "extra", "identical", "missing_baseline", "tampered_baseline", "head", "output"],
+)
+def test_noise_preflight_rejects_wrong_pairing_or_baseline(tmp_path, monkeypatch, change):
+    config, cfg, _, calls, kw = noisy_fixture(tmp_path, monkeypatch)
+    audio = tmp_path / "noisy/en_chile/en/wav"
+    if change == "missing":
+        (audio / "empty.wav").rename(audio / "empty.bak")
+    elif change == "extra":
+        (audio / "extra.wav").write_bytes(b"unexpected")
+    elif change == "identical":
+        for p in audio.glob("*.wav"):
+            p.write_bytes((tmp_path / "en_chile/en/wav" / p.name).read_bytes())
+    elif change == "missing_baseline":
+        cfg.pop("comparison_run_config")
+    elif change == "tampered_baseline":
+        path = tmp_path / "run/run_config.json"
+        path.write_bytes(path.read_bytes() + b" ")
+    elif change == "head":
+        (tmp_path / "another.pt").write_bytes(b"another head")
+        cfg.update(checkpoint="another.pt", checkpoint_sha256=_sha(tmp_path / "another.pt"))
+    else:
+        cfg["output"] = "run"
+    write(config, cfg)
+    with pytest.raises(ValueError):
+        run_english_retrieval(tmp_path, config, tmp_path / "noise_run", audit_only=True, **kw)
+    assert calls == {"loads": 1, "retrieved": 6}
+    assert not (tmp_path / "noise_run").exists()
+
+
+def test_noise_rejects_changed_gate_even_when_inputs_match(tmp_path, monkeypatch):
+    config, _, _, calls, kw = noisy_fixture(tmp_path, monkeypatch)
+    original = external._run_config
+
+    def changed(**kwargs):
+        result = original(**kwargs)
+        result["gate"]["threshold"] = 0.1
+        return result
+
+    monkeypatch.setattr(external, "_run_config", changed)
+    with pytest.raises(ValueError, match="comparison retrieval/data contract changed"):
+        run_english_retrieval(tmp_path, config, tmp_path / "noise_run", audit_only=True, **kw)
+    assert calls == {"loads": 1, "retrieved": 6}
+
+
+def test_noise_workzone_config_changes_only_audio_and_output():
+    clean = json.loads(Path("configs/english_3000.workzone.json").read_text())
+    noisy = json.loads(Path("configs/english_3000_noise10db.workzone.json").read_text())
+    assert noisy.pop("audio_root").endswith("/2026-10-09-带噪10dB")
+    assert noisy.pop("comparison_run_config") == clean["output"] + "/run_config.json"
+    assert noisy["output"] != clean["output"]
+    noisy["output"] = clean["output"]
+    assert noisy == clean

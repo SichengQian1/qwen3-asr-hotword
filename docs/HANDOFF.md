@@ -1,5 +1,76 @@
 # 工作交接记录
 
+## 0.154 2026-10-12 三套英语10dB带噪Top5/Top7对照入口交付（待H200）
+
+用户要求对三套英语带噪音频生成同格式六份交付。按新父目录解释其路径：
+`/host_home/star/两波验证集-可直接推理/2026-10-09-带噪10dB/<en_chile|en_colombia|en_mexico>/en/wav/`。
+用户同时复述的无日期旧路径用作干净参考，不用于本次音频推理。目录名10dB是用户
+提供的数据说明，当前不测信噪比，不宣称已核验加噪算法或逐条音频内容对应。
+
+新增configs/english_3000_noise10db.workzone.json，沿用已冻结773目标+2227补词的
+outputs/english_3000_keywords_v1及480h Head；干净转写和目标JSON均从原目录读取。
+原构表配置保持原字节不变，不重新构表，不采纳带噪目录中的新词表/转写。
+新结果目录为outputs/english_3000_retrieval_480h_noise10db_v1，干净结果保持不动。
+
+英语评测入口新增audio_root+comparison_run_config成对配置，绑定0.153已完成的
+outputs/english_3000_retrieval_480h_v1/run_config.json与report.json，并按原sha256清单
+核验这两文件。允许输出目录与音频路径改变；比较其他配置、Head/词表及全部非音频
+输入SHA、样本ID/参考文本/语言、目标与分母、检索门控参数，以及底层检索代码SHA。
+英文运行封装自身新增本次路径/校验逻辑，允许与旧封装SHA不同；底层检索算法不变。
+旧音频SHA从已封存的干净run_config读取作比较，不要求再次读取旧音频字节。
+
+预检要求新音频与旧转写stem严格一一对应；每组统计changed_files和identical_files。
+某组全部字节与干净版相同则拒绝；部分相同明确报告，不能据changed_files>0宣称
+所有样本都成功加噪。只验证文件字节变化，报告snr_verified=false。
+仍使用Top5直接复现、Top7精确重放，完整3k词表、原参数、原输出结构；不调阈值，
+不训练、不调用最终Qwen转写。本地只用合成fixture，不报告真实带噪召回结果。
+
+### 工区命令与回传
+
+分支codex/g2p-coverage-scan，交付SHA见回复；容器外拉代码：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内运行，4替换为空闲物理GPU。预检通过才启动推理：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+C=configs/english_3000_noise10db.workzone.json
+python -B scripts/run_english_3000.py audit --config "$C" &&
+python -B scripts/run_english_3000.py run --config "$C" --gpu 4
+```
+
+无需build；带噪配置执行build会明确拒绝。预检不创建结果目录、不加载模型。
+中断后保持代码、配置、词表、音频及基线身份不变，恢复同一次带噪运行：
+
+```bash
+python -B scripts/run_english_3000.py run \
+  --config configs/english_3000_noise10db.workzone.json --gpu 4 --resume
+```
+
+新实验拒绝已有输出，不能用--resume复用干净版或其他加噪版结果。成功后验证：
+
+```bash
+(cd outputs/english_3000_retrieval_480h_noise10db_v1 && sha256sum -c sha256.txt)
+cat outputs/english_3000_retrieval_480h_noise10db_v1/report.json
+```
+
+返回新目录report.json和sha256.txt即可。delivery/仍为en_chile_top5/top7.json、
+en_colombia_top5/top7.json、en_mexico_top5/top7.json，共六份（各预计2,000个stem），
+格式stem→[{word,phoneme}]，空召回[]。回传后按0.153同目标分母比较召回、精确率及
+负样本误触发，不把本次本地检查当作H200结果。
+
+定向英语测试34通过；全量pytest 499通过、23跳过。新增测试覆盖带噪真实路径使用、
+重新执行检索而非复用旧输出、六文件/重放/空结果既有行为、原产物保护、重复恢复、
+音频变更拒绝恢复、缺失/多余/全同音频、基线篡改/缺失、换Head/参数和旧输出目录。
+修改文件Ruff、定向Mypy、git diff --check通过。全仓Ruff仍有既有5个E501（用户PPT
+脚本2、scan_g2p_coverage3），MYPYPATH=src mypy仍有训练模块3个既有unused-ignore，
+未修改无关文件。未跟踪用户文件保持不动。
+
 ## 0.153 2026-10-12 三套英语3000词Top5/Top7完成（H200回传）
 
 用户回传`outputs/english_3000_retrieval_480h_v1/report.json`内容，状态completed，

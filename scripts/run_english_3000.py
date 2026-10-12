@@ -35,6 +35,10 @@ def main() -> int:
         cfg = json.loads(args.config.read_text(encoding="utf-8"))
         root, config = args.root.resolve(), args.config.resolve()
         if args.stage == "build":
+            if "audio_root" in cfg:
+                raise ValueError(
+                    "alternate-audio evaluation reuses the existing table; use audit/run"
+                )
             report = build_english_table(root, config, root / cfg["tables"])
         else:
             report = run_english_retrieval(

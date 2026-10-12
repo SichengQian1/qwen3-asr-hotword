@@ -21,8 +21,100 @@ from qwen_hotword.phonemes.coverage import PhonemeVocab, load_phoneme_vocab
 from qwen_hotword.training.spanish_capacity import _sha, _verified
 
 
+def _audio_comparison(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    """Bind an audio-only rerun to a completed, sealed clean run."""
+    cfg, identities = plan["configuration"], plan["inputs"]
+    if "audio_root" not in cfg:
+        return {}
+    previous_path = root / cfg["comparison_run_config"]
+    if previous_path.name != "run_config.json":
+        raise ValueError("comparison_run_config must name the clean run_config.json")
+    previous = _json(_verified(previous_path.parent, previous_path.name, identities))
+    old_report = _json(_verified(previous_path.parent, "report.json", identities))
+    old_cfg = previous["configuration"]
+    allowed = {"output", "audio_root", "comparison_run_config"}
+    if (
+        "audio_root" in old_cfg
+        or {k: v for k, v in cfg.items() if k not in allowed}
+        != {k: v for k, v in old_cfg.items() if k != "output"}
+        or (root / cfg["output"]).resolve() == previous_path.parent.resolve()
+    ):
+        raise ValueError("audio comparison requires identical clean configuration and a new output")
+    table_path = str(root / cfg["tables"] / "keyword_bias_phoneme.json")
+    if (
+        old_report.get("status") != "completed"
+        or old_report.get("checkpoint_sha256") != cfg["checkpoint_sha256"]
+        or old_report.get("table_sha256") != identities[table_path]["sha256"]
+        or old_report.get("keyword_count") != cfg["target_size"]
+        or old_report.get("delivery_file_count") != 6
+        or old_report.get("top5_reproduced") is not True
+        or old_report.get("top7_exact_replay") is not True
+        or set(previous["groups"]) != set(plan["groups"])
+    ):
+        raise ValueError("completed clean comparison report/Head/table differs")
+    clean_audio = {
+        r["audio_path"] for g in previous["groups"].values() for r in g["records"]
+    }
+    for filename, identity in previous["inputs"].items():
+        if filename not in clean_audio and (
+            identities.get(filename, {}).get("sha256") != identity["sha256"]
+        ):
+            raise ValueError(f"comparison non-audio input changed: {filename}")
+    # This orchestration module adds alternate audio; retrieval algorithms stay fixed.
+    old_code = dict(previous["retrieval_source_sha256"])
+    new_code = dict(plan["retrieval_source_sha256"])
+    old_code.pop("inference/english_retrieval.py", None)
+    new_code.pop("inference/english_retrieval.py", None)
+    if old_code != new_code:
+        raise ValueError("comparison retrieval algorithm code changed")
+    comparisons = {}
+    for name, group in plan["groups"].items():
+        old_group = previous["groups"][name]
+        configs = []
+        for original in (group["config"], old_group["config"]):
+            config = {k: v for k, v in original.items() if k != "git_commit"}
+            config["sources"] = [
+                {k: v for k, v in s.items() if k != "audio_dir"} for s in config["sources"]
+            ]
+            configs.append(config)
+        records = [
+            [{k: v for k, v in r.items() if k != "audio_path"} for r in g["records"]]
+            for g in (group, old_group)
+        ]
+        if (
+            configs[0] != configs[1]
+            or records[0] != records[1]
+            or group["target_ids"] != old_group["target_ids"]
+            or group["target_presence"] != old_group["target_presence"]
+        ):
+            raise ValueError(f"{name}: comparison retrieval/data contract changed")
+        changed = sum(
+            identities[n["audio_path"]]["sha256"]
+            != previous["inputs"][o["audio_path"]]["sha256"]
+            for n, o in zip(group["records"], old_group["records"], strict=True)
+        )
+        if not changed:
+            raise ValueError(f"{name}: alternate audio bytes are all identical to baseline")
+        comparisons[name] = {
+            "changed_files": changed,
+            "identical_files": len(group["records"]) - changed,
+        }
+    return {
+        "audio_root": cfg["audio_root"],
+        "comparison_run_config": str(previous_path),
+        "audio_comparison": comparisons,
+        "snr_verified": False,
+    }
+
+
 def prepare_english_run(root: Path, config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     cfg = _json(config_path)
+    if ("audio_root" in cfg) != ("comparison_run_config" in cfg) or any(
+        not isinstance(cfg[key], str) or not cfg[key].strip()
+        for key in ("audio_root", "comparison_run_config")
+        if key in cfg
+    ):
+        raise ValueError("alternate audio requires audio_root and a fixed clean comparison run")
     identities: dict[str, Any] = {}
     checked(config_path, identities)
     tables = root / cfg["tables"]
@@ -75,7 +167,12 @@ def prepare_english_run(root: Path, config_path: Path) -> tuple[dict[str, Any], 
     records_by_group = {}
     for name in DATASETS:
         info = cfg["sources"][name]
-        source = external.SourceSpec(name, root / info["audio"], root / info["transcripts"])
+        audio_dir = (
+            root / cfg["audio_root"] / name / "en" / "wav"
+            if "audio_root" in cfg
+            else root / info["audio"]
+        )
+        source = external.SourceSpec(name, audio_dir, root / info["transcripts"])
         # Separate groups deliberately permit the same stem in different datasets.
         records, audit = external.build_external_dataset((source,), language="en")
         if len(records) != report["transcript_counts"][name]:
@@ -138,6 +235,7 @@ def prepare_english_run(root: Path, config_path: Path) -> tuple[dict[str, Any], 
         "model_weight_shards_hashed": False,
         "table_filler_exclusion_used_transcripts": True,
     }
+    plan.update(_audio_comparison(root, plan))
     return plan, {
         "vocab": vocab,
         "bundle": bundle,
@@ -162,6 +260,11 @@ def run_english_retrieval(
         raise FileExistsError(f"output exists; --resume only for identical inputs: {output}")
     print("Checking English table, Head, transcripts and audio SHA256...", flush=True)
     plan, runtime = prepare_english_run(root, config_path)
+    comparison = {
+        key: plan[key]
+        for key in ("audio_root", "comparison_run_config", "audio_comparison", "snr_verified")
+        if key in plan
+    }
     if audit_only:
         return {
             "status": "audit_pass",
@@ -173,6 +276,7 @@ def run_english_retrieval(
             "selected_filler_transcript_overlap": 0,
             "target_presence": {name: g["target_presence"] for name, g in plan["groups"].items()},
             "checkpoint_sha256": plan["configuration"]["checkpoint_sha256"],
+            **comparison,
         }
     if output.exists():
         if not (output / "run_config.json").is_file() or _json(output / "run_config.json") != plan:
@@ -268,7 +372,10 @@ def run_english_retrieval(
             "Directory names are dataset names, not verified speaker accent metadata.",
         ],
         "return_files": [str(output / "report.json"), str(output / "sha256.txt")],
+        **comparison,
     }
+    if comparison:
+        report["limitations"].append("Noise level is user supplied, not measured by this run.")
     external._write_or_verify_json(output / "report.json", report)
     seal(output)
     return report
