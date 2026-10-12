@@ -1,5 +1,115 @@
 # 工作交接记录
 
+## 0.151 2026-10-12 三套英语3000词并集与Top5/Top7入口交付（待H200）
+
+用户新增en_chile/en_colombia/en_mexico三套英语数据，目录均为
+`/host_home/star/两波验证集-可直接推理/<数据集>/en/`，包含
+`en_keyword_bias_phoneme.json`、`transcripts.txt`、`wav/`。
+本阶段准备工具，不训练、不在本地加载完整模型、不读取或修改既有outputs。
+
+### 已核实附件与构表规则
+
+用户提供的一个样例JSON使用keyword_sets.all_test，470个目标；2,000条转写。
+本地真实附件解析通过，目标缺失音素/OOV均0，不将这个单例当成三套全量验证。
+JSON SHA：050cb9ab01eaab22a583908ad0ec9cb3765b80fd7f27b38640c45fb0afc9a707；
+transcripts SHA：7680f3d4de15b9d61b71b4cea6a8fb54a7f2dfce12d1a3c1b1ff170dee4deccb。
+附件不提交；未知三套并集数量，不硬编码每组样本数，也不凭目录名认定说话人口音。
+
+新增scripts/run_english_3000.py、configs/english_3000.workzone.json及独立英语构表/评测模块。
+先读三份all_test，按NFKC/casefold/标点分词规范取并集；同规范词面同token标签只保留
+一个检索条目、记录大小写等alias；不同标签冲突直接报错，不猜发音或丢目标。
+保留用户目标的词面及原发音，包含短词、多词短语和西语词面，不重新跑G2P。
+
+补词来自既有英语train全文实际出现的词和同批英语MFA词典，身份固定为：
+- outputs/en_us_swift_temporal2x_v1/full_ctc_train.jsonl，SHA
+  6882074371edfdc94a5ca66ff4ba487c0f965c5f7527b0026740af9b952f9dc8；
+- outputs/en_external_train_sources_v1/swift_us_english/mfa_g2p/
+  swift_us_english_english_us_mfa.v1.dict，SHA
+  2dd3c3e045eabaeac4666a4a99cf472bf7a4ef816adf35943a072bd2262c23e2。
+
+逐行要求train和英语标签；补词仅取至少2个ASCII字母的单词，要求已有唯一MFA发音、
+当前音素表无OOV。按三套转写合并后的完整token集合排除补词（大小写、Unicode、标点
+统一；不做子串或词干猜测）。目标始终优先保留。固定seed哈希排序补至恰好3,000个
+规范唯一条目；不足则报告缺口并停止，不放宽排除条件。保留自然同音/近音，不做声学排除。
+选择记录保存来源/训练出现次数，排除记录保存原因；生成目标分组、报告和SHA256。
+
+这是用户明确要求的“按测试转写排除补词”受控实验，报告标记
+table_filler_exclusion_used_transcripts=true。不能宣称盲测词表，不把精度变化全部
+归因于模型；参考转写中的未出现也不是音频听审结论。在线候选选择仍只用音频。
+
+### 评测与产物约定
+
+复用0.147/0.150的新480h epoch25 Head，SHA
+320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265；
+vocab SHA 0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4。
+仅扩展external keyword loader的英语语言/ID映射；原ES/PT行为不变。
+沿用完整音频Anchor检索、64候选、threshold .75、posterior weight/min .25/.5、
+max edit .35、margin0、anchor2/3/4、每词24、offset1、radius2、minimum phonemes1。
+推理设language=English，单次保留64候选，复现Top5并精确重放Top7；不调用Qwen文本生成。
+
+新目录outputs/english_3000_keywords_v1与outputs/english_3000_retrieval_480h_v1。
+构表拒绝已有目录；评测恢复绑定源码SHA/git、输入配置、全部三份目标/转写、训练词典、
+词表、Head和音频字节。不能用换表/换数据后的--resume复用旧结果。按样本落盘，已完成
+相同运行恢复时核验文件，不重新加载模型。若要另开实验，复制配置到新文件并改新输出
+目录，保留旧配置及旧outputs；不得删目录绕过校验。
+
+预检要求各组音频stem与转写严格一一匹配，无缺失、重复或多余。各组独立导出，允许
+不同数据集具有相同stem。delivery/下六文件：
+en_chile_top5.json、en_chile_top7.json、en_colombia_top5.json、en_colombia_top7.json、
+en_mexico_top5.json、en_mexico_top7.json。每个stem→[{word,phoneme}]，无召回保留[]。
+目标召回按各组声明的目标词计数；full_3000_view包含整张并集表（补词在参考中零出现）。
+不再给新报告写full_4000_view或wave目标字段；旧wave/SD导出默认格式保持不变。
+
+### 工区运行
+
+分支codex/g2p-coverage-scan，推送SHA见交付消息。容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内，第一步仅CPU读取文本/词典，不需要GPU、模型下载或MFA运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_english_3000.py build
+```
+
+要求status=completed、total=3000、all_targets_retained=true、
+selected_filler_transcript_overlap=0、oov_count=0。三套真实并集/补词数由这一步报告。
+构表成功再预检和推理，4换成空闲物理GPU，映射为cuda:0：
+
+```bash
+python -B scripts/run_english_3000.py audit &&
+python -B scripts/run_english_3000.py run --gpu 4
+```
+
+audit不加载模型、不创建输出；run自带同等预检。中断恢复：
+
+```bash
+python -B scripts/run_english_3000.py run --gpu 4 --resume
+```
+
+验证及回传（无需传音频、模型或sample_shards）：
+
+```bash
+(cd outputs/english_3000_keywords_v1 && sha256sum -c sha256.txt)
+(cd outputs/english_3000_retrieval_480h_v1 && sha256sum -c sha256.txt)
+cat outputs/english_3000_keywords_v1/report.json
+cat outputs/english_3000_retrieval_480h_v1/report.json
+```
+
+回传两份report.json和sha256.txt；交下游retrieval目录delivery/六文件。
+收到H200真实结果后再单独写结果型HANDOFF，不将本地mock当召回率证据。
+
+本地全量pytest：489通过、23跳过；定向覆盖构表/原wave/SD/外部检索/重放。
+24项新增测试覆盖真实容量3,000、三套转写排除、目标alias/标签冲突/OOV、来源身份、
+六份交付、Top5/Top7差异、同stem隔离、无结果[]、中断恢复及变更输入拒绝。
+修改文件Ruff和定向Mypy通过，git diff --check通过。全仓检查仍有既有5个Ruff E501
+（scan_g2p_coverage3处、用户PPT脚本2处）和训练模块3个Mypy unused-ignore，未修改。
+
 ## 0.150 2026-10-09 四wave 10dB带噪召回完成（H200回传）
 
 用户回传report状态completed，800条/8组各100条，16份delivery，

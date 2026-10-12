@@ -96,10 +96,11 @@ def load_keyword_bias(
     language: str = "pt-BR",
 ) -> KeywordBundle:
     model_language = _normalize_language(language)
-    if model_language not in {"Spanish", "Portuguese"}:
-        raise ValueError("external keywords support Spanish or Portuguese")
-    language_tag = "es" if model_language == "Spanish" else "pt-BR"
-    id_tag = "es" if model_language == "Spanish" else "pt"
+    language_tag, id_tag = {
+        "English": ("en", "en"),
+        "Spanish": ("es", "es"),
+        "Portuguese": ("pt-BR", "pt"),
+    }[model_language]
     source_path = Path(path).expanduser()
     raw = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):

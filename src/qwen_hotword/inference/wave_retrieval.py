@@ -318,9 +318,15 @@ def export_group(
     group: Mapping[str, Any],
     bundle: external.KeywordBundle,
     rows: Sequence[Mapping[str, Any]],
+    *,
+    full_table_metric_key: str = "full_4000_view",
+    table_filler_exclusion_used_transcripts: bool = False,
 ) -> dict[str, Any]:
     """Validate D5 reproduction, replay D7 exactly, then serialize the unchanged schema."""
     d5, _, summary, _ = external.summarize_retrieval(rows, bundle=bundle)
+    if table_filler_exclusion_used_transcripts:
+        summary["table_filler_exclusion_used_transcripts"] = True
+        summary["evaluation_design"] = "transcript_conditioned_negative_fillers"
     gate = _validated_source_gate(group["config"])
     replayed = replay_rows_top7(rows, gate=gate, bundle=bundle)
     _verify_source_top5_metrics(
@@ -340,6 +346,10 @@ def export_group(
             raise ValueError(f"{name}: downstream ID/Top5 reproduction mismatch")
         external._write_or_verify_json(output / "delivery" / f"{name}_top{k}.json", delivery)
         metrics[f"top{k}"] = _view_metrics(replayed, primary, top_k=k)
+        if full_table_metric_key != "full_4000_view":
+            view = metrics[f"top{k}"]
+            view[full_table_metric_key] = view.pop("full_4000_view")
+            view["declared_target_count"] = view.pop("declared_wave_target_count")
     directory = output / name
     external._write_or_verify_jsonl(directory / "retrieval_details.jsonl", rows)
     external._write_or_verify_json(directory / "evaluation_summary.json", summary)
