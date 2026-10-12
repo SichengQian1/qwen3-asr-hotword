@@ -1,5 +1,198 @@
 # 工作交接记录
 
+## 0.155 2026-10-12 英语60条最终ASR提示排序/优先级对照交付（待H200）
+
+本阶段响应用户明确的新实验：复用已完成的干净英语Top7，只测完整Qwen3-ASR最终转写。
+不运行CTC检索、不训练、不改检索算法/门控，不使用带噪音频或流式状态，不覆盖旧outputs。
+开始时本地及origin/codex/g2p-coverage-scan均为980b48ed2609da8a1635d3209ea6bbd6dd16cb77，
+已完整读取AGENTS.md及本文件0.151–0.154的英语资产、结果和交付约定。原有用户未跟踪
+PPT、图片、报告及pt_quality_whisper配置均不修改、不提交。本节为新实验入口完成节点，
+不是H200实测结果；交付commit SHA见本轮回复及git rev-parse HEAD。
+
+### 固定资产与新目录
+
+入口：scripts/run_english_prompt_order.py，配置configs/english_prompt_order.workzone.json。
+独立模块：evaluation/prompt_order.py、prompt_order_metrics.py及
+inference/prompt_order_experiment.py、prompt_order_runtime.py。
+
+- 三套原始干净数据：/host_home/star/两波验证集-可直接推理/
+  <en_chile|en_colombia|en_mexico>/en/{wav,transcripts.txt}，预期各2,000条。
+- 已完成检索：outputs/english_3000_retrieval_480h_v1，读取封存run_config、report和
+  delivery/<dataset>_top7.json；保留delivery数组原顺序，不重跑、截取新排名。
+- 固定表：outputs/english_3000_keywords_v1/keyword_bias_phoneme.json，SHA
+  6e2a7016d16bf86cb1f31f3254213e58f5becd4810cc02a166fd604d1cd9b655。
+- 固定目标范围：同目录targets_by_dataset.json，SHA
+  e3b362df7708ece0c2b9a444199997ac0b157235581a909a8d1e2bbb2b97924f。
+  两者与用户此前返回的sha256(2).txt核对；表定义身份/范围，不注入整张3k表。
+- 检索报告Head身份须为320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265，
+  仅核对来源，不加载CTC Head。
+- 完整模型：/glusterfs_103/models/Qwen3-ASR-1.7B。配置中固定已知config/index SHA，
+  prepare逐字节计算所有权重分片及tokenizer/processor/模板等资产SHA，后续audit/run重验。
+- 新输出：outputs/english_prompt_order_v1。prepare拒绝已有目录；不同模板、顺序规则或
+  输入使用另一个新目录，不能借--resume混入旧结果。
+
+### 先冻结样本，再运行
+
+seed=20261012。每组按目标/参考与旧Top7分层：10条target_hit（参考含本组目标且Top7
+至少命中一个）、5条target_miss（参考含本组目标但Top7无正确目标）、5条no_target。
+各层按SHA256(seed, selection, dataset/stem)排序取样，不读任何新ASR转写。
+若某层不足，先取各层原配额，再按target_hit→target_miss→no_target固定顺序从未选
+样本补足。记录原始缺额、requested_stratum、actual stratum、fallback；仍不足20条则
+冻结不足报告并拒绝推理。不会把补选样本伪称原配额层，也不会挑既有ASR错误样本。
+
+固定样本ID、来源、原始词面/音素、分层、参考、音频SHA、所有条件context及执行顺序
+写入freeze/。保留不足两个候选、空候选、Oracle多于7词的计数。每样本组执行顺序也
+固定seed打散，以减少固定执行次序与条件混淆；每次调用前重置相同的该样本随机seed。
+
+| 组 | context内容 |
+|---|---|
+| A | 空context，无热词说明 |
+| B | Top7交付原顺序；不足7保持实际数量 |
+| C | B倒序，词集合不变 |
+| D | B按seed+sample ID+规范词面哈希确定的随机排列 |
+| E | D同序，全部priority: normal |
+| F | E同序，仅B的第一个候选priority: high，其余normal |
+| G | 本组声明目标与参考的交集，按首次规范token位置排列；全部保留 |
+| H | G完全相同候选倒序 |
+
+B/C/D/G/H英文模板完全相同：
+
+```text
+The following terms are spelling references. Use a term only when supported by the audio. Do not insert a term that is not spoken.
+Term A
+Term B
+```
+
+E/F英文模板完全相同，仅一个priority值变化：
+
+```text
+The following terms are spelling references. Priority indicates preference only when the audio supports multiple candidates. Do not insert a term that is not spoken.
+Term A — priority: normal
+Term B — priority: high
+```
+
+空候选直接使用空context，不虚构词；规范化去重保留原词面及音素，音素只作来源记录，
+prompt不注入音素。Oracle首次位置相同以规范词面、原词面依次打破并列；重叠的声明
+短语独立保留。G/H可含Top7未召回的正确目标，超过7也不截断，不注入整句参考/普通词。
+D允许随机排列恰好等于B/C，明确统计相同prompt，不强制为获得差异而重排。
+
+### 实际Qwen调用与控制变量
+
+已检查公开qwen-asr==0.0.6的源码wheel（仅Python源码、无模型权重），对照官方
+[离线接口源码](https://github.com/QwenLM/Qwen3-ASR/blob/main/qwen_asr/inference/qwen3_asr.py)。
+运行前用安装包版本及4个关键源文件SHA核验：inference/qwen3_asr.py、inference/utils.py、
+modeling_qwen3_asr.py、processing_qwen3_asr.py。若不一致先失败，不能自动升级或猜API。
+
+实际接口为transcribe(audio, context, language, return_time_stamps)，不接受臆造的
+生成参数。使用官方transformers后端，from_pretrained设bf16、eager attention、
+max_inference_batch_size=1、max_new_tokens=512；thinker.generation_config固定
+贪心do_sample=False、num_beams=1、num_return_sequences=1，其完整实际配置落盘。
+language固定English，return_time_stamps=False，完整音频每次独立请求，无上一条对话。
+要求音频在(0,1200]秒以避免官方内部长音频切块；每条实际生成次数须恰好1。
+
+固定Python/NumPy/Torch/CUDA seed、deterministic algorithms、禁用TF32、cuDNN benchmark；
+CUBLAS_WORKSPACE_CONFIG=:4096:8，离线加载已存在本地模型，不下载。记录包版本、
+实际GPU/CUDA/cuDNN、运行参数、完整生成配置，不能宣称跨硬件/版本必然逐bit一致。
+
+调用边界拦截并检查真正传入的context、两条system/user消息、序列化prompt，以及
+传给thinker.generate的input_ids。只允许processor把audio占位token展开，其他token
+必须与完整prompt一致；改写、截断、额外分块、继承past_key_values或改变解码参数时报错。
+保存完整实际context、序列化prompt、token哈希/长度、实际生成参数、转写和截断上限标记。
+同时每组数据确定性选1条重复完全相同B请求，3次额外推理与480次主实验分开统计；
+若重复已有输出不同，须先考虑运行波动，不能直接把所有配对变化归因于prompt。
+
+### 报告和解释边界
+
+report.json按overall、dataset、实际采样层、dataset×层输出每组计数/分母/比率：
+最终声明目标召回、正确注入词采用、参考不存在的注入词落字、无目标样本误落字、WER
+及S/D/I。计量为不同规范词×音频对，同词在同一音频多次出现只计一次；合并以总命中
+除以总分母，分母0为null。WER统一NFKC/casefold/Unicode标点为空格的词序列编辑距离，
+不去音调、不另做数字展开；empty reference单独统计，不套用不同条件的规范化。
+
+配对A/B、B/C、B/D、C/D、E/F、D/E、G/H、A/G、B/G，输出逐条原始/规范转写变化、
+正确目标新增/丢失、错误候选新增/消失、WER改善/退化数。错误候选比较在两组参考缺失
+候选并集上同时匹配两个输出，避免将A没prompt导致的空集合误当作A完全没说错词。
+E/F额外只看被提升的B首词，按参考存在/缺失报告normal/high两侧落字计数。
+
+排序对照仅≥2候选且实际prompt变化的样本计入有效分母，相同/不足2个单列。
+代表例按每对比较×unchanged/improved/worsened/changed_equal_wer固定哈希选1条，
+不存在的类别显式列空；完整60条配对结果均保留。这里improved/worsened仅指WER，
+不替代热词质量判断，不只展示成功样本。
+
+结论限定：这是60条分层探索，不直接代表6,000条；文字匹配错误不等于听审确认的
+幻觉；采用率不是prompt造成采用的因果证明；Oracle不是线上能力或严格数学上界。
+B/G同时改变候选覆盖、正确性、数量和顺序，不能解释为纯排序效应。实验新提示模板
+也不能直接与其他历史ASR流水线指标作单因素比较。
+
+### 工区执行与安全恢复
+
+容器外（分支codex/g2p-coverage-scan）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内首次准备：读取旧交付、音频/模型身份，冻结60条；无模型加载/推理。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_english_prompt_order.py prepare
+```
+
+查看冻结摘要后运行。4替换成空闲物理GPU，脚本映射为逻辑cuda:0：
+
+```bash
+python -B scripts/run_english_prompt_order.py run --gpu 4
+```
+
+run会自动重复完整预检；如只想再次只读核验：
+
+```bash
+python -B scripts/run_english_prompt_order.py audit
+```
+
+相同实验中断后恢复，不再prepare：
+
+```bash
+python -B scripts/run_english_prompt_order.py run --gpu 4 --resume
+```
+
+恢复同时比较冻结plan/ID/音频/候选/参考/context、模型权重/配置/tokenizer、相关代码SHA、
+Git commit及依赖身份。运行时还要求实际解码配置、GPU和环境相同；不同GPU编号也拒绝
+未完成运行的复用，应保持原卡/环境。每个sample×group结果原子保存、带独立摘要；
+篡改或缺失已封存结果会失败，不重新覆盖。完成的相同运行只校验返回，不加载模型。
+独占进程锁防同时写；中断请求未保存则重做，attempts.jsonl分别计入已开始/已保存请求，
+未保存的尝试可能尚未或已经到GPU，不能精确声称每次中断都执行了推理。
+
+输出目录下：freeze/{plan.json,samples.jsonl,sample_ids.txt,preparation_report.json,sha256.txt}；
+runtime.json；results/<UID哈希>/<A-H或B_repeat>.json；predictions.jsonl（483条预期）；
+paired_results.jsonl（60条，包含8组候选、实际prompt、转写及配对结果）；
+representative_examples.md；report.json；sha256.txt。音频/模型不复制。
+
+```bash
+(cd outputs/english_prompt_order_v1 && sha256sum -c sha256.txt)
+cat outputs/english_prompt_order_v1/report.json
+```
+
+返回report.json、sha256.txt、representative_examples.md即可，无需权重或全部旧outputs。
+prepare如报告缺额，把freeze/preparation_report.json一并返回；缺额与补选会在新推理前
+冻结保存。如果遇到版本/source SHA不符，返回错误和安装版本，不绕过校验或自行升级。
+
+### 本地验证（不等于H200结果）
+
+定向测试31通过，包含8组变量隔离、去重/空/单候选、Oracle>7与并列顺序、分层缺额与
+不足阻断、micro/WER/共享错误候选分母、优先词分析、重复请求波动单列、483次mock完整
+运行、中断仅补缺、已有产物保护、资产/代码/配置/运行环境变化拒绝恢复、结果篡改拒绝。
+Qwen边界用轻量替身测试真实封装逻辑，覆盖context改写、额外历史、token截断/改写、
+继承状态、采样参数改动、额外生成调用；未加载任何完整Qwen模型。
+全量pytest：530 passed / 23 skipped（本地无Torch等可选运行依赖）。
+本轮相关文件Ruff、定向Mypy通过；git diff --check通过。
+全仓Ruff仍有5个既有E501：用户PPT辅助脚本2处、scripts/scan_g2p_coverage.py 3处；
+全仓Mypy仍有ctc_overfit.py:260、sharded_ctc.py:989、unfrozen_encoder_ctc.py:813的
+3个既有unused-ignore。未修改无关代码。本轮尚无排序/优先级有效性的实测结论。
+
 ## 0.154 2026-10-12 三套英语10dB带噪Top5/Top7对照入口交付（待H200）
 
 用户要求对三套英语带噪音频生成同格式六份交付。按新父目录解释其路径：

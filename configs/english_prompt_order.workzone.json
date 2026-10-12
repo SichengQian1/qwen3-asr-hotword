@@ -1,0 +1,17 @@
+{
+  "seed": 20261012,
+  "language": "English",
+  "max_new_tokens": 512,
+  "source_samples_per_dataset": 2000,
+  "keyword_count": 3000,
+  "data_root": "/host_home/star/两波验证集-可直接推理",
+  "retrieval": "outputs/english_3000_retrieval_480h_v1",
+  "tables": "outputs/english_3000_keywords_v1",
+  "table_sha256": "6e2a7016d16bf86cb1f31f3254213e58f5becd4810cc02a166fd604d1cd9b655",
+  "targets_sha256": "e3b362df7708ece0c2b9a444199997ac0b157235581a909a8d1e2bbb2b97924f",
+  "retrieval_head_sha256": "320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "model_config_sha256": "2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f",
+  "model_index_sha256": "f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60",
+  "output": "outputs/english_prompt_order_v1"
+}
