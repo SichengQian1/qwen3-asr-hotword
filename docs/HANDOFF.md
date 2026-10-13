@@ -1,5 +1,81 @@
 # 工作交接记录
 
+## 0.160 2026-10-13 英语未进候选与门控失败：小样本配对取证入口（待工区）
+
+用户要求先看具体失败样本，再讨论原因和修改；本阶段不改检索算法、词表、Head或阈值。
+开始时本地/远端codex/g2p-coverage-scan均为f4d471bcfea96fe3319a169ea63b4643f7465c0d，
+已完整读AGENTS、相关HANDOFF和实际候选/门控代码，tracked修改为空，用户未跟踪文件保留。
+用户已粘贴0.159工区诊断：英语3215/4374命中、666未进保存候选、485门控失败、
+8通过门控但低于Top7；扩表仅丢1个最终目标，原新6000条CTC序列/置信度完全相同。
+这些是用户回传的聚合证据，本地未收到原summary/examples字节；尚不能将失败阶段
+归因为标签错、模型错或多语干扰。原examples只取扩表后改变的案例，不足以检查持续漏召回。
+
+### 抽样与证据
+
+新增scripts/extract_english_failure_cases.py及evaluation/english_failure_cases.py、
+retrieval_case_trace.py，只读旧审核表与新4k表两轮已封存的英语结果：
+
+```text
+outputs/reviewed_joint_target_retrieval_480h_v1
+outputs/reviewed_joint_4000_retrieval_480h_v1
+```
+
+- 对每套英语数据按新结果的目标×音频状态分层：未进候选2例、仅score门控失败2例、
+  其他门控失败1例、成功对照1例。固定seed为english-failure-cases-20261013-v1，
+  按SHA256(seed,dataset,stratum,sample_id,target_id)排序；层内音频ID不重复。
+  每套最多6例、三套最多18例；不足取全部且报告缺口，不跨层补选。层间可重复音频，
+  输出唯一音频数量；不是随机总体样本，不从例子数量推断全量根因占比。
+- 核对两轮SHA清单、Head/词表/配置/样本/记录音频SHA、目标范围与保留条目；扫描英语
+  全部记录，重算旧新Top7六项计数并与原报告核对。校验CTC token ID/符号/置信度，
+  复用既有门控判定，保存旧新状态和同音频同目标配对。
+- 对选中案例用原Anchor实现/参数和保存的CTC序列作CPU复查，取得截断前完整排序；
+  验证其前64变体与原cap查询一致，再复现全部保存变体的评分/排名/匹配token位置。
+  区分无Anchor且无exact命中、截断前排名超cap、已进候选后失败；不只从不存在推断。
+  当前参与重放的关键代码SHA须与原运行记录一致，不一致或复现失败直接报错。
+  原运行未记录exact_automaton.py身份，本次记录其SHA并以样本实际重放一致作为限制条件。
+- 每个目标保留全部索引发音变体、获胜发音、旧新前列竞争词及Top7是否选中、参考存在性、
+  完整CTC token/confidence、score/edit/posterior、阈值差值和逐音素编辑。
+  另用相同评分器对该目标做全起点搜索（仍受原窗口长度范围约束）；它是诊断对照，
+  不改变实际候选/门控结果，不生成新的全表排名，更不代表召回必然改善。
+- CTC最佳片段可能匹配别的词，不能替代听审/真实词边界。新位置仅为decoded token
+  下标；原逐token帧区间未保存，内部占位step不导出为音频时间。此阶段不调用MFA，
+  不认证目标发音或模型预测正确，不把表→CTC编辑自动归为模型错误。
+
+### 工区交付与结果返回
+
+容器外拉取（远端SHA见本轮回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+```
+
+容器内执行，不需要GPU或aligner环境，不加载模型/音频：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/extract_english_failure_cases.py
+```
+
+自动新建outputs/english_failure_cases_v1_<随机后缀>，支持--root、--old-run、--new-run、
+--output-dir、--seed；拒绝已有目录及源运行内部目录。无resume；中断后重跑新目录，
+相同资产/seed取相同案例。输出summary.json、examples.json、examples.md、
+target_terms.txt、sha256.txt，另压缩为return_bundle.zip便于回传；清单覆盖包内4个
+数据文件，zip不递归包含自己。打印包路径和字节数，只需返回该zip，不传完整详情或权重。
+
+```bash
+R=outputs/english_failure_cases_v1_实际后缀
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+```
+
+本地定向测试14 passed，全量609 passed/23 skipped；新增代码Ruff通过、无新增Mypy
+问题、git diff --check通过。全量Ruff仍为原有5个E501（用户PPT临时脚本2、
+scan_g2p_coverage.py 3）；全量Mypy仍为ctc_overfit.py:260、sharded_ctc.py:989、
+unfrozen_encoder_ctc.py:813原有3个unused-ignore，未顺手修改。测试覆盖固定抽样、
+短缺、exact单音素命中、Anchor裁剪、门控算术、发音变体、保存结果不一致拒绝、
+输入封存身份及输出不覆盖；没有在本地运行H200模型。工区案例尚未返回，不能声称
+已经定位英语低召回根因，返回后按案例分别判断，再设计单因素验证。
+
 ## 0.159 2026-10-13 联合表1,358→4,000词的候选竞争诊断入口（待工区回传）
 
 用户回传4k检索已完成6,800条/22份交付，要求先检查新增词如何影响候选位置，
