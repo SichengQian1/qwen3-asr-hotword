@@ -1,0 +1,34 @@
+{
+  "reviewed_table": "outputs/multilingual_target_review_v1/keyword_table.json",
+  "reviewed_table_sha256": "89a63763216e9564edffa50014699e8c05f1257fb436ff8bcddc7e8fa720d9a7",
+  "reference_run": "outputs/reviewed_joint_target_retrieval_480h_v1",
+  "reference_config": "configs/reviewed_target_retrieval.workzone.json",
+  "output": "outputs/reviewed_joint_4000_keywords_v1",
+  "target_size": 4000,
+  "seed": "reviewed-joint-4000-20261013-v1",
+  "min_letters": 4,
+  "min_phonemes": 4,
+  "min_train_occurrences": 5,
+  "basic_word_policy": "configs/multilingual_basic_words.v1.json",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "training_sources": {
+    "en": {
+      "manifest": "outputs/en_us_swift_temporal2x_v1/full_ctc_train.jsonl",
+      "manifest_sha256": "6882074371edfdc94a5ca66ff4ba487c0f965c5f7527b0026740af9b952f9dc8",
+      "dictionary": "outputs/en_external_train_sources_v1/swift_us_english/mfa_g2p/swift_us_english_english_us_mfa.v1.dict",
+      "dictionary_sha256": "2dd3c3e045eabaeac4666a4a99cf472bf7a4ef816adf35943a072bd2262c23e2"
+    },
+    "es": {
+      "manifest": "outputs/es_480h_training_v1_00d26e5c2e/full_ctc_train.jsonl",
+      "manifest_sha256": "145c16e2019c4966c450557a150333eea19bcafec37f5eca36ee6e4d8815b300",
+      "dictionary": "outputs/es_noah_mobile_mfa_repaired_v1/final/noah/noah_spanish_latin_america_repaired.v1.dict",
+      "dictionary_sha256": "0a23386028849772672d661fd9fa685a0f89fad7c041a9dcc6d46c41146e3269"
+    },
+    "pt": {
+      "manifest": "outputs/pt_combined_temporal2x_v1/full_ctc_train.jsonl",
+      "manifest_sha256": "47214e4bec638198fd0e00c929f113d8ad35dedfd13a904f1190f903f68b3fd4",
+      "dictionary": "outputs/noah_pt_mfa_g2p/noah_pt_portuguese_brazil_mfa.dict"
+    }
+  }
+}

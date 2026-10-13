@@ -1,5 +1,124 @@
 # 工作交接记录
 
+## 0.158 2026-10-13 审核后三语联合表扩充4,000词与同目标对照入口（待H200）
+
+用户要求把已审核三语表补到4,000个不同词面，新增词不能出现在任何测试转写中，
+并排除无关短词，然后复测原11套干净音频。此阶段只增加候选词，不调整模型、训练、
+Anchor、评分、门控、Top5/Top7及目标集合；继续每条音频检索三语整表，交付按语种分开。
+开始时本地及远端codex/g2p-coverage-scan均为
+89bd2aab40c99b644e1e6c522c5592ca939e32c2。已完整读取AGENTS、0.156–0.157、
+英语3000构表和三语共同检索实现，检查Git状态、diff及远端；用户未跟踪文件未修改。
+
+### 固定输入、筛选与解释边界
+
+- 审核表outputs/multilingual_target_review_v1/keyword_table.json SHA固定为
+  89a63763216e9564edffa50014699e8c05f1257fb436ff8bcddc7e8fa720d9a7。
+  用户回传为1,358个不同词面、1,370个语言发音条目，语言计数en759/es316/pt295。
+  本地没有工区真实词表；构表时重验SHA及原审阅记录，保留所有存活条目原样。
+  过滤只用于新增词；不再次删除用户已经审核保留的短专名，不改变目标分母。
+- 读取已完成outputs/reviewed_joint_target_retrieval_480h_v1的封存run_config/report，
+  从实际配置取得11套transcripts路径，要求逐文件SHA、样本ID和文字与上轮一致。
+  英语3×2,000，西语4×100，葡语4×100；全体6,800条参考形成统一禁入集合。
+  NFKC+casefold+标点转空格，按完整token排除；保留重音，不是子串或听审判断。
+- 新增词仅从训练清单文字提取，结合已存在MFA词典的唯一精确词条；不生成新发音。
+  en：Swift US训练345,820条的已知SHA清单及既有English US MFA词典。
+  es：已冻结480h训练清单（145c16e2…5b300）及Noah修复词典（0a233860…e3269）。
+  pt：783h训练池（47214e4b…b3fd4）及outputs/noah_pt_mfa_g2p中的原巴葡词典。
+  EN/ES字典及三份train清单SHA配置固定；PT字典没有已核验的历史SHA，本次记录其
+  实际SHA并绑定后续加载/恢复，不能把这一点表述为与某历史字典版本独立核验一致。
+- 必须是纯拉丁字母单词、至少4字母、至少4个词表音素、训练出现至少5次；排除三语
+  基础词规则并集、数字/缩写式标点/连字符/撇号、字典缺失/多发音歧义/OOV条目。
+  原全部需求词（包括规则移出和用户删除的词）也在补词禁入名单，不能借另一语言补回。
+  这些规则减少短片段和孤立拼写，不认证每个词的业务意义、词性或真实发音。
+- 对合格词按固定seed+语言+词面SHA排序，EN→ES→PT轮流选取，跨语言词面全局去重。
+  本次预期补EN881、ES881、PT880，共2,642词；最终4,000词面、约4,012个索引发音。
+  不足时失败并指出语种，不重复凑数、不自动放宽规则或改变语言配额，不发布半张表。
+- 不按检索分数或新预测选词，也不刻意选择/排除自然近音词。排除参考中出现的补词
+  是用户指定的受控干扰实验，因此不称盲测；词面不出现在参考中不代表声音没有近音。
+  此轮回答“按上述补词策略扩大候选池后表现怎样”，不能泛化成所有4k词表性能。
+
+### 代码与输出
+
+新增scripts/build_reviewed_joint_4000.py、evaluation/joint_fillers.py及两份配置：
+configs/reviewed_joint_4000_keywords.workzone.json、
+configs/reviewed_joint_4000_retrieval.workzone.json。
+复用run_reviewed_target_retrieval.py，扩展仅限加载经校验的补词及同目标基线报告。
+旧检索/评分核心不变，原始targets仍来自独立验证过的审核表，补词不进入目标分母。
+
+新构表目录outputs/reviewed_joint_4000_keywords_v1：
+keyword_table.json（完整4k表）、reviewed_keyword_table.json（原审核表快照）、
+selected_fillers.jsonl（来源、语言、训练频次和音素）、keywords.txt、
+excluded_reference_words.json、basic_word_policy.json、config.json、report.json、sha256.txt。
+原表及其旧SHA清单保持不变；新表不可直接手工改写后恢复，需新版本构表。
+
+新推理目录outputs/reviewed_joint_4000_retrieval_480h_v1：
+
+```text
+languages/en/delivery/  # 3套 × Top5/Top7，6份
+languages/es/delivery/  # 4套 × Top5/Top7，8份
+languages/pt/delivery/  # 4套 × Top5/Top7，8份
+```
+
+共22份stem→[{word,phoneme}]，保留实际候选数和获胜发音，仍有原门控；不是强行输出7词。
+逐样本详情、run_config、词表/索引快照、report及sha256继续保存。
+报告by_language中的current为本次4k，reviewed_baseline_same_targets为上次1,358词；
+baseline_same_retained_targets仍保留更早单语3k/4k在相同目标上的参考数值。
+从封存原始详情重算基线，核对相同音频SHA、参考、目标IDs、Head、门控、模型配置，
+不需要重跑旧模型；综合比率用计数加总。没有最终LLM转写、WER或CTC PER结论。
+
+### 工区命令与恢复
+
+容器外拉取（远端提交SHA见本轮交付回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内先构表（CPU，读取训练文字和词典，不读取训练音频，不加载模型）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/build_reviewed_joint_4000.py
+```
+
+成功后预检与运行，GPU编号由用户选择：
+
+```bash
+GPU=4
+C=configs/reviewed_joint_4000_retrieval.workzone.json
+python -B scripts/run_reviewed_target_retrieval.py --config "$C" --audit-only &&
+python -B scripts/run_reviewed_target_retrieval.py --config "$C" --gpu "$GPU"
+```
+
+构表拒绝已有目录，没有resume；不需重复构表。推理中断时仅最后一条加--resume。
+只有输入、表、音频、参考、Head、配置、代码身份相同才可复用分片；新词表绝不复用
+上一轮1,358词结果分片。不要覆盖/删除已有outputs。改构表规则要同时指定新词表和
+新推理目录；源码更新后旧任务的严格恢复可能拒绝，不能删除身份检查强行恢复。
+模型权重继续只绑定config/index，未逐权重分片hash；保留0.157的这一已知限制。
+
+完成后返回两份report.json及sha256.txt即可，交付件仍按上面的三语目录交给下游：
+
+```bash
+K=outputs/reviewed_joint_4000_keywords_v1
+R=outputs/reviewed_joint_4000_retrieval_480h_v1
+(cd "$K" && sha256sum --quiet -c sha256.txt) &&
+(cd "$R" && sha256sum --quiet -c sha256.txt) &&
+jq '{status,sample_count,review,by_language,delivery_file_count}' "$R/report.json"
+```
+
+### 本地验证
+
+新增16项测试覆盖跨语种参考排除、重音/标点/大小写、短词/短音素/基础词/低频/OOV、
+不补回删除目标、均衡全局去重与4k数量、确定性、输入异常拒绝且不生成半成品、
+审核目标原样保留、11组22份交付、同目标分母和旧基线、相同运行恢复与篡改拒绝。
+定向52 passed；全量592 passed、23 skipped；新增/修改代码Ruff与定向Mypy通过。
+全仓Ruff仍5个既有E501（用户PPT临时脚本2个、scan_g2p_coverage.py 3个）；全仓Mypy
+仍3个既有unused-ignore（ctc_overfit.py、sharded_ctc.py、unfrozen_encoder_ctc.py），
+未修改无关文件。git diff --check通过。所有本地推理均mock；没有本地运行完整模型，
+真实可用补词数量及本轮召回必须等待用户工区运行。
+
 ## 0.157 2026-10-13 人工审核后三语整表共同检索与22份交付入口（待H200）
 
 用户已在0.156生成的keyword_table.json中删除不需要的完整条目，要求复测干净英语三套

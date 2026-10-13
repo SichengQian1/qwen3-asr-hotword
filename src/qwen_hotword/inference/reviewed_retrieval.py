@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from qwen_hotword.evaluation.joint_fillers import load_joint_fillers
 from qwen_hotword.evaluation.reviewed_targets import import_review
 from qwen_hotword.evaluation.sd_keywords import seal
 from qwen_hotword.evaluation.target_review import LANGUAGES, _checked
@@ -17,6 +18,7 @@ from qwen_hotword.inference.external_keyword_topk_replay import (
     _validated_source_gate,
     replay_rows_top7,
 )
+from qwen_hotword.inference.hotword_prompt import normalize_match_words
 from qwen_hotword.inference.reviewed_joint import (
     collapse_variants,
     export_joint_group,
@@ -45,14 +47,29 @@ def prepare_reviewed_run(root: Path, config: Path) -> tuple[dict[str, Any], dict
         _checked(model / "model.safetensors.index.json", identities)
     vocab = load_phoneme_vocab(vocab_path)
     bundles, targets, review = import_review(table, vocab, identities)
-    joint, variants, by_variant = joint_bundle(bundles)
+    base_joint, _, _ = joint_bundle(bundles)
+    active_bundles = bundles
+    if cfg.get("expanded_table"):
+        table = (root / cfg["expanded_table"]).resolve()
+        active_bundles, expansion = load_joint_fillers(
+            table, (root / cfg["reviewed_table"]).resolve(), bundles, vocab, identities
+        )
+        review.update(
+            filler_entries_added=expansion["fillers_added"],
+            fillers_by_language=expansion["fillers_by_language"],
+            filler_transcript_overlap=expansion["selected_filler_transcript_overlap"],
+            expanded_table_sha256=identities[str(table)]["sha256"],
+            expansion_report=expansion,
+        )
+    joint, variants, by_variant = joint_bundle(active_bundles)
     review.update(
         active_unique_surfaces_per_audio=len(joint.entries),
         active_pronunciation_variants_per_audio=len(variants),
         variant_policy="identical surface+phones deduplicated; best-ranked variant per surface",
         shortlist_unit="pronunciation variant; 64 maximum before surface collapse",
     )
-    groups, records_by_group, previous = {}, {}, {}
+    groups: dict[str, Any] = {}
+    records_by_group, previous = {}, {}
     for lang in LANGUAGES:
         baseline = (root / cfg["baselines"][lang]).resolve()
         old = _json(_verified(baseline, "run_config.json", identities))
@@ -147,6 +164,61 @@ def prepare_reviewed_run(root: Path, config: Path) -> tuple[dict[str, Any], dict
             previous[name] = {"bundle": old_bundle, "config": old_config}
     if set(groups) != set(cfg["datasets"]) or not groups:
         raise ValueError("datasets must belong to en/es/pt")
+    comparison = {}
+    if cfg.get("reviewed_baseline"):
+        directory = (root / cfg["reviewed_baseline"]).resolve()
+        old_plan = _json(_verified(directory, "run_config.json", identities))
+        old_report = _json(_verified(directory, "report.json", identities))
+        if (
+            old_report.get("status") != "completed"
+            or old_report.get("candidate_scope") != "joint_multilingual"
+            or old_report["review"]["reviewed_table_sha256"] != review["reviewed_table_sha256"]
+            or old_report["review"]["filler_entries_added"] != 0
+            or old_report["checkpoint_sha256"] != cfg["checkpoint_sha256"]
+            or set(old_plan["groups"]) != set(groups)
+        ):
+            raise ValueError("reviewed baseline identity differs")
+        for name, group in groups.items():
+            old_group = old_plan["groups"][name]
+            if (
+                old_group["records"] != group["records"]
+                or old_group["target_ids"] != group["target_ids"]
+                or {k: v for k, v in old_group["config"].items() if k not in ignored}
+                != {k: v for k, v in group["config"].items() if k not in ignored}
+            ):
+                raise ValueError(f"reviewed baseline audio/targets/settings differ: {name}")
+            for record in records_by_group[name]:
+                filename = str(record.audio_path)
+                if old_plan["inputs"][filename]["sha256"] != identities[filename]["sha256"]:
+                    raise ValueError(f"reviewed baseline audio hash differs: {filename}")
+            detail = _verified(
+                directory,
+                f"languages/{group['language']}/{name}/retrieval_details.jsonl",
+                identities,
+            )
+            comparison[name] = {
+                "group": {
+                    **group,
+                    "baseline_details": str(detail),
+                    "baseline_target_ids": group["target_ids"],
+                },
+                "previous": {"bundle": base_joint, "config": old_group["config"]},
+            }
+    if cfg.get("expanded_table"):
+        filler_ids = {e.hotword_id for e in joint.entries} - {
+            e.hotword_id for e in base_joint.entries
+        }
+        # Recheck against the actual inference references, not just the builder's file.
+        reference_words = {
+            word
+            for records in records_by_group.values()
+            for r in records
+            for word in normalize_match_words(r.reference_text)
+        }
+        if any(
+            e.normalized in reference_words for e in joint.entries if e.hotword_id in filler_ids
+        ):
+            raise ValueError("expanded filler occurs in an inference reference")
     plan = {
         "schema_version": 1,
         "git_commit": external._git_commit(),
@@ -162,6 +234,7 @@ def prepare_reviewed_run(root: Path, config: Path) -> tuple[dict[str, Any], dict
                 "inference/reviewed_retrieval.py",
                 "inference/reviewed_joint.py",
                 "evaluation/reviewed_targets.py",
+                "evaluation/joint_fillers.py",
                 "evaluation/target_review.py",
                 "inference/external_keyword_retrieval.py",
                 "inference/external_keyword_topk_replay.py",
@@ -185,6 +258,7 @@ def prepare_reviewed_run(root: Path, config: Path) -> tuple[dict[str, Any], dict
         "records": records_by_group,
         "previous": previous,
         "table": table,
+        "comparison": comparison,
     }
 
 
@@ -203,11 +277,13 @@ def _old_metrics(group: dict[str, Any], previous: dict[str, Any]) -> dict[str, A
     }
 
 
-def _aggregate(groups: dict[str, Any], names: list[str], *, baseline: bool) -> dict[str, Any]:
+def _aggregate(
+    groups: dict[str, Any], names: list[str], *, baseline: bool, label: str | None = None
+) -> dict[str, Any]:
     result = {}
     for key in ("top5", "top7"):
         views = [
-            groups[n]["baseline_same_retained_targets" if baseline else "current"][key]
+            groups[n][label or ("baseline_same_retained_targets" if baseline else "current")][key]
             for n in names
         ]
         counts = {
@@ -242,6 +318,7 @@ def run_reviewed_retrieval(
         raise FileExistsError(f"output exists; --resume only for this identical run: {output}")
     cfg = _json(config)
     protected = [root / cfg["reviewed_table"]] + [root / p for p in cfg["baselines"].values()]
+    protected += [root / cfg[k] for k in ("expanded_table", "reviewed_baseline") if cfg.get(k)]
     if any(
         output.resolve().is_relative_to((p.parent if p.is_file() else p).resolve())
         for p in protected
@@ -352,6 +429,16 @@ def run_reviewed_retrieval(
                     ):
                         raise ValueError(f"retained-target denominator mismatch: {name}/{key}")
                 metrics[name] = {"current": current, "baseline_same_retained_targets": previous}
+                if name in runtime["comparison"]:
+                    comparison = runtime["comparison"][name]
+                    small = _old_metrics(comparison["group"], comparison["previous"])
+                    if any(
+                        current[k]["expected_target_sample_pairs"]
+                        != small[k]["expected_target_sample_pairs"]
+                        for k in ("top5", "top7")
+                    ):
+                        raise ValueError(f"reviewed baseline target denominator differs: {name}")
+                    metrics[name]["reviewed_baseline_same_targets"] = small
         finally:
             detector = None
             gc.collect()
@@ -408,6 +495,17 @@ def run_reviewed_retrieval(
         ],
         "return_files": [str(output / "report.json"), str(output / "sha256.txt")],
     }
+    if runtime["comparison"]:
+        for lang in LANGUAGES:
+            report["by_language"][lang]["reviewed_baseline_same_targets"] = _aggregate(
+                metrics,
+                [n for n, g in plan["groups"].items() if g["language"] == lang],
+                baseline=False,
+                label="reviewed_baseline_same_targets",
+            )
+        report["limitations"].append(
+            "Fillers excluded using all test references; this is a conditioned experiment."
+        )
     external._write_or_verify_json(output / "report.json", report)
     seal(output)
     return report
