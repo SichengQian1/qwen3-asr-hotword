@@ -1,5 +1,89 @@
 # 工作交接记录
 
+## 0.156 2026-10-13 三语需求热词合并与基础词过滤审阅入口交付（待工区）
+
+用户要求把英语三套数据的773个需求目标、西语wave1–4的316个需求目标、葡语wave1–4
+的295个需求目标合并，移出a/the/me/I等基础词后先人工检查。本阶段只交付词表生成器，
+不做推理、不改检索或训练、不补充充数词。开始时本地和远端codex/g2p-coverage-scan
+均为47baeb86815c51dc3316d45e8896460258e4792d；已核对Git状态及相关HANDOFF资产记录。
+原有用户未跟踪图片、PPT、文档及pt_quality_whisper配置均不修改、不提交。
+本地没有工区完整词表，因此本节不报告实际移出/保留数量；输入是1,384个语言目标条目，
+跨语言合并后的唯一词面数量须由工区生成结果确认。
+
+### 输入与过滤规则
+
+入口scripts/build_multilingual_target_review.py，配置
+configs/multilingual_target_review.workzone.json，独立模块evaluation/target_review.py。
+
+- 英语：outputs/english_3000_keywords_v1中的keyword_bias_phoneme.json及
+  targets_by_dataset.json。固定表SHA为
+  6e2a7016d16bf86cb1f31f3254213e58f5becd4810cc02a166fd604d1cd9b655，目标范围SHA为
+  e3b362df7708ece0c2b9a444199997ac0b157235581a909a8d1e2bbb2b97924f。
+- 西/葡语：outputs/wave_4000_keywords_old_only_v1中各自的
+  <es|pt>/keyword_bias_phoneme.json和targets_by_wave.json。
+- 每套输入核对封存sha256.txt、report和目标组名称/数量，只遍历目标清单成员，从已有表
+  取回原词面与音素；不会将3k/4k表中的填充词加入新表。西/葡语未另造已知固定SHA，
+  以各自已封存清单核验，并将实际输入身份写入新report。
+- configs/multilingual_basic_words.v1.json是显式可审阅规则：按语言移出独立冠词、
+  代词/限定词、常见介词/连词、常见助动词/系动词及否定词。仅匹配整个规范单词，保留
+  重音差异；The Who、El Paso、São Paulo等完整短语不拆删。普通实词不会仅因常见或短
+  而删除，短词和短音素只做提示。
+- 不将基础词判定冒充词义审核：Will/May/São等同形专名或字母名称可能被规则移出，
+  删除清单明确标注歧义。每语种keep_overrides可恢复命中规则的词；修改后用新目录。
+- 同规范词面跨语言合并时保留全部语言、原词面、音素和来源，不强选一种发音。
+  保留和移出清单仍按语言展开，便于逐项审阅。
+
+### 工区命令、产物与恢复约定
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内（仅CPU，小文件读取，无需GPU或完整模型）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/build_multilingual_target_review.py
+```
+
+默认新目录outputs/multilingual_target_review_v1。输入预检失败不会创建输出；目录已存在
+则拒绝覆盖，不提供resume。规则或输入改变后用新名称，例如
+`--output-dir outputs/multilingual_target_review_v2`，保留所有旧产物。
+
+- review.md：保留词表，含语言、原音素、来源组及审阅提示；优先给用户阅读。
+- removed_basic_words.md：移出词及规则理由，检查误删、同形专名并决定恢复。
+- keyword_table.json：合并总词表，保留所有语言发音变体；当前是审阅格式，并非直接可供
+  旧推理入口加载的配置。keywords.txt提供唯一显示词面清单。
+- all_target_decisions.jsonl：全部输入目标的保留/移出决定，可追溯且不丢失删除项。
+- report.json、config.json、basic_word_policy.json及sha256.txt：数量、输入/代码身份、
+  规则快照及产物校验。本轮human_approved=false，不宣称发音或业务相关性已获人工确认。
+
+验证与回传：
+
+```bash
+cd outputs/multilingual_target_review_v1
+sha256sum --quiet -c sha256.txt
+cat report.json
+```
+
+请返回report.json、review.md、removed_basic_words.md及sha256.txt即可；人工检查后再
+确定最终范围。删除基础词会改变评测目标分母，不能把未来新召回率直接与旧指标比较。
+本阶段不使用音频、参考转写、检索预测或模型；没有热词召回/最终转写效果结论。
+
+### 本地验证
+
+新增21项测试覆盖目标限定、基础词/短语/重音、同形多语言发音、显式恢复例外、确定性、
+源SHA及数量/语言/OOV异常、拒绝覆盖和拒绝写入原词表目录。定向测试106 passed；
+全量561 passed、23 skipped。新增代码Ruff与定向Mypy通过；全仓Ruff仍有5个既有E501
+（用户PPT临时脚本2个、scan_g2p_coverage.py 3个），全仓Mypy仍有3个既有unused-ignore
+（ctc_overfit.py、sharded_ctc.py、unfrozen_encoder_ctc.py），均未顺手修改。
+合成小样本CLI生成与产物SHA校验通过，只证明工具行为，不能代替工区真实词表结果。
+交付提交SHA见本轮回复及git rev-parse HEAD。
+
 ## 0.155 2026-10-12 英语60条最终ASR提示排序/优先级对照交付（待H200）
 
 本阶段响应用户明确的新实验：复用已完成的干净英语Top7，只测完整Qwen3-ASR最终转写。

@@ -1,0 +1,34 @@
+{
+  "output": "outputs/multilingual_target_review_v1",
+  "basic_word_policy": "configs/multilingual_basic_words.v1.json",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "sources": {
+    "en": {
+      "directory": "outputs/english_3000_keywords_v1",
+      "table": "keyword_bias_phoneme.json",
+      "target_groups": "targets_by_dataset.json",
+      "table_sha256": "6e2a7016d16bf86cb1f31f3254213e58f5becd4810cc02a166fd604d1cd9b655",
+      "target_groups_sha256": "e3b362df7708ece0c2b9a444199997ac0b157235581a909a8d1e2bbb2b97924f",
+      "expected_groups": ["en_chile", "en_colombia", "en_mexico"],
+      "expected_targets": 773,
+      "expected_table_size": 3000
+    },
+    "es": {
+      "directory": "outputs/wave_4000_keywords_old_only_v1",
+      "table": "es/keyword_bias_phoneme.json",
+      "target_groups": "es/targets_by_wave.json",
+      "expected_groups": ["wave1", "wave2", "wave3", "wave4"],
+      "expected_targets": 316,
+      "expected_table_size": 4000
+    },
+    "pt": {
+      "directory": "outputs/wave_4000_keywords_old_only_v1",
+      "table": "pt/keyword_bias_phoneme.json",
+      "target_groups": "pt/targets_by_wave.json",
+      "expected_groups": ["wave1", "wave2", "wave3", "wave4"],
+      "expected_targets": 295,
+      "expected_table_size": 4000
+    }
+  }
+}

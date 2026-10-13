@@ -1,0 +1,43 @@
+{
+  "version": "multilingual-basic-words-v1",
+  "description": "人工审阅草案：仅按所属语言、规范化后的完整单词匹配。保留多词短语、音调、原词面和发音；不按频率或检索结果删除。词义/专名歧义需由用户审阅移出清单。",
+  "categories": {
+    "articles": "冠词",
+    "pronouns_determiners": "代词或限定词",
+    "prepositions_conjunctions": "介词、连词或常见介词冠词缩合形式",
+    "auxiliaries_copulas": "常见助动词或系动词形式",
+    "negation_particles": "常见否定词"
+  },
+  "languages": {
+    "en": {
+      "keep_overrides": [],
+      "remove": {
+        "articles": ["a", "an", "the"],
+        "pronouns_determiners": ["i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "ourselves", "you", "your", "yours", "yourself", "yourselves", "he", "him", "his", "himself", "she", "her", "hers", "herself", "it", "its", "itself", "they", "them", "their", "theirs", "themselves", "this", "that", "these", "those", "who", "whom", "whose", "which", "what"],
+        "prepositions_conjunctions": ["of", "to", "in", "on", "at", "by", "for", "from", "with", "without", "into", "onto", "upon", "within", "and", "or", "but", "if", "as", "than", "because", "although", "whether"],
+        "auxiliaries_copulas": ["am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "having", "do", "does", "did", "can", "could", "will", "would", "shall", "should", "may", "might", "must"],
+        "negation_particles": ["no", "not", "nor"]
+      }
+    },
+    "es": {
+      "keep_overrides": [],
+      "remove": {
+        "articles": ["el", "la", "los", "las", "un", "una", "unos", "unas"],
+        "pronouns_determiners": ["yo", "tú", "él", "ella", "ello", "nosotros", "nosotras", "vosotros", "vosotras", "ellos", "ellas", "usted", "ustedes", "vos", "me", "te", "se", "nos", "os", "lo", "le", "les", "mí", "ti", "sí", "mi", "mis", "tu", "tus", "su", "sus", "mío", "mía", "míos", "mías", "tuyo", "tuya", "tuyos", "tuyas", "suyo", "suya", "suyos", "suyas", "nuestro", "nuestra", "nuestros", "nuestras", "vuestro", "vuestra", "vuestros", "vuestras", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas", "aquel", "aquella", "aquellos", "aquellas", "esto", "eso", "aquello", "quien", "quién", "quienes", "quiénes", "qué", "cuál", "cuáles"],
+        "prepositions_conjunctions": ["a", "de", "del", "al", "en", "con", "sin", "por", "para", "entre", "hacia", "hasta", "desde", "durante", "mediante", "según", "y", "e", "o", "u", "ni", "pero", "sino", "si", "que", "porque", "aunque"],
+        "auxiliaries_copulas": ["ser", "soy", "eres", "es", "somos", "sois", "son", "era", "eras", "eran", "fui", "fue", "fueron", "sido", "siendo", "estar", "estoy", "estás", "está", "estamos", "estáis", "están", "estaba", "estaban", "estado", "estando", "haber", "he", "ha", "has", "hemos", "habéis", "han", "hay", "había", "habían", "habrá", "habido"],
+        "negation_particles": ["no"]
+      }
+    },
+    "pt": {
+      "keep_overrides": [],
+      "remove": {
+        "articles": ["a", "o", "as", "os", "um", "uma", "uns", "umas"],
+        "pronouns_determiners": ["eu", "tu", "você", "vocês", "ele", "ela", "eles", "elas", "nós", "vós", "me", "te", "se", "nos", "vos", "lhe", "lhes", "mim", "ti", "si", "meu", "minha", "meus", "minhas", "teu", "tua", "teus", "tuas", "seu", "sua", "seus", "suas", "nosso", "nossa", "nossos", "nossas", "vosso", "vossa", "vossos", "vossas", "este", "esta", "estes", "estas", "esse", "essa", "esses", "essas", "aquele", "aquela", "aqueles", "aquelas", "isto", "isso", "aquilo", "quem", "qual", "quais"],
+        "prepositions_conjunctions": ["de", "do", "da", "dos", "das", "em", "no", "na", "nas", "num", "numa", "nuns", "numas", "ao", "aos", "à", "às", "pelo", "pela", "pelos", "pelas", "com", "sem", "por", "para", "entre", "até", "desde", "durante", "perante", "e", "ou", "mas", "que", "porque", "nem", "embora"],
+        "auxiliaries_copulas": ["ser", "sou", "és", "é", "somos", "sois", "são", "era", "eras", "eram", "fui", "foi", "foram", "sido", "sendo", "estar", "estou", "estás", "está", "estamos", "estais", "estão", "estava", "estavam", "estado", "estando", "ter", "tenho", "tens", "tem", "temos", "tendes", "têm", "tinha", "tinham", "tido", "tendo", "haver", "há", "havia", "haverá"],
+        "negation_particles": ["não"]
+      }
+    }
+  }
+}
