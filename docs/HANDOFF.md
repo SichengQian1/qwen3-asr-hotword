@@ -1,5 +1,78 @@
 # 工作交接记录
 
+## 0.161 2026-10-13 全部英语目标词MFA一致性检查入口（待工区）
+
+用户确认先核查标签基础，不改词表/检索/Head/阈值。本地及实际远端分支
+codex/g2p-coverage-scan起点均为0d67866ac09794178268466cea37a3f02e8b12b3；完整读取
+AGENTS、0.159–0.160及发音规范化、训练词典、审核词表实现。tracked修改为空，
+用户未跟踪PPT/文档/配置保留。本地读取用户return_bundle.zip，包SHA为
+5e1536ae118c5b8a1822292e2bbbf6f4fddb6043de7eb063da8e2fef611c00f9；包内4项数据文件
+校验通过，诊断及重放代码SHA与本地一致，18例为18条不同音频。案例是分层探索样本，
+未听音频；音素编辑不能直接归为模型或标签错误。本阶段只提供一致性检查入口。
+
+### 核查范围与方法
+
+新增scripts/audit_english_target_mfa.py、evaluation/english_target_mfa.py及
+configs/english_target_mfa_audit.workzone.json。默认检查已完成目标表联合检索的封存
+reviewed_keyword_table.json：outputs/reviewed_joint_target_retrieval_480h_v1。
+固定审核表SHA为89a63763216e9564edffa50014699e8c05f1257fb436ff8bcddc7e8fa720d9a7，
+只取759个保留的en语言目标，不取填充词，不重新查询音频或CTC。
+
+- 先核对封存表/report/run_config、完成状态/无填充及目标数；检查vocab SHA与已有
+  检索使用的coverage.py代码身份，并重新核对每个保存标签的音素/token ID。
+- 使用既有English US MFA G2P zip，固定SHA为
+  9923b38d59a8b3e3e322f225c52523c2a6248e5ffc9fd89be151ade2dc97cb02。
+  同时读取实际英语训练词典，SHA固定为
+  2dd3c3e045eabaeac4666a4a99cf472bf7a4ef816adf35943a072bd2262c23e2。
+  只调用本地zip，不下载模型、不加载Qwen、不占GPU。
+- 复用full-manifest训练extract_word_tokens分词（NFC/casefold、连接符映射、保留
+  词内连接符/重音），词典key同样按normalize_training_text规范化，
+  记录实际词序；每个唯一词调用MFA Top1，再按原词序拼接，保留重复词。
+  含数字或无有效词的条目保持未解决，不猜读法；缺词、多发音不拼部分标签。
+  非ASCII、词组/标点仅标记，不能据此自动确认语言或更改拼写。
+- 保存MFA原始输出后，复用原90类CTC规范化规则比较：原标签vs新MFA、原标签vs训练
+  词典、新MFAvs训练词典；报告ctc_equal/ctc_different/unresolved及逐音素编辑。
+  另计原始字符串不同但CTC相同的项；不把格式差异当成真实音素差异。
+- 词组结果是孤立词发音拼接，不是连读标签或音频强制对齐；官方Top1不是正确性认证。
+  en源标签不代表实际说英语，不自动切换语言。训练词典无此词仅表示无法比较。
+  检查结束重验输入SHA，途中变化报失败，不安装新标签、不生成新召回结论。
+
+### 工区交付
+
+容器外拉取，远端SHA见本轮回复：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内一条命令，不需要GPU参数：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+conda run --no-capture-output -n aligner python -B scripts/audit_english_target_mfa.py
+```
+
+默认自动新建outputs/english_target_mfa_audit_v1_<后缀>，打印路径及report；支持
+--root/--config/--output-dir/--jobs（默认16）。拒绝已有目录及源运行/资产目录内输出。
+没有resume；失败保留日志/报告，重跑到新目录。输入模型缺失/身份不符在MFA执行前失败。
+产物为targets.json、configuration.json、words.txt、mfa_en/raw.dict及mfa.log、
+comparisons.json/tsv、report.json、sha256.txt、return_bundle.zip。包只含交付文件和
+清单，不含MFA临时缓存或模型；返回打印路径下的return_bundle.zip即可。
+
+```bash
+R=outputs/english_target_mfa_audit_v1_实际后缀
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+```
+
+本地仅模拟MFA进程测试，定向10 passed，全量619 passed/23 skipped；新增Ruff/Mypy通过、
+git diff --check通过。全量Ruff仍为原有5个E501，全量Mypy仍为ctc_overfit:260、
+sharded_ctc:989、unfrozen_encoder_ctc:813原有3个unused-ignore，无关文件未修改。
+测试覆盖原始/CTC差异、短语词序/重复/撇号、缺词/多发音/OOV/数字未解决、填充词拒绝、
+身份/数量/输出保护、输入途中变化及MFA失败封存；未在本地运行真实MFA或完整ASR。
+工区回传前不宣称759个词发音正确或修改词表能改善召回。
+
 ## 0.160 2026-10-13 英语未进候选与门控失败：小样本配对取证入口（待工区）
 
 用户要求先看具体失败样本，再讨论原因和修改；本阶段不改检索算法、词表、Head或阈值。
