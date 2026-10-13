@@ -1,0 +1,19 @@
+{
+  "source_run": "outputs/reviewed_joint_4000_retrieval_480h_v1",
+  "table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "expected_surfaces": 4000,
+  "models": {
+    "en": {
+      "path": "models/mfa/g2p/english_us_mfa.zip",
+      "sha256": "9923b38d59a8b3e3e322f225c52523c2a6248e5ffc9fd89be151ade2dc97cb02"
+    },
+    "es": {
+      "path": "models/mfa/g2p/spanish_latin_america_mfa.zip",
+      "sha256": "58e0743cf364d8aa2cc8b419e7c95dd9127908268af670f305722c601f726b2a"
+    },
+    "pt": {
+      "path": "models/mfa/g2p/portuguese_brazil_mfa.zip",
+      "sha256": "11e7f72ecccbae7905fa064017ac1a1fead9b6ebfdde4e23e506c28edfbcbcc8"
+    }
+  }
+}

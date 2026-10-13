@@ -1,5 +1,68 @@
 # 工作交接记录
 
+## 0.162 2026-10-13 三语联合4,000词表重新生成MFA G2P查看文件（待工区）
+
+用户要求对当前三语4k表的全部目标及填充词重新执行MFA G2P，只需查看一份合并dict。
+本阶段不改现有标签、检索、阈值、Head或outputs。起点本地/实际远端
+codex/g2p-coverage-scan均为60421e914f81f6fbb15d04488a4bde26376aa6cf；完整读取
+AGENTS及0.159–0.161、4k构表/封存/分词/G2P实现；tracked无修改，既有用户未跟踪
+PPT、文档、配置均保留。本地不运行真实MFA或Qwen，不宣称工区词条生成完整或发音正确。
+
+新增scripts/run_joint_4000_mfa.py、evaluation/joint_mfa_dict.py及
+configs/joint_4000_mfa.workzone.json。取已完成检索封存的
+outputs/reviewed_joint_4000_retrieval_480h_v1/reviewed_keyword_table.json，固定SHA为
+6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b。
+检查SHA清单、完成状态、表身份、4,000唯一词面及三语覆盖，包含target和filler。
+按语言+规范词面去重，跨语言同形词分别保留，因此查看文件行数可超过4,000。
+
+三语分别使用已存在的English US、Spanish Latin America、Portuguese Brazil本地G2P
+zip，路径和已知SHA固定在配置中；缺失或身份不符在执行前停止，不联网下载。
+使用训练extract_word_tokens分词，NFC/casefold和已有连接符规则，保留重音；逐语言
+调用mfa g2p --num_jobs 16 --num_pronunciations 1。每个词组按原词序拼接孤立词Top1，
+保留重复词；不修改原词面、不自动判别语言/代码切换、不去重音、不套西语修复规则、
+不做CTC音素转换、不用旧标签补缺。数字/无词、缺词和多发音条目标为UNRESOLVED。
+同时记录输入缺词及额外输出键，不能因输入/输出数量相同就认定覆盖完整。
+
+最终供用户查看的单一文件是joint_4000_mfa.dict，格式为三列Tab分隔：
+language、原词面、MFA原始音素；未解决条目为# UNRESOLVED注释行并给出原因。
+它是查看文件，不是可以直接导入MFA或线上检索的词典。原始词级dict、词清单和日志
+保存在新目录work/en、work/es、work/pt中；report.json与sha256.txt保留身份及计数。
+三语执行成功且重新核验全部输入身份后才发布最终dict；失败保留诊断，不发布部分表。
+
+容器外拉取（推送SHA见本轮回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内，无需GPU：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+conda run --no-capture-output -n aligner python -B scripts/run_joint_4000_mfa.py
+```
+
+默认自动新建outputs/joint_4000_mfa_v1_<随机后缀>，打印output_dir及dictionary路径。
+支持--root、--config、--output-dir、--jobs；拒绝已有目录和输入资产目录内输出。
+没有resume；失败后重跑会新建目录。completed_with_unresolved表示三语命令完成但有
+词条未解决，不是全部标签正确。用户只需返回最终dict；需要核验身份时再返回report.json
+和sha256.txt，不传模型、MFA缓存或原outputs。
+
+```bash
+R=outputs/joint_4000_mfa_v1_实际后缀
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+less "$R/joint_4000_mfa.dict"
+```
+
+本地定向27 passed，全量633 passed/23 skipped；新增文件Ruff通过，全量Mypy无新增
+问题，git diff --check通过。全量Ruff仍为原有5个E501（用户PPT脚本2、扫描脚本3），
+全量Mypy仍为ctc_overfit:260、sharded_ctc:989、unfrozen_encoder_ctc:813三个
+unused-ignore，未改无关文件。新增14项测试仅模拟MFA进程，覆盖全部语言/填充/同形词、
+短语顺序/重复/撇号、缺词/重音输出键变化/多发音/数字、身份/覆盖/输出保护，以及执行失败
+或途中输入变化时不发布最终dict。真实三语G2P须由用户在工区运行。
+
 ## 0.161 2026-10-13 全部英语目标词MFA一致性检查入口（待工区）
 
 用户确认先核查标签基础，不改词表/检索/Head/阈值。本地及实际远端分支
