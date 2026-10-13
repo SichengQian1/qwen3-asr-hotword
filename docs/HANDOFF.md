@@ -1,5 +1,83 @@
 # 工作交接记录
 
+## 0.159 2026-10-13 联合表1,358→4,000词的候选竞争诊断入口（待工区回传）
+
+用户回传4k检索已完成6,800条/22份交付，要求先检查新增词如何影响候选位置，
+不调阈值、不重训。原审核表与4k表的Top7命中回传分别为：
+EN 3216→3215 /4374，ES 685→664 /724，PT 606→594 /736。
+这些是用户粘贴的汇总；本地尚未读取工区逐样本详情，不把净差当作实际丢失样本数，
+也不据此宣称已证明填充词导致全部下降。阶段起点本地与远端分支
+codex/g2p-coverage-scan为906a87c572387d705ee88ec3f71fe5872276b368；完整读取AGENTS、
+近期HANDOFF及原联合检索/评分/门控实现，检查status/diff/未跟踪文件，用户文件未修改。
+
+### 诊断内容与口径
+
+新增scripts/diagnose_joint_4000_retrieval.py及evaluation/joint_diagnostic_inputs.py、
+joint_diagnostics.py。仅CPU读取以下两个已封存的检索目录：
+
+```text
+outputs/reviewed_joint_target_retrieval_480h_v1
+outputs/reviewed_joint_4000_retrieval_480h_v1
+```
+
+- 核对SHA清单中的run_config、report、词表/索引快照、每组retrieval_details；
+  检查相同音频的记录SHA、参考、目标集合、Head、模型路径/已记录元数据、检索设置及
+  核心评分代码身份。原目标词面/发音条目必须完整保留，新增条目必须声明为filler。
+  不重新打开音频或完整模型。原运行未哈希模型权重分片，不能认证其字节相等。
+- 重现发音候选→词面去重，再按原规则重放Top5/Top7，重算参考中的整词/短语匹配；
+  独立核对每组及各语言原报告的6项计数。新增填充词匹配到参考或身份不一致时失败，
+  不输出一份看似成功的诊断。
+- 每个真实目标归入互斥状态：已选中、未进入保存的候选、通过门控但排不进TopK、
+  或未通过score/edit_ratio/posterior门控（同时失败时记录组合，避免重复计数）。
+  “未进入候选”无法区分没有Anchor命中与Top64之前被裁剪；Top64单位是发音变体。
+- 配对列出丢失命中、新增命中、保留命中及新增/消失的参考外候选，不能用净差替代。
+  统计参考外候选来自新增filler还是原审核需求词、获胜发音语言、音素长度及零编辑比例。
+  语言字段表示词条来源，不证明音频说的是该语言；参考外也不等于未经听审的错误声音。
+- 记录两轮CTC token/confidence序列是否完全相同；记录两轮都存在的目标分数和局部
+  匹配位置是否改变。若CTC本身不同，限制“只由候选竞争导致”的解释。
+- 额外从新保存候选列表移除fillers并重放原门控，仅统计已丢目标能恢复多少。
+  这是保存列表内的条件检查，不能恢复之前被Top64裁掉的目标，不等于重跑原词表。
+- examples.json按语言/失败阶段取首个固定顺序样本，同时含新增目标命中、新增参考外
+  filler示例；保存参考、旧新排名/分数/门控字段、获胜词条音素、匹配CTC片段及上下文。
+  CTC片段没有真实词边界，不能仅据此确认“截取词内子片段”；不只挑成功案例。
+
+### 工区命令、产物与限制
+
+容器外（远端提交SHA见本轮回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内，不需要GPU参数，不运行CTC或Qwen推理：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/diagnose_joint_4000_retrieval.py
+```
+
+每次自动新建outputs/joint_4000_diagnostics_v1_<随机后缀>；不修改原检索/模型/词表。
+支持--old-run、--new-run、--output-dir；输出目录已存在或位于源检索目录内部则拒绝。
+此阶段不需恢复推理；CPU扫描中断可重跑到新目录，不复用半份报告。
+
+产物：summary.json（精简Top7统计）、report.json（Top5/Top7及每数据集明细）、
+examples.json（有限配对示例）、sha256.txt。先返回屏幕JSON；再按需返回summary.json、
+examples.json、sha256.txt，无需上传完整retrieval_details、outputs或权重。
+检查命令（R替换为新生成目录）：
+
+```bash
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+```
+
+本地使用封存的模拟检索产物测试身份、排名去重、门控回填、失败阶段、配对增减、
+跨语言来源、输出不覆盖及原产物不变。工区真实诊断尚未执行，不声称已经定位实际根因。
+定向测试9 passed；全量601 passed、23 skipped；新增文件Ruff及diff --check通过。
+全量Ruff仍有5项已有E501（用户PPT临时脚本2项、scan_g2p_coverage.py 3项）；
+全量Mypy仍有ctc_overfit.py:260、sharded_ctc.py:989、unfrozen_encoder_ctc.py:813
+三项已有unused-ignore，新增代码无类型错误；这些无关文件未修改。
+
 ## 0.158 2026-10-13 审核后三语联合表扩充4,000词与同目标对照入口（待H200）
 
 用户要求把已审核三语表补到4,000个不同词面，新增词不能出现在任何测试转写中，
