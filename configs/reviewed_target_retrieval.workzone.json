@@ -1,0 +1,28 @@
+{
+  "reviewed_table": "outputs/multilingual_target_review_v1/keyword_table.json",
+  "candidate_scope": "joint_multilingual",
+  "output": "outputs/reviewed_joint_target_retrieval_480h_v1",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "checkpoint": "outputs/multilingual_480h_run_v1/head/ctc_head_best.pt",
+  "checkpoint_sha256": "320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "baselines": {
+    "en": "outputs/english_3000_retrieval_480h_v1",
+    "es": "outputs/wave_4000_retrieval_480h_old_only_v1",
+    "pt": "outputs/wave_4000_retrieval_480h_old_only_v1"
+  },
+  "datasets": {
+    "en_chile": {"language": "en", "source_group": "en_chile", "expected_samples": 2000},
+    "en_colombia": {"language": "en", "source_group": "en_colombia", "expected_samples": 2000},
+    "en_mexico": {"language": "en", "source_group": "en_mexico", "expected_samples": 2000},
+    "wave1_es": {"language": "es", "source_group": "wave1", "expected_samples": 100},
+    "wave2_es": {"language": "es", "source_group": "wave2", "expected_samples": 100},
+    "wave3_es": {"language": "es", "source_group": "wave3", "expected_samples": 100},
+    "wave4_es": {"language": "es", "source_group": "wave4", "expected_samples": 100},
+    "wave1_pt": {"language": "pt", "source_group": "wave1", "expected_samples": 100},
+    "wave2_pt": {"language": "pt", "source_group": "wave2", "expected_samples": 100},
+    "wave3_pt": {"language": "pt", "source_group": "wave3", "expected_samples": 100},
+    "wave4_pt": {"language": "pt", "source_group": "wave4", "expected_samples": 100}
+  }
+}

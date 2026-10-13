@@ -1,5 +1,106 @@
 # 工作交接记录
 
+## 0.157 2026-10-13 人工审核后三语整表共同检索与22份交付入口（待H200）
+
+用户已在0.156生成的keyword_table.json中删除不需要的完整条目，要求复测干净英语三套
+和西/葡语四wave。用户进一步明确：每条音频都使用审核后的整张三语表，不按音频语言
+过滤候选；仅交付目录按音频语种区分。此确认覆盖了开发初期准备按语言取子表的假设。
+开始时本地及远端codex/g2p-coverage-scan为7b535d3e4267a78fd9915245943fd947b10ec2bf，
+已完整读取AGENTS.md、检查Git状态及0.146–0.147、0.152–0.153、0.156记录；用户已有
+未跟踪文件均保留。本地无审核后的实际词表或音频，本节只记录代码交付，不报告召回。
+
+### 范围、词表身份和公平比较
+
+入口scripts/run_reviewed_target_retrieval.py；配置configs/reviewed_target_retrieval.workzone.json。
+新模块evaluation/reviewed_targets.py、inference/reviewed_retrieval.py及reviewed_joint.py。
+不修改既有CTC模型、Anchor索引/评分实现、旧评测入口或任何既有outputs。
+
+- 读取outputs/multilingual_target_review_v1/keyword_table.json作为用户审核的新输入。
+  手工删除后旧sha256.txt中的该文件SHA自然不再匹配：不要求重跑构表、不改写旧校验清单。
+  另核验原封存report及all_target_decisions.jsonl，重建原始审阅条目，要求新表仅删除
+  完整entries成员；剩余条目的词面、语言、来源和音素保持原样。重复、添加、改写或
+  JSON破损在模型加载前报错，不静默修复。记录原表SHA和审核后实际SHA及删除数量。
+- 三语所有保留词共同参与每条音频的检索。相同规范词面、相同token序列的重复发音只
+  建一个索引项；不同发音均参与Anchor检索，保留原始变体排名。按规范词面保留最高
+  排名的变体，再按原门控选Top5/Top7；同词面只占一个名额，下游phoneme使用该音频
+  实际胜出的变体，原审核总表快照保留全部语言来源。不是每语种使用自己的子表。
+- 固定480h Head SHA为320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265；
+  模型路径/glusterfs_103/models/Qwen3-ASR-1.7B。沿用完整音频、bf16、各音频语言参数、
+  Anchor Top64、门控0.75/edit≤0.35/posterior≥0.5和Top5/Top7。
+  Top64按发音变体计数，去重后唯一词面可能不足64；报告明确这项多发音适配语义。
+  这不是可与旧单语词表声称“仅删几个词、其他条件完全相同”的实验：表规模、组成、
+  三语竞争及部分词的多发音可用性一起变化。评分/门控参数未调优。
+- 复用并核对两份已完成干净基线的run_config/report及输入SHA：
+  outputs/english_3000_retrieval_480h_v1（3×2,000条），以及
+  outputs/wave_4000_retrieval_480h_old_only_v1（4×2×100条）。从旧配置获得精确音频和
+  transcripts路径，逐条核对参考、ID、音频SHA、原词表及门控/模型配置，不用带噪目录。
+  总计11组、6,800条；相同stem在不同组中独立保存。
+- 新指标仅按每组原声明目标与审核保留词的交集计算。并读取旧逐条结果，在同一保留
+  目标分母上重新计算baseline_same_retained_targets；不重跑旧模型，也不拿旧全目标
+  百分比直接比较。语言综合指标为总命中/总分母；全表误选仍按全部三语候选与参考
+  匹配判断。空目标分母保留null。未出现不等于人工确认的幻觉，不测最终WER或CTC PER。
+
+### 工区命令与输出
+
+容器外：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内先预检，再运行；GPU编号由用户选空闲卡：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_reviewed_target_retrieval.py --audit-only &&
+python -B scripts/run_reviewed_target_retrieval.py --gpu 4
+```
+
+不重新运行build_multilingual_target_review.py，不重新封存或覆盖用户审核文件。
+默认新输出outputs/reviewed_joint_target_retrieval_480h_v1，文件结构：
+
+```text
+report.json / run_config.json / sha256.txt
+reviewed_keyword_table.json       # 实际审核文件的内容快照
+indexed_pronunciations.jsonl      # 真正参与共同检索的发音索引条目
+languages/en/delivery/            # en_chile/en_colombia/en_mexico × Top5/Top7，共6份
+languages/es/delivery/            # wave1_es … wave4_es × Top5/Top7，共8份
+languages/pt/delivery/            # wave1_pt … wave4_pt × Top5/Top7，共8份
+languages/<lang>/<dataset>/       # 每样本shard、详细结果及指标
+```
+
+交付JSON仍为stem→[{word,phoneme}]，保持排序、实际不足K不补足，空召回[]。三语合计
+22份下游文件。来源语言目录不限制候选语言，英语交付中也可能出现西/葡语词。
+词表、基线、音频、参考、模型元数据、Head、配置或代码身份变化不得复用旧shard。
+仅同一次中断运行追加--resume；词表再改则用新--output-dir，例如v2。不允许在原审阅
+目录或旧推理目录内创建新实验。旧outputs一律不覆盖；源码更新导致恢复身份变化时
+明确拒绝。本轮模型权重只绑定config/index，未逐分片hash，报告保留此局限。
+
+```bash
+python -B scripts/run_reviewed_target_retrieval.py --gpu 4 --resume
+```
+
+完成后校验并返回report.json及sha256.txt两个小文件；22份delivery交下游：
+
+```bash
+R=outputs/reviewed_joint_target_retrieval_480h_v1
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+jq '{status,sample_count,review,by_language,delivery_file_count}' "$R/report.json"
+```
+
+### 本地验证
+
+新增15项测试：允许已授权人工删除导致的旧表SHA变化，但绑定剩余原音素；三语共同
+检索、相同发音去重、同词Top-K去重及胜出发音交付；11组/22份文件、负样本空列表、
+同stem隔离、同目标旧结果重算、恢复仅补缺失样本、词表/音频/参考/Head变化拒绝恢复、
+禁止写入原资产目录。定向101项通过；全量576 passed、23 skipped，git diff --check通过。
+新增代码Ruff及定向Mypy通过。全仓Ruff仍有既有5个E501（用户PPT脚本2个、
+scan_g2p_coverage.py 3个）；全仓Mypy仍有既有3个unused-ignore（ctc_overfit.py、
+sharded_ctc.py、unfrozen_encoder_ctc.py），均未修改。所有本地推理为mock；H200实测
+仍须用户运行，收到结果前不得声称新词表提高召回。远端提交SHA见本轮回复。
+
 ## 0.156 2026-10-13 三语需求热词合并与基础词过滤审阅入口交付（待工区）
 
 用户要求把英语三套数据的773个需求目标、西语wave1–4的316个需求目标、葡语wave1–4
