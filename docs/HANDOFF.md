@@ -78,6 +78,40 @@ examples.json、sha256.txt，无需上传完整retrieval_details、outputs或权
 全量Mypy仍有ctc_overfit.py:260、sharded_ctc.py:989、unfrozen_encoder_ctc.py:813
 三项已有unused-ignore，新增代码无类型错误；这些无关文件未修改。
 
+### 指定词项的MFA原始发音复核入口
+
+用户另提供仓库根目录mismatch_words_en/es/pt.txt，要求使用既有MFA G2P模型生成
+原始结果。首条shell命令的单词预检在合法词组（如el niño）处主动停止，MFA未启动、
+未创建输出；不能将此解释为模型或输入文本损坏。新增scripts/run_mismatch_mfa.py：
+UTF-8逐行保留原词项与行号，NFC+casefold后按空白拆词；每语言唯一词调用当地语言
+G2P Top1，再按原词序拼回（重复词保留）。保留重音和标点，不猜测father s day中的
+撇号，不自动识别或切换语言，不应用西语代理/去鼻化及CTC词表规范化。
+缺词或多发音歧义时整条phrase pronunciation为null，保留逐词结果及显式原因；
+completed_with_unresolved表示流程结束但存在未完整生成的词项，不认证标注正确。
+组合结果是孤立词发音拼接，未模拟跨词连读，不是基于测试音频的校准。
+
+容器外在/home/star/q00933266/qwen3-asr-hotword执行
+git pull --ff-only origin codex/g2p-coverage-scan；远端SHA见本轮交付。
+容器内在/host_home/star/q00933266/qwen3-asr-hotword执行：
+
+```bash
+conda run --no-capture-output -n aligner python -B scripts/run_mismatch_mfa.py \
+  --output-dir outputs/mismatch_mfa_phrases_v1
+```
+
+不下载模型、不使用Qwen/GPU、不改已有表或outputs。模型从models/mfa/g2p中读取
+english_us_mfa.zip、spanish_latin_america_mfa.zip、portuguese_brazil_mfa.zip，
+报告实际模型/输入SHA、脚本SHA、Python/MFA版本与调用参数，每语言隔离MFA工作目录。
+默认--jobs 16；省略--output-dir则自动创建outputs/mismatch_mfa_phrases_<随机后缀>。
+拒绝已存在的输出目录，不提供resume；失败时保留日志和失败报告，重跑使用新目录。
+结果为en/es/pt子目录的input.txt、words.txt、raw.dict、phrases.json、phrases.tsv、
+mfa.log，根目录report.json和sha256.txt。SHA清单覆盖交付文件，不包含mfa_work缓存。
+返回report.json、三份phrases.json和sha256.txt即可；可用
+(cd outputs/mismatch_mfa_phrases_v1 && sha256sum --quiet -c sha256.txt)核验。
+本地仅使用模拟MFA进程测试拆词/拼回、缺词不拼残缺标签、隔离和不覆盖；未运行真实MFA。
+定向3 passed、全量604 passed/23 skipped；新增脚本Ruff/Mypy与diff --check通过。
+全量Ruff/Mypy仍仅有上文记录的5项E501与3项unused-ignore，无关文件未修改。
+
 ## 0.158 2026-10-13 审核后三语联合表扩充4,000词与同目标对照入口（待H200）
 
 用户要求把已审核三语表补到4,000个不同词面，新增词不能出现在任何测试转写中，
