@@ -46,7 +46,11 @@ def setup(root):
     digest = _sha(source / "reviewed_keyword_table.json")
     write(source / "report.json", {
         "status": "completed", "candidate_scope": "joint_multilingual",
-        "review": {"reviewed_table_sha256": digest, "active_unique_surfaces_per_audio": 6},
+        "review": {
+            "reviewed_table_sha256": "original target-only SHA, deliberately different",
+            "expanded_table_sha256": digest,
+            "active_unique_surfaces_per_audio": 6,
+        },
     })
     seal(source)
     models = {}
@@ -130,6 +134,29 @@ def test_phrase_order_apostrophe_duplicate_variants_and_aliases(tmp_path):
     lines, stats = audit.reconstruct([term], dictionary)
     assert lines[0].startswith("# UNRESOLVED") and "ambiguous_words=o'brien" in lines[0]
     assert stats["unresolved"] == 1
+
+
+@pytest.mark.parametrize("recorded", [None, "wrong expanded table SHA"])
+def test_expanded_sha_required_even_when_original_review_sha_matches(
+    tmp_path, monkeypatch, recorded
+):
+    config, _ = setup(tmp_path)
+    source = tmp_path / "source"
+    report = json.loads((source / "report.json").read_text())
+    review = report["review"]
+    review["reviewed_table_sha256"] = _sha(source / "reviewed_keyword_table.json")
+    if recorded is None:
+        del review["expanded_table_sha256"]
+    else:
+        review["expanded_table_sha256"] = recorded
+    write(source / "report.json", report)
+    (source / "sha256.txt").unlink()
+    seal(source)
+    monkeypatch.setattr(audit.subprocess, "run", lambda *a, **k: pytest.fail("must not run MFA"))
+    output = tmp_path / "new"
+    with pytest.raises(ValueError, match="source expanded_table_sha256 differs"):
+        audit.run(tmp_path, config, output, 2, "mfa")
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("fault", ["duplicate", "language", "surface", "removed", "empty"])

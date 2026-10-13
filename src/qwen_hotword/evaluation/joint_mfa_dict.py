@@ -118,13 +118,19 @@ def run(root: Path, config: Path, output: Path, jobs: int, mfa: str) -> dict[str
     )
     source_report = _json(_verified(source, "report.json", identities))
     review = source_report["review"]
-    if (
-        source_report["status"] != "completed"
-        or source_report["candidate_scope"] != "joint_multilingual"
-        or review["reviewed_table_sha256"] != cfg["table_sha256"]
-        or review["active_unique_surfaces_per_audio"] != cfg["expected_surfaces"]
-    ):
-        raise ValueError("completed sealed 4000-table source identity differs")
+    # The producer retains reviewed_table_sha256 for the pre-expansion target table.
+    # The sealed snapshot here contains fillers, identified by expanded_table_sha256.
+    checks = {
+        "status": (source_report.get("status"), "completed"),
+        "candidate_scope": (source_report.get("candidate_scope"), "joint_multilingual"),
+        "expanded_table_sha256": (review.get("expanded_table_sha256"), cfg["table_sha256"]),
+        "active_unique_surfaces_per_audio": (
+            review.get("active_unique_surfaces_per_audio"), cfg["expected_surfaces"]
+        ),
+    }
+    for name, (actual, expected) in checks.items():
+        if actual != expected:
+            raise ValueError(f"source {name} differs: expected {expected!r}, got {actual!r}")
     terms = table_terms(_json(table_path), cfg["expected_surfaces"])
     if set(cfg["models"]) != set(LANGUAGES):
         raise ValueError("exactly en/es/pt local G2P models required")

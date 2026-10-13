@@ -13,6 +13,8 @@ configs/joint_4000_mfa.workzone.json。取已完成检索封存的
 outputs/reviewed_joint_4000_retrieval_480h_v1/reviewed_keyword_table.json，固定SHA为
 6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b。
 检查SHA清单、完成状态、表身份、4,000唯一词面及三语覆盖，包含target和filler。
+扩表身份核对review.expanded_table_sha256；review.reviewed_table_sha256保留的是
+补词前审核目标表的来源身份，不能与扩表文件SHA混用。校验失败输出具体字段及预期/实际值。
 按语言+规范词面去重，跨语言同形词分别保留，因此查看文件行数可超过4,000。
 
 三语分别使用已存在的English US、Spanish Latin America、Portuguese Brazil本地G2P
@@ -56,12 +58,13 @@ R=outputs/joint_4000_mfa_v1_实际后缀
 less "$R/joint_4000_mfa.dict"
 ```
 
-本地定向27 passed，全量633 passed/23 skipped；新增文件Ruff通过，全量Mypy无新增
+本地定向45 passed，全量635 passed/23 skipped；新增文件Ruff通过，全量Mypy无新增
 问题，git diff --check通过。全量Ruff仍为原有5个E501（用户PPT脚本2、扫描脚本3），
 全量Mypy仍为ctc_overfit:260、sharded_ctc:989、unfrozen_encoder_ctc:813三个
-unused-ignore，未改无关文件。新增14项测试仅模拟MFA进程，覆盖全部语言/填充/同形词、
+unused-ignore，未改无关文件。新增16项测试仅模拟MFA进程，覆盖全部语言/填充/同形词、
 短语顺序/重复/撇号、缺词/重音输出键变化/多发音/数字、身份/覆盖/输出保护，以及执行失败
-或途中输入变化时不发布最终dict。真实三语G2P须由用户在工区运行。
+或途中输入变化时不发布最终dict；包括原审核SHA与扩表SHA不同的真实报告结构，以及
+扩表SHA缺失/错误时拒绝执行。真实三语G2P须由用户在工区运行。
 
 ## 0.161 2026-10-13 全部英语目标词MFA一致性检查入口（待工区）
 
