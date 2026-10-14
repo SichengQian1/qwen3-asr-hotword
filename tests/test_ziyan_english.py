@@ -322,3 +322,103 @@ def test_frozen_actual_target_list_count_and_basic_exclusions():
     assert len(words) == cfg["expected_targets"] == 372 and words == sorted(set(words))
     assert _sha(path) == cfg["targets_sha256"]
     assert not {"a", "the", "me", "i", "please", "twenty", "im", "ive", "fourty"} & set(words)
+
+
+@pytest.fixture
+def identity_assets(tmp_path, monkeypatch):
+    """Completed mock runner assets; inspection itself must never run the detector."""
+    config, _, _ = setup(tmp_path)
+    monkeypatch.setattr(assets.subprocess, "run", mock_mfa)
+    assets.build(tmp_path, config, tmp_path / "assets", 2, "mfa")
+    monkeypatch.setattr(
+        external,
+        "_load_audio",
+        lambda path: (path.name, {"audio_load_seconds": 0.01, "duration_seconds": 1.0}),
+    )
+    run(
+        tmp_path,
+        config,
+        tmp_path / "assets",
+        tmp_path / "results",
+        detector_factory=lambda **kw: SimpleNamespace(**kw),
+        retrieve_function=fake_retrieval,
+    )
+    plan = json.loads((tmp_path / "results/run_config.json").read_text())
+    for relative in plan["code_sha256"]:
+        rel = relative if relative.startswith("scripts/") else "src/qwen_hotword/" + relative
+        destination = tmp_path / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(Path(rel).read_bytes())
+    # Inspector uses only stdlib, and still works without original audio or backbone metadata.
+    for path in (tmp_path / "audio").iterdir():
+        path.unlink()
+    (tmp_path / "model/config.json").unlink()
+    monkeypatch.setattr(external, "_load_audio", lambda *a: pytest.fail("must not read audio"))
+    monkeypatch.setattr(external, "_load_detector", lambda **kw: pytest.fail("must not infer"))
+    return tmp_path, config
+
+
+def test_identity_inspection_preserves_sources_and_packages_only_small_evidence(identity_assets):
+    import zipfile
+
+    from qwen_hotword.evaluation.ziyan_identity import inspect, verify_seal
+
+    root, config = identity_assets
+    before = {
+        p: _sha(p) for d in (root / "assets", root / "results") for p in d.rglob("*") if p.is_file()
+    }
+    output = root / "inspection"
+    result = inspect(root, config, root / "assets", root / "results", output)
+    assert result["status"] == "identity_verified" and result["sample_count"] == 3
+    summary = json.loads((output / "summary.json").read_text())
+    assert summary["candidate_or_gate_replay"] is False and summary["audio_read"] is False
+    assert summary["row_field_presence"]["raw_variant_ranked_matches"] == 3
+    assert all(_sha(p) == sha for p, sha in before.items())
+    with zipfile.ZipFile(output / "return_bundle.zip") as bundle:
+        assert "first_saved_row.json" in bundle.namelist()
+        assert not any(
+            "sample_shards" in name or "retrieval_details" in name for name in bundle.namelist()
+        )
+    verify_seal(output)
+    with pytest.raises(FileExistsError, match="existing output"):
+        inspect(root, config, root / "assets", root / "results", output)
+
+
+@pytest.mark.parametrize("fault", ["sealed_report", "head", "code", "reference", "source_output"])
+def test_identity_inspection_rejects_tamper_and_source_output_before_publication(
+    identity_assets, fault
+):
+    from qwen_hotword.evaluation.ziyan_identity import inspect
+
+    root, config = identity_assets
+    output = root / "inspection"
+    if fault == "sealed_report":
+        (root / "results/report.json").write_text("{}")
+    elif fault == "head":
+        (root / "model/head.pt").write_bytes(b"changed")
+    elif fault == "code":
+        (root / "src/qwen_hotword/hotwords/scoring.py").write_text("changed")
+    elif fault == "reference":
+        path = root / "results/run_config.json"
+        plan = json.loads(path.read_text())
+        plan["records"][0]["reference_text"] = "changed"
+        write(path, plan)
+        (root / "results/sha256.txt").unlink()
+        seal(root / "results")
+    else:
+        output = root / "results/nested_inspection"
+    with pytest.raises(ValueError):
+        inspect(root, config, root / "assets", root / "results", output)
+    assert not output.exists()
+
+
+def test_identity_seal_rejects_escaping_paths(tmp_path):
+    from qwen_hotword.evaluation.ziyan_identity import verify_seal
+
+    outside = tmp_path / "outside"
+    outside.write_text("outside")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "sha256.txt").write_text(f"{_sha(outside)}  ../outside\n")
+    with pytest.raises(ValueError, match="invalid seal"):
+        verify_seal(source)

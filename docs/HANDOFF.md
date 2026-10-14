@@ -1,5 +1,69 @@
 # 工作交接记录
 
+## 0.165 2026-10-14 Ziyan产物身份与实际字段核验入口（待工区回传）
+
+本阶段承接0.164，先核验现有产物，不重新推理或改变检索。完整读取AGENTS及
+0.159–0.164、Ziyan入口/构表/检索与旧取证重放实现。开始时HEAD、origin跟踪分支和
+git ls-remote真实远端均为f6d956bcf387bf10119a7518078d9cb9fb9401c8，tracked无修改。
+本地没有outputs目录，不能把终端报告当成已独立核验的工区文件。
+
+发现未跟踪scripts/diagnose_ziyan_english.py及evaluation/ziyan_diagnostics.py，来源
+未确认；本轮只读检查，不覆盖、导入或提交这两份文件。其余PPT/图片/文档/葡语配置
+也保持原样。新工具使用独立文件scripts/inspect_ziyan_artifacts.py及
+evaluation/ziyan_identity.py，只依赖标准库，避免混用未知诊断草稿。
+
+工具核验资产与检索各自SHA清单全部条目；检查已完成状态、固定配置、JSON/冻结目标/
+vocab/Head实际SHA与原运行记录、资产/检索两份表字节、原检索代码SHA。逐行检查712条
+详情的行SHA、保存音频SHA、原JSON参考和manifest/run_config记录一致；回传实际字段
+出现次数与首条候选字段，列出记录hash重复组及原始参考/保存CTC一致性。
+不打开原音频、Qwen权重或运行MFA/Anchor/评分，不独立重算召回/PER/WER。
+summary中的reported_metrics_not_recomputed明确是原report值；identity_verified
+仅表示这次身份检查通过，不表示已定位399对漏召回原因或验证音文/SNR质量。
+原JSON/Head/vocab实际字节验证与音频hash记录复用须分开解释。
+
+容器外同步；本轮最终推送SHA见回复，不沿用上述起点SHA：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内，在项目现有Python环境执行一条CPU命令，无GPU参数：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/inspect_ziyan_artifacts.py
+```
+
+默认新建outputs/ziyan_identity_v1_<随机后缀>，拒绝已存在目录或源资产/检索目录内部及
+其祖先目录。支持--root/--config/--assets-dir/--source-run/--output-dir。没有resume；
+中断重跑会生成新目录，旧outputs不覆盖、不删除。打印return_file、bundle_sha256及
+bundle_bytes；用户只需返回该return_bundle.zip和屏幕JSON。
+包内summary.json、首条first_saved_row.json、首个非空候选行candidate_schema_row.json、
+两份原report、run_config、配置、目标和
+源SHA清单用于独立核验；不包含全部详情、样本分片、音频、模型或Head。
+样例行仅用于确认字段，不作为根因代表案例；全量无非空候选时仍保留首条并报告空字段。
+
+本地定向21 passed，全量679 passed（本地模拟/单元测试，不是工区结果）；新增代码及
+修改测试Ruff通过，独立身份模块Mypy通过，git diff --check通过。全量Ruff有11个
+既有/未跟踪文件E501：历史扫描/PPT文件5个，两份未知诊断代码6个；全量mypy src
+有8项问题：既有训练unused-ignore 3项，未知ziyan_diagnostics 5项，未改这些文件。
+使用全局Mypy执行仓库Python3.10配置；.conda内同配置检查被现装NumPy的Python3.12
+类型stub阻断，切到3.12又引入依赖类型问题，不将不同检查环境当作历史结果复现。
+测试覆盖源文件不改、无原音频/模型仍可核验、精简包、报告/Head/代码/参考篡改拒绝、
+已有/源内输出及清单越界拒绝。尚未在工区运行该工具。
+
+如需工区核对新小包（R替换成打印目录）：
+
+```bash
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+```
+
+收到小包后先验包及原件身份，再交付399对漏项的候选/门控组合/Top7分解与必要CPU
+Anchor重放、ants等误例及真实正确对照。此轮尚无新集分解或听审结果，未排除28词、
+调门控、改90音素、重训或扩跑LLM提示实验；保持0.164所有待完成状态及解释限制。
+
 ## 0.164 2026-10-14 近期实测结果补记与英语检索诊断交接（当前状态）
 
 本节补记0.155、0.157–0.163之后已返回但未独立落档的重要结果；这些历史章节的
