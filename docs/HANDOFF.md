@@ -1,5 +1,112 @@
 # 工作交接记录
 
+## 0.163 2026-10-14 Ziyan带噪英语：新目标替换与Top5/Top7入口（待工区）
+
+用户提供新JSON并要求选300–500个英语目标，替换原联合4k表的700多个英语需求词，
+新词先跑MFA，再评测全部JSON音频。已明确确认：仅替换原759个英语target，保留
+原英语fillers及全部ES/PT条目；不补回4,000整。继续使用三语联合候选范围、480h Head
+及原Anchor/门控参数；不重训、不改检索算法、不跑最终Qwen转写。起点本地/实际远端
+codex/g2p-coverage-scan均为8be370f47248681ae7868395b68760de935827ec。AGENTS已完整
+读取；检查status/diff、近期HANDOFF与构表/检索/交付实现，tracked无修改，既有用户
+未跟踪文件保留。旧outputs不覆盖。
+
+### 已核验输入与冻结目标（只基于附件文本，不是工区召回结果）
+
+容器JSON为/data/c00809914/audio/ms-swift-qwen3-asr/test/en-ziyan_2-5h_noise_10db_test.json，
+本地附件140,077字节，SHA为
+32465f58a3c00d36c7d4d75b9b6c7200962789b9e8de7e4c340feec624cf20e1。
+顶层列表712条，每条一个audios绝对路径及一个纯文本response；没有时长、说话人或
+口音字段。音频路径来自/glusterfs_103/c00809914/wenet_qwen/evaluate/data/test_zh-en/
+data/en-ziyan_2-5h_noise_10db。路径/文件stem无重复，参考不改写；10dB仅按提供方命名，
+本地没有音频、未核验SNR或音文准确性。工区JSON字节必须与附件一致。
+
+冻结configs/ziyan_english_targets.v1.txt共372个ASCII单词，SHA为
+8200f17b8485f9145ac27c31c4a209e474e9ce8b6cb813337d7d64f6a303340e。
+以机场、酒店、医疗、餐饮、购物等内容词为候选；排除功能词、泛化会话词、数字、明显
+缺撇号/拼接/错拼碎片。4字母词只保留room/card/menu/taxi等有明确场景含义的词；
+282词出现在至少两条参考中，另人工按词义补入90个明确业务词的单次出现项，例如
+checkpoint、dehydration、luggage、insurance、wheelchair。不根据CTC/ASR预测或分数挑词。
+部分地名/人名属于英语文本中的专名，English US G2P不能保证其实际说法正确。
+此次是参考文本条件化的内容词检索实验，不是盲词库测试，也非只评难专名。
+
+按原整词规范化规则独立核对：1100个不同目标词×音频，413条含新目标、299条不含；
+41条各含超过5个目标、22条各含超过7个目标。固定TopK槽位的理想容量界为Top5
+85.3636%、Top7 91.5455%，不是预测所得成绩；排序/门控/声学误差只能在此之外再损失。
+旧fillers可能在新参考中出现，按用户要求不删除，但单独列出重合，不作为新的目标分母。
+
+### 实现与资产
+
+新增scripts/run_ziyan_english.py、evaluation/ziyan_assets.py、inference/ziyan_retrieval.py
+及configs/ziyan_english.workzone.json、冻结词清单。prepare只读原4k检索封存表，
+SHA仍为6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b，
+核对review.expanded_table_sha256及实际4k词面数量。移除原en target变体759条；全部
+其他变体原样保留，包括跨语言同形词、新目标与旧filler重合词的旧变体。新目标附加
+独立fresh English US MFA Top1标签；同词面最终只占一个TopK槽位，胜出音素用于交付。
+
+prepare调用已有本地models/mfa/g2p/english_us_mfa.zip（SHA9923b38d...），不下载。
+372个独立词全部MFA生成后按原90类vocab规范化；缺词、多发音、OOV/空标签导致明确失败，
+保留日志和unresolved，但不发布部分词表、不偷偷更换目标或缩小分母。原参考不改。
+产物：keyword_table.json、targets.json、words.txt、english_raw.dict、dataset_manifest.jsonl、
+config.json、report.json、sha256.txt；MFA临时缓存不纳入交付清单。
+
+audit读取712条JSON明确列出的音频，不扫描目录纳入其他文件；核对已冻结记录/输入SHA、
+音频文件SHA和可读头部，报告实际小时数及重复文件hash计数，不把文件字节去重当声学去重。
+run绑定物理GPU为逻辑cuda:0，复用完整音频离线CTC检测、三语变体合并与原导出逻辑。
+原参数：Anchor64、2/3/4-gram、24 anchors/entry、offset1、radius2，score>=0.75、
+edit<=0.35、posterior>=0.5、posterior_weight0.25；Top7从同一完整保存候选精确重放。
+报告新目标Top5/Top7分子分母、门控前后召回、参考外候选、文件名前缀分组和TopK容量界。
+不同新词、数据域、噪声及总词表规模同时改变，不能与旧英语77.37%直接解释为模型改进。
+不衡量CTC PER或最终ASR WER；模型分片不新做全量哈希，记录模型config/index身份。
+
+### 工区命令与输出策略
+
+容器外（远端提交SHA见本轮回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内，先CPU/MFA准备，再qwen环境预检与推理，GPU编号由用户填：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+conda run --no-capture-output -n aligner python -B scripts/run_ziyan_english.py prepare
+python -B scripts/run_ziyan_english.py audit
+python -B scripts/run_ziyan_english.py run --gpu 4
+```
+
+新表目录outputs/ziyan_english_assets_v1；新检索目录
+outputs/ziyan_english_retrieval_480h_v1。禁止覆盖旧或已有目录；prepare失败后改用新
+--assets-dir（audit/run也传相同参数），或新配置输出名；没有prepare恢复。
+run中断可给原命令加--resume，仅在音频、参考、新旧词表、目标、Head、模型元数据、
+配置和相关代码身份都一致时复用已校验的sample_shards；损坏行拒绝。物理GPU可换，
+逻辑设备仍固定cuda:0；换词表/代码/策略需新输出目录。audit不写文件、不加载模型。
+
+最终交付文件（原word/phoneme列表格式，以JSON音频stem为key）：
+
+```text
+outputs/ziyan_english_retrieval_480h_v1/delivery/ziyan_en_noise10db_top5.json
+outputs/ziyan_english_retrieval_480h_v1/delivery/ziyan_en_noise10db_top7.json
+```
+
+返回终端精简JSON或新检索report.json、sha256.txt即可，必要时再给两份delivery；
+不传完整逐样本详情或权重。核验命令：
+
+```bash
+R=outputs/ziyan_english_retrieval_480h_v1
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+jq '{status,sample_count,keyword_count,metrics,target_presence,table_replacement}' "$R/report.json"
+```
+
+本地新定向14 passed；全量649 passed/23 skipped；新代码Ruff通过，Mypy无新增问题、
+git diff --check通过。全量Ruff仍为既有5个E501，Mypy仍为ctc_overfit:260、
+sharded_ctc:989、unfrozen_encoder_ctc:813三个unused-ignore，未改无关文件。
+测试仅模拟MFA及检测器，WAV头部用本地stdlib读真实测试文件替代SoundFile依赖；覆盖
+填充/外语/同形词保留、MFA失败不发布、JSON契约、TopK容量与重复词计数、Top5/Top7
+原格式导出、只读预检、恢复与音频/结果篡改拒绝。未在本地运行真实MFA/Qwen，尚无新召回率。
+
 ## 0.162 2026-10-13 三语联合4,000词表重新生成MFA G2P查看文件（待工区）
 
 用户要求对当前三语4k表的全部目标及填充词重新执行MFA G2P，只需查看一份合并dict。

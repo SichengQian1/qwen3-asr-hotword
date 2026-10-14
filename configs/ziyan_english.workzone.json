@@ -1,0 +1,21 @@
+{
+  "dataset": "/data/c00809914/audio/ms-swift-qwen3-asr/test/en-ziyan_2-5h_noise_10db_test.json",
+  "dataset_sha256": "32465f58a3c00d36c7d4d75b9b6c7200962789b9e8de7e4c340feec624cf20e1",
+  "expected_samples": 712,
+  "targets": "configs/ziyan_english_targets.v1.txt",
+  "targets_sha256": "8200f17b8485f9145ac27c31c4a209e474e9ce8b6cb813337d7d64f6a303340e",
+  "expected_targets": 372,
+  "source_run": "outputs/reviewed_joint_4000_retrieval_480h_v1",
+  "source_table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "source_surfaces": 4000,
+  "old_english_targets": 759,
+  "g2p_model": "models/mfa/g2p/english_us_mfa.zip",
+  "g2p_model_sha256": "9923b38d59a8b3e3e322f225c52523c2a6248e5ffc9fd89be151ade2dc97cb02",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "checkpoint": "outputs/multilingual_480h_run_v1/head/ctc_head_best.pt",
+  "checkpoint_sha256": "320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265",
+  "assets": "outputs/ziyan_english_assets_v1",
+  "output": "outputs/ziyan_english_retrieval_480h_v1"
+}
