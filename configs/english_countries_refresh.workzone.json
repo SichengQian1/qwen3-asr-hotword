@@ -1,0 +1,20 @@
+{
+  "output": "outputs/english_countries_refresh_v1",
+  "countries": [
+    {"name": "chile", "directory": "/glusterfs_103/z00816262/data/en/智利", "old_prefix": "/glusterfs_104/asr-data_imedia_zh-en/en/ASR_shards_data/English/智利"},
+    {"name": "colombia", "directory": "/glusterfs_103/z00816262/data/en/哥伦比亚", "old_prefix": "/glusterfs_104/asr-data_imedia_zh-en/en/ASR_shards_data/English/哥伦比亚"},
+    {"name": "mexico", "directory": "/glusterfs_103/z00816262/data/en/墨西哥", "old_prefix": "/glusterfs_104/asr-data_imedia_zh-en/en/ASR_shards_data/English/墨西哥"}
+  ],
+  "target_hours": 480.0,
+  "selection_seed": 20260923,
+  "g2p_model": "models/mfa/g2p/english_us_mfa.zip",
+  "g2p_model_sha256": "9923b38d59a8b3e3e322f225c52523c2a6248e5ffc9fd89be151ade2dc97cb02",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "baseline_training_config": "configs/480h_training.workzone.json",
+  "fixed_freeze": "outputs/multilingual_480h_training_v2_a48f58e452",
+  "fixed_languages": {
+    "es": {"sha256": "3f3abb4c53f511dd48b8b52ad59954480bbdcdf2cdfb62ec1ceb5aaa500d0777", "records": 296399},
+    "pt": {"sha256": "987e650842f2dabcbd82abd1cbe3659a5005a195ee3fa6d7df77383de450d25a", "records": 321741}
+  }
+}

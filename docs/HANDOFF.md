@@ -1,5 +1,117 @@
 # 工作交接记录
 
+## 0.166 2026-10-14 新三国英语全量处理→480h替换→原三语CTC训练入口（待工区）
+
+用户明确暂停0.164–0.165英语检索根因诊断，授权换英语训练语料后重新训练三语CTC；
+西语/葡语各480h不变。此前“不重训”限制由本次新请求更新，检索诊断、旧听审和prompt
+旁线继续暂停。本轮接续0.13英语G2P/精确连接符、0.125已冻结三语清单、0.126及
+0.138–0.141缓存与训练方案，不重建旧ES/PT/validation，不从旧Head续训新数据。
+起点本地HEAD/origin跟踪/实际远端一致为448c9d174a9d7d6bda2230c7f6a828004a24134b；
+tracked无修改。保留两份未知Ziyan诊断代码及新增未跟踪docs/MFA_POSTPROCESSING_V0_2.md、
+PPT/图片/文档/葡语配置，不导入、覆盖或误提交它们。没有本地加载/下载完整模型。
+暂停前0.165身份小包已分两包返回，合并11项SHA全部匹配，目标分母/容量独立重算一致；
+399漏项全量分解及听审仍未完成，本次不继续展开该分析。
+
+### 固定输入及处理政策
+
+新增configs/english_countries_refresh.workzone.json、scripts/run_english_refresh.py及
+training/english_refresh{,_source,_freeze}.py。三国来源均为
+/glusterfs_103/z00816262/data/en下的智利、哥伦比亚、墨西哥目录，每目录train.json、
+test.json、audios。逐国将JSON内/glusterfs_104/asr-data_imedia_zh-en/en/ASR_shards_data/
+English/<国家>前缀替换成实际目录，其余audios/shards_*/WAV后缀保留；也接受已是新
+前缀的路径，拒绝未知前缀/跨国/目录越界。只取response的English<asr_text>后正文，
+与可用assistant内容核对；流式读取原JSON，每条train保留来源/旧新路径/原response，
+不拿test响应造词表或标签，不猜speaker，不把国家文件夹当作已验证口音。
+
+先处理三个train.json的全部行：统一TSV与全量训练词表，新跑既有English US MFA zip
+Top1（固定9923b38d…cb02，不下载），再调用原full_manifest，语言en-US是沿用的标签
+管线标记，来源保留三国。使用原90类v0.2词表SHA0f4939ba…af4及原IPA后处理；允许
+词典唯一精确、无OOV的撇号/连字符。数字、缺词、歧义、OOV、音频问题等进入完整
+needs_review，不丢行、不用旧英语词典补标签。词典输入/输出缺失、额外键与歧义另报。
+严格分区source_records=ready+review，只在完整分区结束后开始选样。
+
+沿用original_ready及仅ctc_length_infeasible的temporal 2x recovery：有效长度满足
+minimum/(2*T_est)<=0.90。其余review不释放。对完整释放池做音频字节hash：同内容同标签
+只保留一个，内容相同但文本/标签/元数据冲突整组隔离；排除三国test、旧全部heldout
+和固定ES/PT训练音频的路径或hash重合。原文件不删除，排除原因保存在新产物。
+旧heldout由0.125已封存audio_fingerprints的roles重建，不重新打开旧test标签。
+新test仅解析路径并读取字节用于保护；最终所选三语与保护集合再次做真实字节审计。
+SHA不识别重编码/重叠片段，当前没有speaker metadata，不能声称speaker-disjoint。
+
+合格唯一英语按国家来源×release×时长×标签密度×CTC ratio分层，按可用小时比例分配
+配额，seed20260923沿用0.118选样策略。总计至少480h，保留完整音频略超；不足停止并
+保留完整处理产物/capacity_report，不重复抽样凑时长。原英US训练全部替换。
+
+固定ES/PT来自outputs/multilingual_480h_training_v2_a48f58e452，分别296399/321741条，
+SHA3f3abb4c…d0777 / 987e6508…0d25a，完整值见新配置。新的分语言ES/PT文件须与原字节
+一致；combined仅更新版本元数据，原音频、ID、文本、音素、选样不变。固定旧8101条
+validation及SHA d43d143f…4499全部沿用，包括原英语2808条，以支持旧视图比较；新
+英语域上的验证能力需另行评估，本次不使用新test挑checkpoint。
+
+### 新目录及短命令
+
+默认新根outputs/english_countries_refresh_v1，包括source、words、MFA尝试目录、
+全量manifest、frozen_<后缀>、新training配置和training运行目录。旧outputs不覆盖。
+prepare尚未执行，不能声称新英语可用小时或新480h已完成。固定ES/PT/validation身份
+及原freeze完成状态在新处理前核对；代码/配置/六个JSON身份写入preparation_contract。
+
+容器外同步（本轮最终推送SHA见回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内CPU/MFA完整准备，无GPU，不复制音频或提取Encoder特征：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+conda run --no-capture-output -n aligner python -B scripts/run_english_refresh.py prepare
+```
+
+成功status=data_prepared。返回屏幕JSON及打印的return_bundle.zip；包含原源计数、
+完整ready/review摘要、MFA缺项、可用/选中小时与分层、去重/保护、固定资产及新配置SHA，
+不含全量清单、缓存、音频或权重。失败返回终端错误；容量失败另返回新frozen目录下的
+capacity_report.json，最终审计失败返回audio_identity_audit.json。不能使用失败清单训练。
+
+首次拒绝已有根目录；完全一致的配置/JSON/旧资产/代码可显式追加--resume。完成的
+source/words/manifest/freeze必须通过SHA清单；full_manifest未完成shards按原机制恢复。
+MFA失败新建attempt目录，保留失败输出；freeze失败新建frozen尝试目录，不覆写现场。
+若source/words转换中断、无完成清单，保留原根并用--output-dir指定另一新根；所有后续
+阶段须传相同--output-dir。不支持配置/字典漂移的原目录恢复，也不删除目录自动重跑。
+
+prepare成功后切回现有Qwen环境；4仅是空闲物理H200示例，用户选择编号：
+
+```bash
+python -B scripts/run_english_refresh.py smoke --gpu 4
+python -B scripts/run_english_refresh.py cache --gpu 4
+python -B scripts/run_english_refresh.py pilot --gpu 4
+python -B scripts/run_english_refresh.py formal --gpu 4
+```
+
+逐步成功才执行下一步。复用原multilingual_480_run和原cache/train_full_ctc入口，训练
+冻结Qwen3-ASR-1.7B的ln_post特征上随机新temporal_upsample Head（h512/k5/dropout0.1/
+time2），不使用旧480h或smoke Head初始化正式Head。batch256/LR3e-4、weight_decay1e-4、
+clip5、seed20260825、all_samples_once均不变；三语Macro PER选checkpoint，原worst-group/
+loss tie-break、min_delta0.001/patience6/minimum5epochs、loss scheduler不变。
+smoke1epoch机械检查；全量cache为新三语清单+固定validation，bf16/encoder batch8/
+512samples每shard，建议H200至少40GiB空闲，存储门槛由新帧数估计，不套旧140GB为实测。
+pilot完整数据5epoch；formal恢复Head/optimizer/scheduler到总上限30，不另加30。
+pilot中断明确追加--resume；smoke/cache及formal按原身份和分片机制恢复，未完成epoch
+会重跑。早停后不为凑30轮反复formal。训练只读cache，test不参与，PER不等于检索召回/WER。
+
+smoke/cache返回终端JSON；pilot/formal返回新training/head/report.json及metrics.jsonl，
+另返回ctc_head_best.pt的SHA即可，不上传权重。新的三语训练、缓存与效果均尚未在H200
+发生；本轮仅交付代码与本地合成验证。检索诊断继续暂停，后续评测另立受控对照。
+
+本地新流程8项测试及相关模块定向38 passed，全量687 passed；新增范围Ruff和strict
+Mypy（scoped --follow-imports=silent）通过，CLI help、git diff --check通过。
+全仓Ruff仍有11个既有/未知文件E501，Mypy仍有8项（既有训练unused-ignore 3项、
+未知ziyan_diagnostics 5项），未改无关文件。合成测试包括全量处理后选样、固定ES/PT/
+validation及优化参数不变、review保存、字节重复/冲突、holdout隔离、不足阻断、
+temporal recovery、MFA失败新尝试及恢复、GPU阶段委托原流程及配置漂移拒绝。
+
 ## 0.165 2026-10-14 Ziyan产物身份与实际字段核验入口（待工区回传）
 
 本阶段承接0.164，先核验现有产物，不重新推理或改变检索。完整读取AGENTS及
