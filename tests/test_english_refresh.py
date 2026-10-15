@@ -86,6 +86,8 @@ def setup(root):
             "ctc_time_upsampling_factor": 2,
             "estimated_ctc_input_length": 50,
             "phoneme_token_ids": [1, 2],
+            "label_length": 2,
+            "ctc_minimum_input_length": 2,
             "text": "old",
         }
         fixed.append(row)
@@ -116,14 +118,12 @@ def setup(root):
     baseline = json.loads((REPO / "configs/480h_training.workzone.json").read_text())
     (root / "config").mkdir()
     zone = root / "config/old_zone.yaml"
-    zone.write_text(
-        yaml.safe_dump(
-            {
-                "paths": {"cache_dir": "old/cache", "output_dir": "old"},
-                "model": {"path": "/fake/Qwen3-ASR-1.7B"},
-            }
-        )
-    )
+    model = root / "model/Qwen3-ASR-1.7B"
+    for name in ("config.json", "model.safetensors.index.json"):
+        write(model / name, {})
+    zone_value = yaml.safe_load((REPO / "configs/480h_cache.workzone.yaml").read_text())
+    zone_value["model"]["path"] = str(model)
+    zone.write_text(yaml.safe_dump(zone_value))
     baseline.update(
         freeze_dir=str(old),
         train_sha256=_sha(old / "full_ctc_train.jsonl"),
@@ -135,6 +135,21 @@ def setup(root):
         vocab=cfg["vocab"],
     )
     write(root / "config/baseline.json", baseline)
+    write(
+        root / "old_cache/cache_config.json",
+        {
+            "source_manifest": {"sha256": baseline["validation_sha256"]},
+            "vocab": {"sha256": baseline["vocab_sha256"]},
+            "ctc_time_upsampling_factor": 2,
+            "tap_module": "thinker.audio_tower.ln_post",
+            "model": {
+                "path": str(model),
+                "dtype": "bfloat16",
+                "config_sha256": _sha(model / "config.json"),
+                "weight_index_sha256": _sha(model / "model.safetensors.index.json"),
+            },
+        },
+    )
     cfg.update(
         baseline_training_config=str(root / "config/baseline.json"),
         fixed_freeze=str(old),

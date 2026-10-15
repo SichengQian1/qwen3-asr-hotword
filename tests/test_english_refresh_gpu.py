@@ -24,13 +24,36 @@ def prepared(tmp_path):
     freeze = Path(cfg["freeze_dir"])
     report_path = freeze / "report.json"
     report = json.loads(report_path.read_text())
-    report.update(audio_isolation_policy=gpu.POLICY, path_identity_audit={"status": "pass"})
+    report.update(
+        audio_isolation_policy=gpu.POLICY,
+        path_identity_audit={"status": "pass", "protected_paths": 6},
+    )
     report_path.write_text(json.dumps(report))
     (freeze / "sha256.txt").write_text(
         "".join(
             f"{gpu._sha(p)}  {p.name}\n" for p in sorted(freeze.iterdir()) if p.name != "sha256.txt"
         )
     )
+    # This unit fixture represents legacy strict assets. The lifecycle test below
+    # separately consumes real fast.prepare outputs, which have no new fingerprints.
+    source = tmp_path / "source_preparation/source"
+    source.mkdir(parents=True)
+    tests = source / "test_audio_paths.jsonl"
+    tests.write_text("")
+    (source / "sha256.txt").write_text(f"{gpu._sha(tests)}  {tests.name}\n")
+    contract = tmp_path / "preparation_contract.json"
+    fingerprints = freeze / "audio_fingerprints.jsonl"
+    contract.write_text(
+        json.dumps(
+            {
+                "configuration": {"fixed_freeze": str(freeze)},
+                "audio_isolation_policy": gpu.POLICY,
+                "source_preparation": str(source.parent),
+                "input_sha256": {str(p): gpu._sha(p) for p in (fingerprints, tests)},
+            }
+        )
+    )
+    (tmp_path / "sha256.txt").write_text(f"{gpu._sha(contract)}  {contract.name}\n")
     return cfg, output
 
 

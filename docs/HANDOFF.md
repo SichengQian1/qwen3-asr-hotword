@@ -1,172 +1,135 @@
 # 工作交接记录
 
-## 0.168 2026-10-15 新英语480h快速选样：复用完整标签，跳过WAV字节扫描（选样终端回传，GPU待核验）
+## 0.168 2026-10-15 新英语480h快速准备与GPU训练衔接（准备终端回传，H200待继续）
 
-用户报告0.166 prepare已完成453826条全量标签，但第6/7阶段指纹扫描至291840条仍
-太慢、无法继续等待，询问能否直接使用已处理文本/标签。按用户本次取舍提供独立快速
-入口，保留原严格入口及所有代码字节不变；不重跑MFA或全量标签，也不修改运行中旧
-任务的身份契约。起点HEAD=22591e687dc5ff1bd72db76fe4105792fac92835，分支仍为
-codex/g2p-coverage-scan。新增未知examples/、tests/test_mfa_reference.py与此前未知
-PPT/文档/配置/诊断草稿均只读保留，不纳入此提交。
+主线仍为仅替换三语480h中的英语，保留原西语/葡语480h、旧validation8101条、90类
+音素及全部训练策略。分支codex/g2p-coverage-scan。新英语原始路径为
+/glusterfs_103/z00816262/data/en/{智利,哥伦比亚,墨西哥}，JSON的旧104前缀映射至103；
+文本取response中language English<asr_text>之后，与assistant一致。完整模型仅用户在
+H200加载/glusterfs_103/models/Qwen3-ASR-1.7B；本地不下载/加载完整模型。
 
-新增scripts/run_english_refresh_fast.py与training/english_refresh_fast.py。默认只读复用
-outputs/english_countries_refresh_v1的preparation_contract、source、g2p_report及已封存
-manifest；核验完整源/标签/词典/旧固定资产SHA，确认全量标签完成，直接采用既有
-original_ready与原2x/0.90 recovery释放规则。元数据仍需读取/校验，不能承诺瞬间完成。
+### 已完成资产及口径
 
-快速版不打开WAV/FLAC字节，不跑候选音频SHA、不跑最终三语音频字节审计。按已规范
-绝对路径排重，排除固定ES/PT训练路径、旧validation/test路径及新三国test路径；同路径
-标签冲突整组隔离。候选路径不反复resolve/readlink共享盘文件，分层维度/seed与原版
-一致，按国家来源×release×时长×密度×CTC ratio选足480h。不同路径同内容音频无法
-发现，因此不能声称字节去重/字节隔离；480h是清单时长，不是已证明独立录音小时。
+旧outputs/english_countries_refresh_v1已处理453826条全量源记录和MFA标签；用户因
+第6/7步完整WAV指纹读取太慢，明确选择跳过字节去重/字节隔离。新增独立fast入口复用
+该完整标签，不重跑MFA、不覆盖旧目录。原候选WAV指纹未逐条持久化，不将内存中曾
+扫描的291840条伪装成可复用缓存。
 
-原ES/PT分语言清单仍逐字节一致，旧validation/90类音素/MFA标签/训练参数均不变。
-新报告audio_isolation_policy=path_only_no_audio_byte_audit_user_requested；
-audio_identity_audit.status=not_performed、performed=false、byte_isolation_verified=false。
-为旧训练接口保留的空conflict_groups_by_reason不代表字节审核通过；另有明确path审计。
-新training_config_path_only.json与后续run_plan.config均携带此政策，使用新fast入口
-进入GPU阶段；生成的原training_config.json仅为配置构建中间件，不用于快速版启动。
-不应把快速数据称为原严格字节审核通过的数据。
+用户回传fast prepare终端JSON：status=data_prepared，新根为
+outputs/english_countries_refresh_fast_v1。以下是终端摘要，完整return_bundle.zip尚未
+独立返回核验，不宣称本轮Encoder cache或Head已完成：
 
-### 切换与短命令
+| 语言 | 条数 | 小时 |
+|---|---:|---:|
+| 新英语 | 263609 | 480.001615 |
+| 原西语 | 296399 | 480.001823 |
+| 原葡语 | 321741 | 480.000408 |
 
-先在工区运行旧prepare的终端按Ctrl-C停止指纹扫描，等待提示符返回；不删除任何目录。
-仅关闭另一个watch观察终端不会停止旧prepare。这里不远程终止用户进程。
+合计881749条/1440.003846h。英语智利81456条/152.089802h、哥伦比亚95396条/
+176.951241h、墨西哥86757条/150.960573h。英语original_ready263594条，原规则的
+2x recovery15条；保留原释放阈值/分层维度/seed20260923，不因快版改变标签或选样规则。
 
-容器外拉取当前分支；新远端SHA见本轮回复：
+fast按canonical绝对路径去重、隔离同路径标签冲突、排除固定ES/PT及全部保护路径；
+不发现不同路径同内容录音，不声称字节/说话人隔离或独立录音480h。明确政策为
+path_only_no_audio_byte_audit_user_requested，audio_byte_audit_performed=false。
+原ES/PT清单按原SHA复制，validation保持原SHA；原training_config.json为构建中间件，
+GPU入口实际使用training_config_path_only.json，后续run_plan.config继续携带该政策。
+
+### 当前接口与只读核验
+
+scripts/run_english_refresh_fast.py负责prepare/smoke/cache/pilot/formal。快版准备不会
+生成frozen/audio_fingerprints.jsonl。GPU前置曾错误读取该严格版产物，根因是原GPU
+单测夹具恰好包含该文件，未覆盖真实fast准备产物；不能用先前通过的局部测试声称已
+验证整个衔接链路。当前改从原准备契约中声明且SHA锁定的两个实际来源读取保护路径：
+
+- configuration.fixed_freeze/audio_fingerprints.jsonl：旧480h资产中已有的validation/test
+  路径和角色，只读取JSONL元数据，不重算WAV字节指纹。
+- source_preparation/source/test_audio_paths.jsonl：新三国测试音频路径，不读测试文本。
+
+english_refresh_gpu核验两文件自身封存SHA及其在原preparation_contract中的精确SHA，
+检查旧validation覆盖、整个新训练清单与保护路径不重叠，以及保护路径数量与fast
+冻结报告一致。protection_provenance写入新run_plan；不在fast目录补造指纹文件。
+
+GPU前置及显式prevalidated_audio_paths模式用字符串比较已规范路径，避免对约89万条
+音频重复resolve/stat/readlink。通用加载器默认仍检查音频存在性，只有fast子命令显式
+选择上述政策；所有标签、split、ID/路径重叠、计数、输入SHA检查保留。真实音频读取、
+可解码性及实际CTC长度仍在Encoder提取时严格核验。用户最新终端已确认训练清单
+881749条扫描22.3秒、validation8101条0.2秒；之后因上述错误路径退出，GPU尚未启动。
+这只证明本次元数据扫描耗时，不能外推全量Encoder完成时间或质量。
+
+stage_progress显示阶段、真实完成/总数、ASCII进度条和耗时；没有可靠总数时每10秒
+显示活动和累计耗时，不编造ETA。覆盖输入SHA、清单/标签、保护路径、空间、Qwen
+加载、两split Encoder提取、缓存SHA、验证分组和Head训练；保留原batch/shard/epoch
+日志。活动提示只说明进程存在，不证明处理数量持续增长。
+
+旧快版准备契约额外锁定自身源码。english_refresh_compat仅允许实际同一路径的
+english_refresh_fast.py从已发布2615e3d文件SHA
+5d69e4a99650ec42469c87c274f1975c3a1e18c8d2fd3b6bc0590a5620cb83cf，或6b85bfc文件SHA
+59ac7fc038578cfe22481ae337eacb6d865a77a40b72b073cd6d763e0fe5f6b1，升级至已审查文件SHA
+ed283d77e9c7443c99bd4e682af51283300f93c217d7691226656667c14821dc。7个准备函数AST
+相同，改动限于运行入口。未知代码/数据/标签变化仍阻断；不重写旧contract、seal或
+配置哈希，仅新增不可覆盖code_compatibility_<内容摘要>.json及成功摘要中的兼容记录。
+本次保护路径修复不再改变该被锁定入口，既有兼容审计仍可幂等复用。
+
+### 拉取、运行与恢复
+
+在同一仓库拉取当前分支，SHA以本轮最终回复/实际远端为准：
 
 ```bash
+# 容器外（也可在同一挂载仓库的容器内拉取）
 cd /home/star/q00933266/qwen3-asr-hotword
 git pull --ff-only origin codex/g2p-coverage-scan
 git rev-parse HEAD
 ```
 
-容器内现有Python环境，无需MFA/aligner或GPU：
+容器内使用原Qwen环境、已分配物理H200，4为显式GPU示例：
 
 ```bash
 cd /host_home/star/q00933266/qwen3-asr-hotword
-python -B scripts/run_english_refresh_fast.py prepare
-```
-
-默认新输出outputs/english_countries_refresh_fast_v1；拒绝已有目录、源准备目录及输入
-目录内输出。支持--prepared-dir指向已有完整标签根、--output-dir选另一个新根、
---config/--root。快速prepare不恢复部分结果；失败保留现场，另选新输出目录重新读取
-元数据，不重跑标签。原逐条WAV指纹尚未持久化，不尝试将内存中的291840个指纹伪装
-为可复用资产，也不复制/改动旧未完成frozen目录。
-
-五阶段名称、候选实际完成/总数、已处理合并行数及耗时可见；静默元数据检查时每10秒
-打印活动/累计时间，不虚构剩余时长。成功为data_prepared；返回新根的return_bundle.zip
-及终端JSON，包内报告/政策/训练配置/源身份及SHA，不含音频、权重或全量清单。
-新目录的元数据可用sha256sum -c sha256.txt核验；该清单不证明WAV字节身份。
-
-准备成功后，原Qwen环境、选择空闲物理H200（4仅为示例）：
-
-```bash
 python -B scripts/run_english_refresh_fast.py smoke --gpu 4
 python -B scripts/run_english_refresh_fast.py cache --gpu 4
 python -B scripts/run_english_refresh_fast.py pilot --gpu 4
 python -B scripts/run_english_refresh_fast.py formal --gpu 4
 ```
 
-逐步成功后再下一步，不自动连跑；pilot中断可加--resume，其他GPU阶段沿原身份恢复。
-使用了--output-dir则所有后续命令传同一路径。smoke/cache使用下述等价快速前置核验，
-pilot/formal仍委托原multilingual_480_run；不改
-冻结Qwen/新temporal Head、全量Encoder cache、LR/batch/epochs/early stopping等参数。
-Encoder cache仍需读取所选音频，这是提取特征必需的读取；本次省掉前置额外扫描。
+逐步成功才下一步，不自动连跑。本次失败发生在发布run_plan前，修复后直接重新smoke，
+复用现有准备结果，不重跑prepare/MFA/选样，不删任何目录。首次新准备才执行
+python -B scripts/run_english_refresh_fast.py prepare；默认新根
+outputs/english_countries_refresh_fast_v1，拒绝已有目录。准备失败保留现场、另选新根，
+不恢复部分选样；--prepared-dir可指向已有完整标签，--output-dir需在后续命令保持一致。
 
-本地定向21 passed，新范围Ruff/strict Mypy、CLI help、git diff --check通过；包含禁止打开WAV的完整快速准备、
-已完成标签复用、原输入不改、低于480h阻断、路径冲突/保护隔离、元数据选样规则一致、
-显式未执行字节审核标记、原ES/PT清单不变及GPU阶段委托。初次交付时尚无工区快速选样或
-训练实测；不能声称新480h已经生成或训练已启动。
-全量745 passed（包含现有未跟踪MFA参考示例测试，未纳入提交）；全仓Ruff仍11项既有
-E501，Mypy仍8项既有/未知草稿问题，无本次新增。首次全量发现新GPU委托测试未恢复
-工作目录，已修复测试隔离并完整重跑通过；生产训练入口无改动。
+新plan完整核验后原子发布；已有完整plan按原config/input_sha256复用，不重写身份。
+若training目录存在但缺plan，保留现场报告。smoke/cache按原分片SHA恢复，smoke Head
+按原训练状态恢复；pilot中断显式加--resume，formal从已完成5epoch状态继续。
+并发锁冲突先查持有PID及子进程；STAT=T表示暂停、仍持锁，不是已退出。确认是旧任务
+才终止，不删除锁文件绕过保护。已处理过的12418为暂停的旧smoke，无子进程。
 
-### GPU前置路径扫描修复及逐阶段可视化
+全量cache仍提取三语全部训练数据及8101条固定validation，不读取sealed test；本版
+未优化复用旧ES/PT特征。bf16、ln_post1024、encoder batch8、512样本/shard；缓存前按
+估计帧数×2048×1.25+10GiB核验空间。冻结Qwen、新temporal Head h512/k5/dropout0.1/
+time2、batch256/LR3e-4、all_samples_once、训练seed20260825、macro PER选点等原参数
+保持不变。smoke只1epoch检查流程，不将其Head用于正式初始化；pilot5epoch，formal
+总上限30epoch，validation/early stopping策略见原480h配置。
 
-用户随后回传fast prepare终端JSON：data_prepared；EN263609条/480.001615h，
-ES296399条/480.001823h，PT321741条/480.000408h，合计881749条/1440.003846h。
-EN三国分别为智利81456条/152.089802h、哥伦比亚95396条/176.951241h、墨西哥
-86757条/150.960573h。均为终端摘要，尚未收到对应return_bundle.zip独立核验文件
-身份；未宣称新Encoder cache或Head已完成。
+### 验证与待返结果
 
-用户运行smoke长时间停在Checking frozen manifests and choosing small deterministic
-smoke subsets，nvidia-smi无该进程。代码确认该日志位于模型加载前：旧scan_manifest
-对每条audio_path执行Path.resolve，约89万条清单会重复查询共享盘路径分量的元数据，
-但未读取WAV内容。没有扫描进度也是实现问题；尚无工区中断栈和分阶段耗时，不能将
-该机器的全部等待时间归因或量化为此项。后续通用cache入口还会逐WAV is_file并在
-跨split核验时resolve，故一并为显式快速政策提供不访问WAV的前置模式。
+新增真实产物串联回归：先用实际fast.prepare生成不含新指纹文件的资产，接入旧版本
+源码身份，再调用实际cache/Head CLI。以合成Encoder特征和CPU替代Qwen/H200边界，
+真实写入/读取特征分片并校验SHA，真实训练smoke1epoch、pilot5epoch、从第5epoch续训
+至formal停止；验证完成缓存重用不再次提取、原产物逐字节不改、相对fixed_freeze解析、
+旧validation/新test重叠和保护元数据篡改均阻断。仅MFA/Encoder输入及硬件为测试边界，
+不伪造Head报告/缓存成功，也不将CPU回归称为H200质量或性能结果。本次定向44 passed。
+该小夹具为train4/validation3条，formal报告实际从5续到6并按原策略早停，缓存SHA
+核验为true、test_set_used=false；它证明衔接/恢复，不提供真实语料质量证据。
+全量775 passed；修改范围Ruff/strict Mypy、CLI help及git diff --check已通过。
+全仓仍仅既有Ruff11项/Mypy8项，未知PPT/文档/诊断草稿均未改、未提交。
 
-新增training/english_refresh_gpu.py：对已封存canonical绝对路径做纯字符串规范化，
-完整扫描ID/路径/分组/split/时长/CTC因子并保留原前16 train/前8 validation分组顺序。
-通用load_experiment_records和validate_disjoint_records增加显式prevalidated_audio_paths
-参数，默认false，旧调用行为不变；fast生成的cache子命令显式传入该标记及两split
-预期条数。仍核验全部标签、计数、训练/验证路径重叠、保护集路径、清单/模型元数据
-SHA；音频存在性、可解码性及真实CTC长度延至实际提取时严格检查，错误仍阻断。
-不据此声称符号链接别名/不同路径同录音已去重或字节隔离。
-
-不修改旧严格版准备契约锁定的english_refresh.py、multilingual_480_run.py、feature_cache.py、
-sharded_ctc.py等源码；现有preparation_contract与训练配置无需重建/改SHA。独立快速
-planner生成同协议run_plan，扫描全部完成后才在临时目录写入并发布；中断时不把部分
-plan当成可续跑状态。已有完整training/run_plan.json按原config和input_sha256核验后
-直接复用，不重写其身份或smoke清单。没有删除/覆盖已有用户outputs。
-
-新增stage_progress.py，并接入fast GPU前置、cache及Head入口。扫描显示真实
-完成数/总数、ASCII进度条、百分比和耗时；否则每10秒显示阶段名称/累计耗时。
-具体包括准备输入SHA、run-plan SHA、清单扫描/标签加载、保护路径、跨split检查、
-空间核验、Qwen加载、train/validation Encoder提取、train/validation缓存SHA、验证
-分组及Head训练。Encoder保留原batch/shard计数，Head保留原shard/epoch指标。
-活动提示只证明进程仍运行，不冒充处理数量在增长，不估计无实测依据的剩余时间。
-
-工区停止旧smoke后，在同一仓库拉取当前分支；不要删除任何准备目录：
-
-```bash
-git pull --ff-only origin codex/g2p-coverage-scan
-git rev-parse HEAD
-python -B scripts/run_english_refresh_fast.py smoke --gpu 4
-```
-
-4仍为用户分配的物理GPU示例。先等smoke_completed，再原命令cache --gpu 4；无需重跑
-prepare。已有匹配缓存按原分片SHA恢复，已有smoke Head按原状态恢复；pilot中断仍须
-显式--resume。若发现旧training目录存在但缺run_plan，保留现场并报告，不能删除后
-冒充全新运行；本次所报卡点在创建training目录之前。完成输入SHA后应出现
-Scan train manifest (metadata only)进度，总数来自固定881749条配置，不靠假百分比。
-
-核验：git rev-parse HEAD与本轮回复的远端SHA一致；根准备目录内运行
-sha256sum -c sha256.txt验证原准备元数据未改（不证明WAV字节）。返回根
-return_bundle.zip、training/run_plan.json、training/smoke_head/report.json及smoke
-终端摘要；cache完成后返回training/cache/feature_cache_report.json。无需上传特征
-分片/权重。现有训练配置、冻结Encoder、Head结构和全部超参数不变。
-
-本地新增15项回归：禁止WAV resolve/stat/readlink/open、原/新smoke清单逐字节一致、
-保留采样上限及输入拒绝规则、完整旧plan身份复用、默认存在性检查、延迟真实读取
-缺失音频仍失败、标签/路径重叠阻断、未完成smoke/低磁盘/变更SHA阻断、子命令参数
-与CLI贯通、真实计数及中断状态。全量760 passed；修改范围Ruff、5个入口/新模块
-strict Mypy、3个CLI help及git diff --check通过。全仓仍仅既有Ruff11项、Mypy8项；
-未修改无关草稿。尚无修复后H200耗时/质量实测，不承诺提速倍数。
-
-工区随后在输入核验4.5秒后退出：input changed: english_refresh_fast.py。原因是0.168
-快速准备额外锁定了自身源码SHA，6b85bfc修改该文件时漏做跨版本兼容；此前测试用
-同一版本新建契约，未覆盖该情形。这是代码交付遗漏，不是已证明的数据/标签变化，
-此次GPU尚未启动。原严格版契约未改并不足以保证快速版契约兼容，以上结论据此修正。
-
-新增english_refresh_compat.py：先核验原preparation_contract.json自身封存SHA，再逐项
-校验原inputs。仅允许实际同一路径的english_refresh_fast.py从已发布2615e3d文件SHA
-5d69e4a99650ec42469c87c274f1975c3a1e18c8d2fd3b6bc0590a5620cb83cf，或6b85bfc文件SHA
-59ac7fc038578cfe22481ae337eacb6d865a77a40b72b073cd6d763e0fe5f6b1，升级至本次精确SHA
-ed283d77e9c7443c99bd4e682af51283300f93c217d7691226656667c14821dc。两旧版与当前的
-7个准备函数AST逐项相同，修改仅在GPU运行入口/进度与兼容处理。未知来源/目标SHA、
-其他源码、源JSON/标签等变化仍阻断，不按.py后缀放行，也不修改原contract/seal/SHA。
-全部输入通过后仅新增不可覆盖的code_compatibility_<内容摘要>.json，记录旧/新源码SHA、
-旧契约SHA及检查数量；终端成功JSON也带preparation_code_compatibility。
-
-仍按上述当前分支pull/smoke短命令继续，不重跑MFA、选样或prepare，不删除任何目录。
-预期先看到Reviewed preparation-code upgrade，再进入正常扫描；旧配置/数据校验与
-GPU参数不变。返回时附新增code_compatibility_*.json及原计划的小报告即可。新增8项
-跨版本/拒绝回归，定向29 passed；包括两已发布来源到当前入口、幂等审计、全部旧产物
-字节不改、标签/其他源码/未知SHA/原契约封存变更阻断。原有检查和进度修复继续保留。
-本次全量768 passed，新范围Ruff/strict Mypy、CLI help和git diff --check通过；全仓
-仍仅既有Ruff11项/Mypy8项。未在本地加载完整模型，尚待本补丁的工区smoke结果。
+核验git rev-parse HEAD与回复远端SHA一致；准备根目录内可运行
+sha256sum -c sha256.txt核验旧元数据（不证明WAV字节）。返回根return_bundle.zip、
+code_compatibility_*.json、training/run_plan.json、training/smoke_head/report.json及终端
+摘要；cache完成返回training/cache/feature_cache_report.json；训练返回
+training/head/report.json、metrics.jsonl。无需上传音频、特征张量或权重。当前工区仍待
+本次修复后smoke、全量Encoder和Head实测；Ziyan诊断/控制检索仍是独立旁线。
 
 ## 0.167 2026-10-15 Ziyan删除37英语非目标词、仅保留0–4目标音频的配对检索（待工区）
 

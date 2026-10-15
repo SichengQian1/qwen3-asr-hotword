@@ -83,6 +83,51 @@ def scan_manifest(
     )
 
 
+def verify_protected_paths(
+    output: Path,
+    train_paths: set[str],
+    val_paths: set[str],
+    frozen: dict[str, Any],
+    checked: dict[str, Any],
+) -> dict[str, Any]:
+    """Use the real preparation inputs; path-only preparation emits no new byte fingerprints."""
+    contract_path = _verified(output.parent, "preparation_contract.json", checked)
+    contract = json.loads(contract_path.read_text())
+    if contract.get("audio_isolation_policy") != POLICY:
+        raise ValueError("explicit path-only source preparation required")
+    original_freeze = Path(contract["configuration"]["fixed_freeze"]).expanduser().resolve()
+    source = Path(contract["source_preparation"]) / "source"
+    fingerprints = _verified(original_freeze, "audio_fingerprints.jsonl", checked)
+    test_paths = _verified(source, "test_audio_paths.jsonl", checked)
+    for path in (fingerprints, test_paths):
+        if contract["input_sha256"].get(str(path)) != checked[str(path)]["sha256"]:
+            raise ValueError(f"protection input differs from preparation contract: {path}")
+    protected, original_validation = set(), set()
+    for row in _rows(fingerprints):
+        roles = set(row["roles"])
+        if roles & {"validation", "test"}:
+            audio = str(canonical_audio_path(row["audio_path"]))
+            protected.add(audio)
+            if "validation" in roles:
+                original_validation.add(audio)
+    if not val_paths <= original_validation:
+        raise ValueError("legacy validation contains audio outside original protected paths")
+    protected.update(str(canonical_audio_path(row["audio_path"])) for row in _rows(test_paths))
+    protected.update(val_paths)
+    if train_paths & protected:
+        raise ValueError("training manifest overlaps protected validation/test paths")
+    if len(protected) != frozen["path_identity_audit"]["protected_paths"]:
+        raise ValueError("protected path count differs from completed path-only preparation")
+    return {
+        "policy": POLICY,
+        "original_fingerprints": str(fingerprints),
+        "new_test_audio_paths": str(test_paths),
+        "protected_paths": len(protected),
+        "cross_split_path_overlaps": 0,
+        "new_audio_byte_audit_performed": False,
+    }
+
+
 def prepare(config: dict[str, Any], output: Path) -> dict[str, Any]:
     """Publish a compatible plan only after metadata/identity checks pass; never scan WAVs."""
     if output.exists():
@@ -147,14 +192,7 @@ def prepare(config: dict[str, Any], output: Path) -> dict[str, Any]:
     if train_stats["by_language"] != config["train_counts"]:
         raise ValueError("unexpected frozen sample counts")
     with stage_progress("Verify protected validation paths and input SHA256"):
-        # In this policy these are retained protection metadata, not a new byte audit.
-        fingerprints = _verified(freeze, "audio_fingerprints.jsonl", checked)
-        remaining = set(val_paths)
-        for row in _rows(fingerprints):
-            if "validation" in row["roles"]:
-                remaining.discard(str(canonical_audio_path(row["audio_path"])))
-        if remaining:
-            raise ValueError("legacy validation contains audio outside protected paths")
+        protection = verify_protected_paths(output, train_paths, val_paths, report, checked)
         for filename, identity in checked.items():
             identities[str(Path(filename).resolve())] = identity["sha256"]
         for filename, digest in identities.items():
@@ -177,6 +215,7 @@ def prepare(config: dict[str, Any], output: Path) -> dict[str, Any]:
         "model_loaded": False,
         "training_started": False,
         "preflight_policy": "sealed canonical paths; no per-audio stat/readlink before decoding",
+        "protection_provenance": protection,
         "limitations": [
             "Path-only isolation; different paths with identical audio content remain undetected.",
             "Audio readability and actual CTC lengths are checked during extraction.",
