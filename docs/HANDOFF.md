@@ -105,6 +105,43 @@ smoke/cache返回终端JSON；pilot/formal返回新training/head/report.json及m
 另返回ctc_head_best.pt的SHA即可，不上传权重。新的三语训练、缓存与效果均尚未在H200
 发生；本轮仅交付代码与本地合成验证。检索诊断继续暂停，后续评测另立受控对照。
 
+### 2026-10-15 长任务终端进度补充
+
+用户要求后续可能长时间运行的任务都提供可见进度，已写入AGENTS Coding Guidelines：
+真实计数、阶段、时间和日志/活动提示；底层没有可靠进度时不编百分比或ETA。
+当前prepare的MFA stdout/stderr写入mfa_attempt_*/mfa.log，原命令终端可能长时间安静。
+项目仅有葡语76744词/1702.057秒（约28.4分钟）的历史实测，不能当新英语耗时；新英语
+唯一词数/吞吐尚未回传，MFA成本按唯一词而非480h音频小时估计，完整prepare还含音频字节扫描。
+
+新增scripts/watch_english_refresh.py及training/english_refresh_progress.py。保留9811190
+原prepare/训练入口及其契约哈希覆盖的代码字节不变，避免为显示进度破坏已有任务身份。
+此补充在0.166记档，不改变数据、MFA参数、筛选、缓存或训练；不新增训练实验节点。
+
+容器外按上面的分支pull同步后，容器内另开终端观察已启动任务：
+
+```bash
+python -B scripts/watch_english_refresh.py
+```
+
+默认只读，不启动、不恢复、不覆盖任何任务或产物；Ctrl-C仅退出监看。每5秒显示7个
+阶段编号、实际计数/条数进度条、阶段已观察时间和总监看时间，并跟随MFA原始日志。
+附加监看的时间从打开监看起算，不能当成原任务已经运行多久；阶段编号不是总耗时百分比。
+MFA若没提供真实总百分比，只显示活动指示、词数和日志，不把内部子步骤100%当全程完成。
+只读文件变化不能单独证明原进程仍在运行，以原任务终端退出码/JSON和原报告为准。
+
+新任务可把启动与进度合到一条命令（已启动任务不要重复--run）：
+
+```bash
+conda run --no-capture-output -n aligner python -B scripts/watch_english_refresh.py --run
+```
+
+--run将同一配置/输出/worker/jobs参数交给原scripts/run_english_refresh.py prepare，
+保持原返回码；原任务报错不会被监看当成功。已验证配置相同的中断恢复使用--run --resume，
+原0.166恢复限制仍然适用。支持--root/--config/--output-dir/--workers/--jobs/--interval。
+监看不要求MFA/Qwen环境；只有--run需要aligner。GPU cache/train原有shard/epoch日志继续保留。
+本次全量回归692 passed，最终监看定向7 passed（含补充的只读/返回码CLI验证）；新范围
+Ruff/Mypy、CLI help、git diff --check通过。全仓既有Ruff11/Mypy8项不变，未改未知文件。
+
 本地新流程8项测试及相关模块定向38 passed，全量687 passed；新增范围Ruff和strict
 Mypy（scoped --follow-imports=silent）通过，CLI help、git diff --check通过。
 全仓Ruff仍有11个既有/未知文件E501，Mypy仍有8项（既有训练unused-ignore 3项、

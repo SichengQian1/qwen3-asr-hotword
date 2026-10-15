@@ -609,6 +609,11 @@ is fixed.
 
 ## Coding Guidelines
 
+- Long-running commands must expose visible terminal progress: named stages,
+  actual completed/total counts when available, elapsed time, and live logs or
+  a periodic activity indicator during otherwise silent work. Never invent a
+  percentage or ETA when the underlying tool does not report reliable progress.
+  Preserve existing run identities when adding observation to an active task.
 - Keep changes scoped and compatible with Qwen3-ASR-1.7B.
 - Prefer small, inspectable modules under `src/qwen_hotword/`.
 - Add tests for scanner, hotword, CTC, prompt, or training behavior when logic
