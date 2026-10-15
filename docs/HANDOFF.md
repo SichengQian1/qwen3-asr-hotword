@@ -1,5 +1,121 @@
 # 工作交接记录
 
+## 0.167 2026-10-15 Ziyan删除37英语非目标词、仅保留0–4目标音频的配对检索（待工区）
+
+用户恢复Ziyan检索分析并明确授权：删除讨论的13个疑似残片和24个非目标近邻词，
+不再要求300–500个热词；仅跑每条参考包含4个及以下目标词的音频。用户另明确确认本次
+只要Top5/Top7检索，不运行最终Qwen LLM转写。训练替换英语的0.166为独立工作，本次
+不改训练任务或Head。当前分支codex/g2p-coverage-scan；本次起点HEAD、origin跟踪与
+实际远端均为6e2d93b601fb1aa1fb80b9217b144e2aecf4a2d9。未知未跟踪PPT/文档/图片、
+葡语配置及两份Ziyan诊断草稿保持原样，不导入、覆盖、提交；tracked起点干净。
+
+### 已确认的原始分布与新口径
+
+用户回传资产report的targets_per_audio，独立复算712条/1100个不同目标词×音频，
+413正样本/299无目标样本。超过3目标为93条，占全部13.0618%、正样本22.5182%，
+贡献591/1100=53.7273%目标对；这说明微平均召回受高密度音频影响，不证明音文配错。
+0目标只指固定372词与参考的交集为空，不表示没有语音/没有全表词，也不直接降低目标召回。
+
+新实验按原冻结372目标、生产strict_phrase_match计不同词，一词重复多次仍计1；
+保留0/1/2/3/4目标的299/175/101/44/35条，共654条，其中355正样本、299无目标，
+分母649目标对。排除58条/451目标对。Top5/Top7对新目标的理论容量界均100%，不能
+据此预言实际召回。筛选使用参考、不使用预测，是参考条件化子集，不是泛化收益。
+不去重、不截断音频；原6条额外hash重复仍由源记录保留，新报告重算选中重复数。
+372是已有冻结资产，不为本次重新凑词数；新控制工具没有300–500限制。仅在被排除
+音频出现的目标仍留在索引，另列active_target_words_in_subset和缺席目标，不静默删目标。
+
+新增configs/ziyan_control_le4_drop37.workzone.json冻结两组词：
+
+- 13残片：ately/connec/contem/cutors/immigra/interna/kets/larly/mation/opportuni/
+  sions/sition/sonal。疑似残片仍是审查判断，未证明其原始产生原因。
+- 24近邻：warnings/warns/balanced/balances/companies/guarantees/delays/designs/
+  highways/perfumes/stations/requested/enjoyed/rained/weathered/fished/contracting/
+  advancement/nationally/nationals/booker/prides/thrived/thriving。
+
+这37词均不在372目标中。只删除这些词的英语filler变体；若同词面有ES/PT变体，保留
+其他语言，并明确报告仍活跃的跨语言词面。因此完整三语词面数不预先写死为3606-37。
+保留的词面/发音不修改，不跑MFA，不改90类音素、Anchor、评分、门控、Top64或Top5/7。
+
+### CPU真实索引重放与结果解释
+
+新增scripts/run_ziyan_control.py及evaluation/ziyan_control{,_replay}.py。复用已完成
+outputs/ziyan_english_assets_v1和outputs/ziyan_english_retrieval_480h_v1。源表固定SHA
+09244f35b64964313a26fc8a6cfa51b321e17ce02b730f168d1c4c3d6fabc530；Head仍为320123fe…4265，
+vocab仍0f4939ba…af4，完整原身份继续由configs/ziyan_english.workzone.json约束。
+
+先调用既有ziyan_identity核验源资产/检索全部SHA、实际JSON/targets/Head/vocab、原代码
+和712条详情。读取已有CTC IDs/confidences，对每条选中音频重新构建原表索引查询Top64，
+调用原评分/词面合并/门控，复现全部变体候选、词面候选、分数、编辑距离、posterior、
+decoded_start/end和Top5选取，除不能恢复的声学帧时间外逐项核对（浮点容差1e-10）。
+任一不一致即停止，不发布实验结果。随后对真正删除英语条目的新表重新建Anchor索引，
+重算锚点权重/Top64候选/重排/门控，产出新Top5/Top7，绝不是从旧交付或Top64列表删词。
+
+原文件未存逐音素声学帧边界；CPU内部使用离散序号辅助原函数，导出所有start_step/
+end_step为null，仅保留真实decoded-token位置，绝不把序号伪装成WAV时间。无需GPU、
+Qwen Encoder或Head前向，未打开源音频字节、不加载完整模型；音频hash复用已存记录。
+这是一致CTC下的检索配对实验，不提供PER/WER、新H200时延或音文/SNR审核结论。
+
+报告分开给原712条旧指标、同654条旧表指标、新表同654条指标。只有后两项是删词配对；
+对照同649分母，另存逐条gained/lost目标、参考外输出和候选数量，避免掩盖一增一减。
+by_target_count逐层报告0–4；无目标样本分别记录错误目标触发率与任意输出率，后者可能
+含参考中真实出现的非目标词，不能全部叫误报。新表词面数和发音索引规模独立报告。
+
+### 同步、执行、恢复与回传
+
+容器外拉取当前分支（本轮新远端SHA见回复）：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内仓库根目录，现有Python环境执行，纯CPU，无需aligner或GPU参数：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_ziyan_control.py
+```
+
+默认新目录outputs/ziyan_control_le4_drop37_v1，拒绝已有目录及旧资产/检索目录内或祖先
+输出。可用--output-dir指定另一新目录；固定--config/--root。四阶段进度及每条完成数、
+真实百分比、累计时间和sample ID可见。CPU耗时依CTC长度与机器而变，未给虚构ETA。
+
+完全相同配置、源身份和代码中断后：
+
+```bash
+python -B scripts/run_ziyan_control.py --resume
+```
+
+逐条配对JSON shard有SHA与原行SHA，完成配对才原子保存；未完成音频重放原/新两个索引，
+已核验配对复用。代码/配置/源身份漂移拒绝恢复。完成后--resume仅验证、返回原报告。
+源身份小包写入中断或shard损坏不删除现场，需使用另一新输出目录。已有生成词表不同
+则拒绝，避免覆盖用户修改；原outputs始终只读。部分最终打包可恢复；zip临时文件不
+当成完成包，残留尝试保留。归档与报告完成后封存整个新输出。
+
+新产物包括keyword_table.json、english_words.txt、removed_english_words.txt、targets.txt、
+subset_manifest.jsonl（654条逐条参考/目标数）、excluded_manifest.jsonl、原JSON选中行、
+sample_shards、逐样本详情、paired_changes.jsonl、selection/removal/report及SHA清单。
+delivery两份名称仍为ziyan_en_noise10db_top5/top7.json；仅654个stem，格式仍word/phoneme。
+屏幕打印return_bundle.zip及SHA；只需返回该小包和终端JSON，不传音频、权重或特征。
+包内含新两份交付、英语词清单、移除清单、冻结目标、配对变化与各小报告，便于核验。
+另含新run_config的实际输入/代码SHA及源identity summary；源音频字节未重新打开。
+
+完成后在工区核验新输出：
+
+```bash
+R=outputs/ziyan_control_le4_drop37_v1
+(cd "$R" && sha256sum --quiet -c sha256.txt)
+```
+
+本地验证为合成CTC/模拟文件及单元测试，不是工区实测；当前尚无这版召回率或删词收益。
+定向32 passed，全量705 passed；新范围Ruff、strict Mypy、CLI help与git diff --check通过。
+全仓Ruff仍有原11项E501，Mypy仍有原8项（历史训练3项、未知诊断草稿5项），未改无关
+文件。测试覆盖不到300目标的冻结资产、完整原表重放、变体/候选/门控一致、原Top64外
+词可在删词重建后进入候选、ES/PT同形词保留、0/4/5边界、重复词去重计数、原文件不改、
+无实际音频仍可重放、损坏输出/配置漂移拒绝、逐条中断与最终打包中断的恢复，以及无
+伪造声学时间的导出。新代码未修改原检索/训练模块。
+
 ## 0.166 2026-10-14 新三国英语全量处理→480h替换→原三语CTC训练入口（待工区）
 
 用户明确暂停0.164–0.165英语检索根因诊断，授权换英语训练语料后重新训练三语CTC；

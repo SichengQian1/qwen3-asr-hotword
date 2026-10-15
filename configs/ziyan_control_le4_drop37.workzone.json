@@ -1,0 +1,26 @@
+{
+  "baseline_config": "configs/ziyan_english.workzone.json",
+  "source_table_sha256": "09244f35b64964313a26fc8a6cfa51b321e17ce02b730f168d1c4c3d6fabc530",
+  "maximum_targets_per_audio": 4,
+  "keep_zero_target_samples": true,
+  "expected_selection": {
+    "samples": 654,
+    "positive_samples": 355,
+    "negative_samples": 299,
+    "target_sample_pairs": 649,
+    "excluded_samples": 58
+  },
+  "remove_english_non_targets": {
+    "suspected_fragments": [
+      "ately", "connec", "contem", "cutors", "immigra", "interna", "kets",
+      "larly", "mation", "opportuni", "sions", "sition", "sonal"
+    ],
+    "non_target_neighbors": [
+      "warnings", "warns", "balanced", "balances", "companies", "guarantees",
+      "delays", "designs", "highways", "perfumes", "stations", "requested",
+      "enjoyed", "rained", "weathered", "fished", "contracting", "advancement",
+      "nationally", "nationals", "booker", "prides", "thrived", "thriving"
+    ]
+  },
+  "output": "outputs/ziyan_control_le4_drop37_v1"
+}
