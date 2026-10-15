@@ -372,11 +372,13 @@ def _prepare(root: Path, cfg: dict[str, Any], prepared: Path, output: Path) -> d
 
 
 def run_stage(root: Path, output: Path, stage: str, gpu: str, *, resume: bool = False) -> Any:
+    from qwen_hotword.training.english_refresh_compat import verify_preparation_inputs
+
     report = json.loads((output / "report.json").read_text())
     if report.get("status") != "data_prepared" or report.get("audio_isolation_policy") != POLICY:
         raise ValueError("completed explicit path-only preparation required")
     with stage_progress("Verify fixed preparation inputs (metadata only)"):
-        original.unchanged(json.loads((output / "preparation_contract.json").read_text()))
+        compatibility = verify_preparation_inputs(output)
     path = output / "training_config_path_only.json"
     if (
         _sha(path) != report["training_config_sha256"]
@@ -393,6 +395,12 @@ def run_stage(root: Path, output: Path, stage: str, gpu: str, *, resume: bool = 
     if stage in {"smoke", "cache"}:
         from qwen_hotword.training.english_refresh_gpu import run_stage as run_gpu_stage
 
-        return run_gpu_stage(config, output / "training", stage, gpu)
-    with stage_progress(f"{stage} Head training: see validation/shard/epoch logs"):
-        return historical.run_training_stage(config, output / "training", stage, gpu, resume=resume)
+        result = run_gpu_stage(config, output / "training", stage, gpu)
+    else:
+        with stage_progress(f"{stage} Head training: see validation/shard/epoch logs"):
+            result = historical.run_training_stage(
+                config, output / "training", stage, gpu, resume=resume
+            )
+    if compatibility:
+        result["preparation_code_compatibility"] = compatibility
+    return result

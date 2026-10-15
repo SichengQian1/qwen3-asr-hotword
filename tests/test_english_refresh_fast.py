@@ -7,6 +7,7 @@ import pytest
 from test_english_refresh import prepared_inputs as prepared_inputs
 
 from qwen_hotword.training import english_refresh as original
+from qwen_hotword.training import english_refresh_compat as compatibility
 from qwen_hotword.training import english_refresh_fast as fast
 from qwen_hotword.training import english_refresh_gpu as gpu_stages
 from qwen_hotword.training.spanish_480_plan import _rows, candidate
@@ -130,3 +131,77 @@ def test_fast_insufficient_capacity_preserves_labels_and_does_not_publish(
     assert (root / "original/manifest/sha256.txt").exists()
     assert (root / "fast/frozen/capacity_report.json").exists()
     assert not (root / "fast/training_config_path_only.json").exists()
+
+
+def legacy_contract(output, digest):
+    path = output / "preparation_contract.json"
+    saved = json.loads(path.read_text())
+    saved["input_sha256"][str(compatibility.FAST_MODULE)] = digest
+    path.write_text(json.dumps(saved))
+    seal = output / "sha256.txt"
+    lines = []
+    for line in seal.read_text().splitlines():
+        old, relative = line.split("  ", 1)
+        lines.append(f"{_sha(path) if relative == path.name else old}  {relative}\n")
+    seal.write_text("".join(lines))
+
+
+def test_reviewed_compatibility_target_matches_delivered_fast_module():
+    assert _sha(compatibility.FAST_MODULE) == compatibility.REVIEWED_TARGET
+
+
+@pytest.mark.parametrize("old_sha", sorted(compatibility.REVIEWED_SOURCES))
+def test_existing_preparation_survives_reviewed_code_update(staged, monkeypatch, old_sha):
+    root, cfg, mfa_calls = staged
+    output = root / "fast"
+    fast.prepare(root, cfg, root / "original", output)
+    legacy_contract(output, old_sha)
+    before = {p: _sha(p) for p in output.rglob("*") if p.is_file()}
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(gpu_stages, "run_stage", lambda *args: {"status": "mock_only"})
+    for _ in range(2):
+        result = fast.run_stage(root, output, "smoke", "4")
+        change = result["preparation_code_compatibility"][0]
+        assert change["recorded_sha256"] == old_sha
+        assert change["current_sha256"] == compatibility.REVIEWED_TARGET
+        for path, digest in before.items():
+            assert _sha(path) == digest
+    assert len(mfa_calls) == 1
+    audits = list(output.glob("code_compatibility_*.json"))
+    assert len(audits) == 1
+    audit = json.loads(audits[0].read_text())
+    assert audit["dataset_checks_relaxed"] is False
+    assert audit["preparation_contract_sha256"] == _sha(output / "preparation_contract.json")
+
+
+@pytest.mark.parametrize("problem", ["data", "unknown_source", "target", "other_code", "seal"])
+def test_compatibility_never_bypasses_other_identity_changes(staged, monkeypatch, problem):
+    root, cfg, _ = staged
+    output = root / "fast"
+    fast.prepare(root, cfg, root / "original", output)
+    legacy_contract(output, next(iter(compatibility.REVIEWED_SOURCES)))
+    contract_path = output / "preparation_contract.json"
+    if problem == "data":
+        (root / "original/manifest/train_ready.jsonl").write_text("changed labels")
+    elif problem == "unknown_source":
+        legacy_contract(output, "0" * 64)
+    elif problem == "target":
+        sha = compatibility._sha
+        monkeypatch.setattr(
+            compatibility,
+            "_sha",
+            lambda path: "f" * 64 if path == compatibility.FAST_MODULE else sha(path),
+        )
+    else:
+        saved = json.loads(contract_path.read_text())
+        if problem == "other_code":
+            other = str(Path(original.__file__))
+            saved["input_sha256"][other] = next(iter(compatibility.REVIEWED_SOURCES))
+        else:
+            saved["unexpected"] = "edited without updating original seal"
+        contract_path.write_text(json.dumps(saved))
+        if problem == "other_code":
+            legacy_contract(output, next(iter(compatibility.REVIEWED_SOURCES)))
+    with pytest.raises(ValueError):
+        compatibility.verify_preparation_inputs(output)
+    assert not list(output.glob("code_compatibility_*.json"))

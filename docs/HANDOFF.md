@@ -105,7 +105,7 @@ smoke subsets，nvidia-smi无该进程。代码确认该日志位于模型加载
 SHA；音频存在性、可解码性及真实CTC长度延至实际提取时严格检查，错误仍阻断。
 不据此声称符号链接别名/不同路径同录音已去重或字节隔离。
 
-不修改原准备契约锁定的english_refresh.py、multilingual_480_run.py、feature_cache.py、
+不修改旧严格版准备契约锁定的english_refresh.py、multilingual_480_run.py、feature_cache.py、
 sharded_ctc.py等源码；现有preparation_contract与训练配置无需重建/改SHA。独立快速
 planner生成同协议run_plan，扫描全部完成后才在临时目录写入并发布；中断时不把部分
 plan当成可续跑状态。已有完整training/run_plan.json按原config和input_sha256核验后
@@ -144,6 +144,29 @@ return_bundle.zip、training/run_plan.json、training/smoke_head/report.json及s
 与CLI贯通、真实计数及中断状态。全量760 passed；修改范围Ruff、5个入口/新模块
 strict Mypy、3个CLI help及git diff --check通过。全仓仍仅既有Ruff11项、Mypy8项；
 未修改无关草稿。尚无修复后H200耗时/质量实测，不承诺提速倍数。
+
+工区随后在输入核验4.5秒后退出：input changed: english_refresh_fast.py。原因是0.168
+快速准备额外锁定了自身源码SHA，6b85bfc修改该文件时漏做跨版本兼容；此前测试用
+同一版本新建契约，未覆盖该情形。这是代码交付遗漏，不是已证明的数据/标签变化，
+此次GPU尚未启动。原严格版契约未改并不足以保证快速版契约兼容，以上结论据此修正。
+
+新增english_refresh_compat.py：先核验原preparation_contract.json自身封存SHA，再逐项
+校验原inputs。仅允许实际同一路径的english_refresh_fast.py从已发布2615e3d文件SHA
+5d69e4a99650ec42469c87c274f1975c3a1e18c8d2fd3b6bc0590a5620cb83cf，或6b85bfc文件SHA
+59ac7fc038578cfe22481ae337eacb6d865a77a40b72b073cd6d763e0fe5f6b1，升级至本次精确SHA
+ed283d77e9c7443c99bd4e682af51283300f93c217d7691226656667c14821dc。两旧版与当前的
+7个准备函数AST逐项相同，修改仅在GPU运行入口/进度与兼容处理。未知来源/目标SHA、
+其他源码、源JSON/标签等变化仍阻断，不按.py后缀放行，也不修改原contract/seal/SHA。
+全部输入通过后仅新增不可覆盖的code_compatibility_<内容摘要>.json，记录旧/新源码SHA、
+旧契约SHA及检查数量；终端成功JSON也带preparation_code_compatibility。
+
+仍按上述当前分支pull/smoke短命令继续，不重跑MFA、选样或prepare，不删除任何目录。
+预期先看到Reviewed preparation-code upgrade，再进入正常扫描；旧配置/数据校验与
+GPU参数不变。返回时附新增code_compatibility_*.json及原计划的小报告即可。新增8项
+跨版本/拒绝回归，定向29 passed；包括两已发布来源到当前入口、幂等审计、全部旧产物
+字节不改、标签/其他源码/未知SHA/原契约封存变更阻断。原有检查和进度修复继续保留。
+本次全量768 passed，新范围Ruff/strict Mypy、CLI help和git diff --check通过；全仓
+仍仅既有Ruff11项/Mypy8项。未在本地加载完整模型，尚待本补丁的工区smoke结果。
 
 ## 0.167 2026-10-15 Ziyan删除37英语非目标词、仅保留0–4目标音频的配对检索（待工区）
 
