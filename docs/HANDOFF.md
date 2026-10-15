@@ -1,5 +1,86 @@
 # 工作交接记录
 
+## 0.168 2026-10-15 新英语480h快速选样：复用完整标签，跳过WAV字节扫描（待工区）
+
+用户报告0.166 prepare已完成453826条全量标签，但第6/7阶段指纹扫描至291840条仍
+太慢、无法继续等待，询问能否直接使用已处理文本/标签。按用户本次取舍提供独立快速
+入口，保留原严格入口及所有代码字节不变；不重跑MFA或全量标签，也不修改运行中旧
+任务的身份契约。起点HEAD=22591e687dc5ff1bd72db76fe4105792fac92835，分支仍为
+codex/g2p-coverage-scan。新增未知examples/、tests/test_mfa_reference.py与此前未知
+PPT/文档/配置/诊断草稿均只读保留，不纳入此提交。
+
+新增scripts/run_english_refresh_fast.py与training/english_refresh_fast.py。默认只读复用
+outputs/english_countries_refresh_v1的preparation_contract、source、g2p_report及已封存
+manifest；核验完整源/标签/词典/旧固定资产SHA，确认全量标签完成，直接采用既有
+original_ready与原2x/0.90 recovery释放规则。元数据仍需读取/校验，不能承诺瞬间完成。
+
+快速版不打开WAV/FLAC字节，不跑候选音频SHA、不跑最终三语音频字节审计。按已规范
+绝对路径排重，排除固定ES/PT训练路径、旧validation/test路径及新三国test路径；同路径
+标签冲突整组隔离。候选路径不反复resolve/readlink共享盘文件，分层维度/seed与原版
+一致，按国家来源×release×时长×密度×CTC ratio选足480h。不同路径同内容音频无法
+发现，因此不能声称字节去重/字节隔离；480h是清单时长，不是已证明独立录音小时。
+
+原ES/PT分语言清单仍逐字节一致，旧validation/90类音素/MFA标签/训练参数均不变。
+新报告audio_isolation_policy=path_only_no_audio_byte_audit_user_requested；
+audio_identity_audit.status=not_performed、performed=false、byte_isolation_verified=false。
+为旧训练接口保留的空conflict_groups_by_reason不代表字节审核通过；另有明确path审计。
+新training_config_path_only.json与后续run_plan.config均携带此政策，使用新fast入口
+进入GPU阶段；生成的原training_config.json仅为配置构建中间件，不用于快速版启动。
+不应把快速数据称为原严格字节审核通过的数据。
+
+### 切换与短命令
+
+先在工区运行旧prepare的终端按Ctrl-C停止指纹扫描，等待提示符返回；不删除任何目录。
+仅关闭另一个watch观察终端不会停止旧prepare。这里不远程终止用户进程。
+
+容器外拉取当前分支；新远端SHA见本轮回复：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内现有Python环境，无需MFA/aligner或GPU：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+python -B scripts/run_english_refresh_fast.py prepare
+```
+
+默认新输出outputs/english_countries_refresh_fast_v1；拒绝已有目录、源准备目录及输入
+目录内输出。支持--prepared-dir指向已有完整标签根、--output-dir选另一个新根、
+--config/--root。快速prepare不恢复部分结果；失败保留现场，另选新输出目录重新读取
+元数据，不重跑标签。原逐条WAV指纹尚未持久化，不尝试将内存中的291840个指纹伪装
+为可复用资产，也不复制/改动旧未完成frozen目录。
+
+五阶段名称、候选实际完成/总数、已处理合并行数及耗时可见；静默元数据检查时每10秒
+打印活动/累计时间，不虚构剩余时长。成功为data_prepared；返回新根的return_bundle.zip
+及终端JSON，包内报告/政策/训练配置/源身份及SHA，不含音频、权重或全量清单。
+新目录的元数据可用sha256sum -c sha256.txt核验；该清单不证明WAV字节身份。
+
+准备成功后，原Qwen环境、选择空闲物理H200（4仅为示例）：
+
+```bash
+python -B scripts/run_english_refresh_fast.py smoke --gpu 4
+python -B scripts/run_english_refresh_fast.py cache --gpu 4
+python -B scripts/run_english_refresh_fast.py pilot --gpu 4
+python -B scripts/run_english_refresh_fast.py formal --gpu 4
+```
+
+逐步成功后再下一步，不自动连跑；pilot中断可加--resume，其他GPU阶段沿原身份恢复。
+使用了--output-dir则所有后续命令传同一路径。只委托原multilingual_480_run，不改
+冻结Qwen/新temporal Head、全量Encoder cache、LR/batch/epochs/early stopping等参数。
+Encoder cache仍需读取所选音频，这是提取特征必需的读取；本次省掉前置额外扫描。
+
+本地定向21 passed，新范围Ruff/strict Mypy、CLI help、git diff --check通过；包含禁止打开WAV的完整快速准备、
+已完成标签复用、原输入不改、低于480h阻断、路径冲突/保护隔离、元数据选样规则一致、
+显式未执行字节审核标记、原ES/PT清单不变及GPU阶段委托。尚无本轮工区快速选样或
+训练实测；不能声称新480h已经生成或训练已启动。
+全量745 passed（包含现有未跟踪MFA参考示例测试，未纳入提交）；全仓Ruff仍11项既有
+E501，Mypy仍8项既有/未知草稿问题，无本次新增。首次全量发现新GPU委托测试未恢复
+工作目录，已修复测试隔离并完整重跑通过；生产训练入口无改动。
+
 ## 0.167 2026-10-15 Ziyan删除37英语非目标词、仅保留0–4目标音频的配对检索（待工区）
 
 用户恢复Ziyan检索分析并明确授权：删除讨论的13个疑似残片和24个非目标近邻词，
