@@ -8,6 +8,7 @@ from test_english_refresh import prepared_inputs as prepared_inputs
 
 from qwen_hotword.training import english_refresh as original
 from qwen_hotword.training import english_refresh_fast as fast
+from qwen_hotword.training import english_refresh_gpu as gpu_stages
 from qwen_hotword.training.spanish_480_plan import _rows, candidate
 from qwen_hotword.training.spanish_capacity import _sha
 
@@ -95,7 +96,7 @@ def test_gpu_stage_delegates_with_explicit_policy_and_unchanged_options(staged, 
         calls.append((config, output, stage, gpu))
         return {"status": "mock_only"}
 
-    monkeypatch.setattr(original.historical, "run_stage", run)
+    monkeypatch.setattr(gpu_stages, "run_stage", run)
     monkeypatch.chdir(root)
     assert fast.run_stage(root, root / "fast", "smoke", "4")["status"] == "mock_only"
     assert calls[0][0]["audio_isolation_policy"] == fast.POLICY

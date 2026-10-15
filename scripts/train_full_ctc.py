@@ -16,6 +16,7 @@ from qwen_hotword.training.sharded_ctc import (
     load_disk_feature_cache,
     train_sharded_ctc_head,
 )
+from qwen_hotword.training.stage_progress import stage_progress
 from qwen_hotword.training.train_sampling import (
     PT_ORIGINAL_READY_EQUAL_RECORD_EXPOSURE,
     build_portuguese_original_ready_sampling_plan,
@@ -107,20 +108,20 @@ def main() -> int:
                 raise RuntimeError("CUDA training was requested but CUDA is unavailable")
             vocab = load_phoneme_vocab(args.vocab)
             verify_sha256 = not args.skip_cache_sha256_verification
-            train_cache = load_disk_feature_cache(
-                args.train_cache,
-                expected_split="train",
-                source_manifest_path=args.train_manifest,
-                vocab_path=args.vocab,
-                verify_sha256=verify_sha256,
-            )
-            validation_cache = load_disk_feature_cache(
-                args.validation_cache,
-                expected_split="validation",
-                source_manifest_path=args.validation_manifest,
-                vocab_path=args.vocab,
-                verify_sha256=verify_sha256,
-            )
+            caches = {}
+            for split, cache_dir, manifest in (
+                ("train", args.train_cache, args.train_manifest),
+                ("validation", args.validation_cache, args.validation_manifest),
+            ):
+                with stage_progress(f"Verify {split} feature-cache identity and shard SHA256"):
+                    caches[split] = load_disk_feature_cache(
+                        cache_dir,
+                        expected_split=split,
+                        source_manifest_path=manifest,
+                        vocab_path=args.vocab,
+                        verify_sha256=verify_sha256,
+                    )
+            train_cache, validation_cache = caches["train"], caches["validation"]
             expected_validation_groups = tuple(
                 value.strip()
                 for value in args.expected_validation_groups.split(",")
@@ -133,24 +134,25 @@ def main() -> int:
                 or args.checkpoint_selection_metric == "validation_macro_per"
             ) and not args.validation_group_column:
                 raise ValueError("Macro validation metrics require --validation-group-column")
-            validation_sample_groups = (
-                load_validation_sample_groups(
-                    args.validation_manifest,
-                    validation_cache,
-                    group_column=args.validation_group_column,
-                    expected_groups=expected_validation_groups,
+            with stage_progress("Prepare validation groups and training sampling policy"):
+                validation_sample_groups = (
+                    load_validation_sample_groups(
+                        args.validation_manifest,
+                        validation_cache,
+                        group_column=args.validation_group_column,
+                        expected_groups=expected_validation_groups,
+                    )
+                    if args.validation_group_column
+                    else None
                 )
-                if args.validation_group_column
-                else None
-            )
-            train_sampling_plan = (
-                build_portuguese_original_ready_sampling_plan(
-                    args.train_manifest,
-                    train_cache,
+                train_sampling_plan = (
+                    build_portuguese_original_ready_sampling_plan(
+                        args.train_manifest,
+                        train_cache,
+                    )
+                    if args.train_sampling_policy == PT_ORIGINAL_READY_EQUAL_RECORD_EXPOSURE
+                    else None
                 )
-                if args.train_sampling_policy == PT_ORIGINAL_READY_EQUAL_RECORD_EXPOSURE
-                else None
-            )
             print(
                 json.dumps(
                     {
@@ -176,37 +178,38 @@ def main() -> int:
                 ),
                 flush=True,
             )
-            report = train_sharded_ctc_head(
-                train_cache,
-                validation_cache,
-                vocab,
-                args.output_dir,
-                vocab_path=args.vocab,
-                device=args.device,
-                epochs=args.epochs,
-                minimum_epochs=args.minimum_epochs,
-                early_stopping_patience=args.early_stopping_patience,
-                early_stopping_min_delta=args.early_stopping_min_delta,
-                early_stopping_metric=args.early_stopping_metric,
-                checkpoint_selection_metric=args.checkpoint_selection_metric,
-                validation_sample_groups=validation_sample_groups,
-                train_sampling_plan=train_sampling_plan,
-                train_batch_size=args.train_batch_size,
-                learning_rate=args.learning_rate,
-                weight_decay=args.weight_decay,
-                max_gradient_norm=args.max_gradient_norm,
-                scheduler_patience=args.scheduler_patience,
-                scheduler_factor=args.scheduler_factor,
-                minimum_learning_rate=args.minimum_learning_rate,
-                seed=args.seed,
-                log_every_shards=args.log_every_shards,
-                resume=args.resume,
-                head_type=args.head_type,
-                head_hidden_dimension=args.head_hidden_dimension,
-                head_kernel_size=args.head_kernel_size,
-                head_dropout=args.head_dropout,
-                head_time_upsampling_factor=args.head_time_upsampling_factor,
-            )
+            with stage_progress("Train/validate CTC Head (see shard and epoch metrics)"):
+                report = train_sharded_ctc_head(
+                    train_cache,
+                    validation_cache,
+                    vocab,
+                    args.output_dir,
+                    vocab_path=args.vocab,
+                    device=args.device,
+                    epochs=args.epochs,
+                    minimum_epochs=args.minimum_epochs,
+                    early_stopping_patience=args.early_stopping_patience,
+                    early_stopping_min_delta=args.early_stopping_min_delta,
+                    early_stopping_metric=args.early_stopping_metric,
+                    checkpoint_selection_metric=args.checkpoint_selection_metric,
+                    validation_sample_groups=validation_sample_groups,
+                    train_sampling_plan=train_sampling_plan,
+                    train_batch_size=args.train_batch_size,
+                    learning_rate=args.learning_rate,
+                    weight_decay=args.weight_decay,
+                    max_gradient_norm=args.max_gradient_norm,
+                    scheduler_patience=args.scheduler_patience,
+                    scheduler_factor=args.scheduler_factor,
+                    minimum_learning_rate=args.minimum_learning_rate,
+                    seed=args.seed,
+                    log_every_shards=args.log_every_shards,
+                    resume=args.resume,
+                    head_type=args.head_type,
+                    head_hidden_dimension=args.head_hidden_dimension,
+                    head_kernel_size=args.head_kernel_size,
+                    head_dropout=args.head_dropout,
+                    head_time_upsampling_factor=args.head_time_upsampling_factor,
+                )
     except (FileNotFoundError, KeyError, OSError, RuntimeError, ValueError) as error:
         print(f"FULL CTC TRAINING FAILED: {type(error).__name__}: {error}", file=sys.stderr)
         return 1

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -98,6 +100,14 @@ class OverfitReport:
         return asdict(self)
 
 
+def canonical_audio_path(value: str) -> Path:
+    """Compare already staged absolute paths without stat/readlink on shared storage."""
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts:
+        raise ValueError("prevalidated audio requires canonical absolute paths")
+    return Path(os.path.normpath(value))
+
+
 def load_experiment_records(
     manifest_path: str | Path,
     *,
@@ -105,6 +115,8 @@ def load_experiment_records(
     blank_id: int = 0,
     expected_experiment: str = "A",
     expected_split: str = "train",
+    prevalidated_audio_paths: bool = False,
+    progress: Callable[[int], None] | None = None,
 ) -> list[ExperimentRecord]:
     path = Path(manifest_path).expanduser()
     if not path.is_file():
@@ -139,8 +151,13 @@ def load_experiment_records(
                 raise ValueError(f"duplicate sample id at row {line_number}: {sample_id}")
             seen_ids.add(sample_id)
 
-            audio_path = Path(_required_string(raw, "audio_path", line_number)).expanduser()
-            if not audio_path.is_file():
+            audio_value = _required_string(raw, "audio_path", line_number)
+            audio_path = (
+                canonical_audio_path(audio_value)
+                if prevalidated_audio_paths
+                else Path(audio_value).expanduser()
+            )
+            if not prevalidated_audio_paths and not audio_path.is_file():
                 raise FileNotFoundError(
                     f"audio file from manifest row {line_number} does not exist: {audio_path}"
                 )
@@ -187,6 +204,8 @@ def load_experiment_records(
                     ctc_time_upsampling_factor=time_upsampling_factor,
                 )
             )
+            if progress is not None:
+                progress(len(records))
     if not records:
         raise ValueError(f"experiment manifest contains no records: {path}")
     return records

@@ -24,6 +24,7 @@ from qwen_hotword.training.english_refresh_freeze import old_assets, release_poo
 from qwen_hotword.training.feature_cache import exclusive_feature_cache_run
 from qwen_hotword.training.spanish_480_plan import _bucket, _rows, metrics, stratified_select
 from qwen_hotword.training.spanish_capacity import _sha
+from qwen_hotword.training.stage_progress import stage_progress
 
 POLICY = "path_only_no_audio_byte_audit_user_requested"
 VERSION = "en-countries-path-only-es-pt-fixed-v1"
@@ -374,7 +375,8 @@ def run_stage(root: Path, output: Path, stage: str, gpu: str, *, resume: bool = 
     report = json.loads((output / "report.json").read_text())
     if report.get("status") != "data_prepared" or report.get("audio_isolation_policy") != POLICY:
         raise ValueError("completed explicit path-only preparation required")
-    original.unchanged(json.loads((output / "preparation_contract.json").read_text()))
+    with stage_progress("Verify fixed preparation inputs (metadata only)"):
+        original.unchanged(json.loads((output / "preparation_contract.json").read_text()))
     path = output / "training_config_path_only.json"
     if (
         _sha(path) != report["training_config_sha256"]
@@ -389,5 +391,8 @@ def run_stage(root: Path, output: Path, stage: str, gpu: str, *, resume: bool = 
         raise ValueError("path-only policy or training options changed")
     os.chdir(root)
     if stage in {"smoke", "cache"}:
-        return historical.run_stage(config, output / "training", stage, gpu)
-    return historical.run_training_stage(config, output / "training", stage, gpu, resume=resume)
+        from qwen_hotword.training.english_refresh_gpu import run_stage as run_gpu_stage
+
+        return run_gpu_stage(config, output / "training", stage, gpu)
+    with stage_progress(f"{stage} Head training: see validation/shard/epoch logs"):
+        return historical.run_training_stage(config, output / "training", stage, gpu, resume=resume)

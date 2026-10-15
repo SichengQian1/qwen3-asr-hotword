@@ -18,6 +18,7 @@ from qwen_hotword.training.feature_cache import (
     cache_feature_split,
     exclusive_feature_cache_run,
 )
+from qwen_hotword.training.stage_progress import stage_progress
 
 DEFAULT_VOCAB = REPO_ROOT / "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json"
 
@@ -36,6 +37,13 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--encoder-batch-size", type=int, default=8)
     parser.add_argument("--samples-per-shard", type=int, default=512)
+    parser.add_argument(
+        "--prevalidated-audio-paths",
+        action="store_true",
+        help="Use sealed canonical paths; defer audio existence checks to actual decoding",
+    )
+    parser.add_argument("--expected-train-samples", type=int)
+    parser.add_argument("--expected-validation-samples", type=int)
     args = parser.parse_args()
 
     try:
@@ -43,21 +51,30 @@ def main() -> int:
         vocab = load_phoneme_vocab(args.vocab)
         if not vocab.tokens or vocab.tokens[0] != "<blank>":
             raise ValueError("CTC vocabulary must place <blank> at token ID 0")
-        train_records = load_experiment_records(
-            args.train_manifest,
-            num_classes=len(vocab.tokens),
-            blank_id=0,
-            expected_experiment="full-ctc-v1",
-            expected_split="train",
-        )
-        validation_records = load_experiment_records(
-            args.validation_manifest,
-            num_classes=len(vocab.tokens),
-            blank_id=0,
-            expected_experiment="full-ctc-v1",
-            expected_split="validation",
-        )
-        validate_disjoint_records(train_records, validation_records)
+        splits = {}
+        for split, manifest, expected in (
+            ("train", args.train_manifest, args.expected_train_samples),
+            ("validation", args.validation_manifest, args.expected_validation_samples),
+        ):
+            with stage_progress(f"Load {split} labels", total=expected) as progress:
+                splits[split] = load_experiment_records(
+                    manifest,
+                    num_classes=len(vocab.tokens),
+                    blank_id=0,
+                    expected_experiment="full-ctc-v1",
+                    expected_split=split,
+                    prevalidated_audio_paths=args.prevalidated_audio_paths,
+                    progress=progress,
+                )
+                if expected is not None and len(splits[split]) != expected:
+                    raise ValueError(f"unexpected {split} sample count")
+        train_records, validation_records = splits["train"], splits["validation"]
+        with stage_progress("Check train/validation path overlap"):
+            validate_disjoint_records(
+                train_records,
+                validation_records,
+                prevalidated_audio_paths=args.prevalidated_audio_paths,
+            )
         print(
             json.dumps(
                 {
@@ -70,6 +87,7 @@ def main() -> int:
                     "test_set_used": False,
                     "gpu_processes": 1,
                     "logical_device": config.model.device,
+                    "prevalidated_audio_paths": args.prevalidated_audio_paths,
                 },
                 indent=2,
             ),
@@ -78,31 +96,26 @@ def main() -> int:
 
         destination = Path(args.output_dir).expanduser()
         with exclusive_feature_cache_run(destination):
-            wrapper = load_asr_model(config.model)
-            train_summary = cache_feature_split(
-                train_records,
-                wrapper,
-                destination / "train",
-                split="train",
-                source_manifest_path=args.train_manifest,
-                model_path=config.model.path,
-                model_dtype=config.model.dtype,
-                vocab_path=args.vocab,
-                encoder_batch_size=args.encoder_batch_size,
-                samples_per_shard=args.samples_per_shard,
-            )
-            validation_summary = cache_feature_split(
-                validation_records,
-                wrapper,
-                destination / "validation",
-                split="validation",
-                source_manifest_path=args.validation_manifest,
-                model_path=config.model.path,
-                model_dtype=config.model.dtype,
-                vocab_path=args.vocab,
-                encoder_batch_size=args.encoder_batch_size,
-                samples_per_shard=args.samples_per_shard,
-            )
+            with stage_progress("Load Qwen model onto GPU"):
+                wrapper = load_asr_model(config.model)
+            summaries = {}
+            for split, records, manifest in (
+                ("train", train_records, args.train_manifest),
+                ("validation", validation_records, args.validation_manifest),
+            ):
+                with stage_progress(f"Extract {split} Encoder features (see shard counts)"):
+                    summaries[split] = cache_feature_split(
+                        records,
+                        wrapper,
+                        destination / split,
+                        split=split,
+                        source_manifest_path=manifest,
+                        model_path=config.model.path,
+                        model_dtype=config.model.dtype,
+                        vocab_path=args.vocab,
+                        encoder_batch_size=args.encoder_batch_size,
+                        samples_per_shard=args.samples_per_shard,
+                    )
             del wrapper
 
             import torch
@@ -114,8 +127,8 @@ def main() -> int:
                 "gpu_processes": 1,
                 "logical_device": config.model.device,
                 "test_set_used": False,
-                "train": train_summary.to_dict(),
-                "validation": validation_summary.to_dict(),
+                "train": summaries["train"].to_dict(),
+                "validation": summaries["validation"].to_dict(),
                 "status": "pass",
             }
             destination.mkdir(parents=True, exist_ok=True)

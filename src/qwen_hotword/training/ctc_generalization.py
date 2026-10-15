@@ -81,6 +81,8 @@ class GeneralizationReport:
 def validate_disjoint_records(
     train_records: list[ExperimentRecord],
     validation_records: list[ExperimentRecord],
+    *,
+    prevalidated_audio_paths: bool = False,
 ) -> None:
     train_ids = {record.sample_id for record in train_records}
     validation_ids = {record.sample_id for record in validation_records}
@@ -91,8 +93,16 @@ def validate_disjoint_records(
             f"{sorted(duplicate_ids)[:5]}"
         )
 
-    train_audio = {record.audio_path.resolve() for record in train_records}
-    validation_audio = {record.audio_path.resolve() for record in validation_records}
+    if prevalidated_audio_paths:
+        from qwen_hotword.training.ctc_overfit import canonical_audio_path
+
+        train_audio = {canonical_audio_path(str(record.audio_path)) for record in train_records}
+        validation_audio = {
+            canonical_audio_path(str(record.audio_path)) for record in validation_records
+        }
+    else:
+        train_audio = {record.audio_path.resolve() for record in train_records}
+        validation_audio = {record.audio_path.resolve() for record in validation_records}
     duplicate_audio = train_audio & validation_audio
     if duplicate_audio:
         raise ValueError(

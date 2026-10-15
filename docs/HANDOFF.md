@@ -1,6 +1,6 @@
 # 工作交接记录
 
-## 0.168 2026-10-15 新英语480h快速选样：复用完整标签，跳过WAV字节扫描（待工区）
+## 0.168 2026-10-15 新英语480h快速选样：复用完整标签，跳过WAV字节扫描（选样终端回传，GPU待核验）
 
 用户报告0.166 prepare已完成453826条全量标签，但第6/7阶段指纹扫描至291840条仍
 太慢、无法继续等待，询问能否直接使用已处理文本/标签。按用户本次取舍提供独立快速
@@ -69,17 +69,81 @@ python -B scripts/run_english_refresh_fast.py formal --gpu 4
 ```
 
 逐步成功后再下一步，不自动连跑；pilot中断可加--resume，其他GPU阶段沿原身份恢复。
-使用了--output-dir则所有后续命令传同一路径。只委托原multilingual_480_run，不改
+使用了--output-dir则所有后续命令传同一路径。smoke/cache使用下述等价快速前置核验，
+pilot/formal仍委托原multilingual_480_run；不改
 冻结Qwen/新temporal Head、全量Encoder cache、LR/batch/epochs/early stopping等参数。
 Encoder cache仍需读取所选音频，这是提取特征必需的读取；本次省掉前置额外扫描。
 
 本地定向21 passed，新范围Ruff/strict Mypy、CLI help、git diff --check通过；包含禁止打开WAV的完整快速准备、
 已完成标签复用、原输入不改、低于480h阻断、路径冲突/保护隔离、元数据选样规则一致、
-显式未执行字节审核标记、原ES/PT清单不变及GPU阶段委托。尚无本轮工区快速选样或
+显式未执行字节审核标记、原ES/PT清单不变及GPU阶段委托。初次交付时尚无工区快速选样或
 训练实测；不能声称新480h已经生成或训练已启动。
 全量745 passed（包含现有未跟踪MFA参考示例测试，未纳入提交）；全仓Ruff仍11项既有
 E501，Mypy仍8项既有/未知草稿问题，无本次新增。首次全量发现新GPU委托测试未恢复
 工作目录，已修复测试隔离并完整重跑通过；生产训练入口无改动。
+
+### GPU前置路径扫描修复及逐阶段可视化
+
+用户随后回传fast prepare终端JSON：data_prepared；EN263609条/480.001615h，
+ES296399条/480.001823h，PT321741条/480.000408h，合计881749条/1440.003846h。
+EN三国分别为智利81456条/152.089802h、哥伦比亚95396条/176.951241h、墨西哥
+86757条/150.960573h。均为终端摘要，尚未收到对应return_bundle.zip独立核验文件
+身份；未宣称新Encoder cache或Head已完成。
+
+用户运行smoke长时间停在Checking frozen manifests and choosing small deterministic
+smoke subsets，nvidia-smi无该进程。代码确认该日志位于模型加载前：旧scan_manifest
+对每条audio_path执行Path.resolve，约89万条清单会重复查询共享盘路径分量的元数据，
+但未读取WAV内容。没有扫描进度也是实现问题；尚无工区中断栈和分阶段耗时，不能将
+该机器的全部等待时间归因或量化为此项。后续通用cache入口还会逐WAV is_file并在
+跨split核验时resolve，故一并为显式快速政策提供不访问WAV的前置模式。
+
+新增training/english_refresh_gpu.py：对已封存canonical绝对路径做纯字符串规范化，
+完整扫描ID/路径/分组/split/时长/CTC因子并保留原前16 train/前8 validation分组顺序。
+通用load_experiment_records和validate_disjoint_records增加显式prevalidated_audio_paths
+参数，默认false，旧调用行为不变；fast生成的cache子命令显式传入该标记及两split
+预期条数。仍核验全部标签、计数、训练/验证路径重叠、保护集路径、清单/模型元数据
+SHA；音频存在性、可解码性及真实CTC长度延至实际提取时严格检查，错误仍阻断。
+不据此声称符号链接别名/不同路径同录音已去重或字节隔离。
+
+不修改原准备契约锁定的english_refresh.py、multilingual_480_run.py、feature_cache.py、
+sharded_ctc.py等源码；现有preparation_contract与训练配置无需重建/改SHA。独立快速
+planner生成同协议run_plan，扫描全部完成后才在临时目录写入并发布；中断时不把部分
+plan当成可续跑状态。已有完整training/run_plan.json按原config和input_sha256核验后
+直接复用，不重写其身份或smoke清单。没有删除/覆盖已有用户outputs。
+
+新增stage_progress.py，并接入fast GPU前置、cache及Head入口。扫描显示真实
+完成数/总数、ASCII进度条、百分比和耗时；否则每10秒显示阶段名称/累计耗时。
+具体包括准备输入SHA、run-plan SHA、清单扫描/标签加载、保护路径、跨split检查、
+空间核验、Qwen加载、train/validation Encoder提取、train/validation缓存SHA、验证
+分组及Head训练。Encoder保留原batch/shard计数，Head保留原shard/epoch指标。
+活动提示只证明进程仍运行，不冒充处理数量在增长，不估计无实测依据的剩余时间。
+
+工区停止旧smoke后，在同一仓库拉取当前分支；不要删除任何准备目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_english_refresh_fast.py smoke --gpu 4
+```
+
+4仍为用户分配的物理GPU示例。先等smoke_completed，再原命令cache --gpu 4；无需重跑
+prepare。已有匹配缓存按原分片SHA恢复，已有smoke Head按原状态恢复；pilot中断仍须
+显式--resume。若发现旧training目录存在但缺run_plan，保留现场并报告，不能删除后
+冒充全新运行；本次所报卡点在创建training目录之前。完成输入SHA后应出现
+Scan train manifest (metadata only)进度，总数来自固定881749条配置，不靠假百分比。
+
+核验：git rev-parse HEAD与本轮回复的远端SHA一致；根准备目录内运行
+sha256sum -c sha256.txt验证原准备元数据未改（不证明WAV字节）。返回根
+return_bundle.zip、training/run_plan.json、training/smoke_head/report.json及smoke
+终端摘要；cache完成后返回training/cache/feature_cache_report.json。无需上传特征
+分片/权重。现有训练配置、冻结Encoder、Head结构和全部超参数不变。
+
+本地新增15项回归：禁止WAV resolve/stat/readlink/open、原/新smoke清单逐字节一致、
+保留采样上限及输入拒绝规则、完整旧plan身份复用、默认存在性检查、延迟真实读取
+缺失音频仍失败、标签/路径重叠阻断、未完成smoke/低磁盘/变更SHA阻断、子命令参数
+与CLI贯通、真实计数及中断状态。全量760 passed；修改范围Ruff、5个入口/新模块
+strict Mypy、3个CLI help及git diff --check通过。全仓仍仅既有Ruff11项、Mypy8项；
+未修改无关草稿。尚无修复后H200耗时/质量实测，不承诺提速倍数。
 
 ## 0.167 2026-10-15 Ziyan删除37英语非目标词、仅保留0–4目标音频的配对检索（待工区）
 
