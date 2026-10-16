@@ -1,5 +1,81 @@
 # 工作交接记录
 
+## 0.170 2026-10-16 第21轮Head快照：干净英语6,000条/三语4k同口径预览（待工区）
+
+用户确认以0.164的联合4k版本严格配对，只测en_chile/en_colombia/en_mexico各2,000条，
+不测ES/PT音频，但每条英语音频继续搜索完整EN/ES/PT联合词表。固定目标分母4,374；
+旧Top5=3,175/4,374=72.5880%，Top7=3,215/4,374=73.5025%。不能与旧3k表/10,046
+分母或Ziyan372目标结果混比。只替换CTC Head，不调门控/核心检索、不运行LLM转写。
+
+当前新验证训练尚在进行，用户已复制只读预览来源
+outputs/english_head_preview_hLF3E7KR/ctc_head_best.pt并生成checkpoint.sha256；终端
+torch.load成功，epoch_metrics为epoch21、loss0.260812525937281、
+PER0.06402920539574865、errors22257/reference347607。这个PER是混合验证音素统计，
+不是英语PER或热词召回；该快照也不能称为已完成40轮后的最终模型。具体权重SHA尚未
+回传，入口在工区读取上述单文件清单，核对路径/字节/词表/epoch21和Temporal2x权重
+结构，并将实际SHA写入新plan/report。不会读取训练中持续变化的best或暂停现有训练。
+
+新增configs/english_head_preview_4k.workzone.json、scripts/run_english_head_preview.py、
+inference/english_head_preview.py和独立测试；旧准备、缓存、训练、检索模块均未改。
+起点本地/跟踪/实际远端均2b54d31d6faed1238d776617fde22a9c4bba3722；
+分支codex/g2p-coverage-scan。本地7个既有未提交测试修改及未知未跟踪资料保留，
+不包含在本次提交中。
+
+### 配对契约及执行边界
+
+源目录固定outputs/reviewed_joint_4000_retrieval_480h_v1。只读核验封存run_config、
+report、词表快照、indexed_pronunciations、三份英语retrieval_details；词表SHA仍为
+6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b；旧Head和vocab
+SHA分别保持320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265、
+0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4。
+直接复用封存发音索引的完整顺序与ID，包含西葡发音，不重建MFA/目标/填充词。
+核验原记录/参考/目标ID与6,000条WAV字节，重放旧Top5/Top7并检查各组、汇总及上面
+固定命中数。比较旧run_config各组，除git_commit/ctc_checkpoint外字段必须一致；
+旧plan记录的检索代码SHA、model config/index必须一致。完整模型分片不重新hash。
+缺少/漂移的旧产物会停止，不自动重建旧outputs或放宽校验。
+
+完整Qwen只由用户在H200加载；对这6,000条重新运行Encoder→新Head→原Anchor Top64
+发音候选→原词面合并/门控→Top5/7。保留0.75/0.35/0.5与原评分，posterior仍不是
+词级存在概率。阶段/真实样本进度/耗时/10秒活动提示覆盖核验、加载和推理。ES/PT
+音频不读、不评测；新英语480h训练缓存不属于这批评测输入，不重算训练缓存。
+
+### 工区命令、恢复及回传
+
+容器内/host_home/star/q00933266/qwen3-asr-hotword，原Qwen环境。先拉取并核验本次
+最终回复的实际远端SHA；5为示例物理评测卡，换成已分配卡，4号若仍训练则留给训练：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_english_head_preview.py --gpu 5
+```
+
+不用再次复制训练中的best。可选CPU预检为同命令去掉--gpu 5并加--audit-only；不会
+加载Qwen或写结果，但会读取Head小权重及这6,000条WAV核验身份。正常命令已包含
+同样预检，无须重复跑。默认新目录outputs/english_head_preview_4k_ep21_v1，拒绝
+覆盖旧目录或嵌套输入；中断后保持同一Git/配置/快照，运行：
+
+```bash
+python -B scripts/run_english_head_preview.py --gpu 5 --resume
+```
+
+恢复校验plan/代码/输入及逐样本摘要，只计算缺失分片；成功完成后重跑不会再加载
+模型。report.json含各组/汇总新旧Top5/7、固定分母、命中、参考外输出、召回百分点
+差值及快照身份；六份下游JSON在languages/en/delivery/。回传默认目录下
+return_bundle.zip即可，内含report.json、run_config.json、checkpoint_metadata.json
+及包内SHA清单，不含权重、WAV、训练缓存或完整逐样本结果。包原子发布后再封存。
+这是同口径中途预览；不宣称最终ASR WER，也不新增字节级/说话人级训练测试隔离结论；
+原4k填充词依据参考排除的条件保持不变，不能当作盲词表泛化评估。
+
+### 本地验证
+
+当前工作区全量764 passed（76.27s），随后补充的新预测计量用例及ZIP原子发布由
+独立定向6 passed覆盖。覆盖完整多语索引、只测英语、同分母
+复算、新预测确实改变命中/百分点、中断恢复不重算、坏分片/输入/门控/代码漂移阻断、
+旧文件不改及结果包身份。新增文件Ruff/strict Mypy、CLI help、git diff --check通过。
+全仓仍有既有Ruff11项/Mypy8项，未碰这些问题或未知测试修改。本地使用小型模拟
+音频/检索边界及真实小Head保存/读取，没有加载完整Qwen或产生H200召回实测。
+
 ## 0.169 2026-10-16 新英语同域验证与40轮Head训练入口（代码交付，工区待执行）
 
 用户指出0.168替换英语训练来源后仍用旧英语validation选点，明确批准修正：新英语
