@@ -1,5 +1,123 @@
 # 工作交接记录
 
+## 0.169 2026-10-16 新英语同域验证与40轮Head训练入口（代码交付，工区待执行）
+
+用户指出0.168替换英语训练来源后仍用旧英语validation选点，明确批准修正：新英语
+validation必须来自未入选本轮480小时的合格池；三个原test.json继续封存。保留原三语
+训练清单/特征、原ES/PT验证样本/特征，旧英语只作额外对照。用户进一步要求取消5轮
+pilot，保留smoke后直接正式训练，总上限40轮、minimum-learning-rate=5e-6、
+early-stopping-min-delta=0.0005。分支codex/g2p-coverage-scan；起点本地/跟踪/实际
+远端均613db41eb7bc16fb74a63b8b698c7cf1f56278f3。既有未知未跟踪文件保持原样。
+
+### 已返回的上一轮结果与结论修正
+
+用户终端已确认旧入口smoke_completed、cache_completed、pilot_completed和
+formal_completed。run_plan SHA始终76543fea57f1bead99027942e5abe37e34254ee3499c5b42f4d97999f1f02aab；
+训练清单SHA10fdbdbbdb8ef352cd7a143b742fd962627b40a98a44d0b54701311f0b94fbfe；
+旧validation SHA仍d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499。
+全量train881749条/1723shards/138772069023bytes；validation8101条/16shards/
+1155707472bytes。Head缓存SHA核验true，test_set_used=false。
+上一轮formal从5续训到15、early_stopped=true，三语macro选中epoch9：英语
+13561/77701=17.4528%、西语5230/129906=4.0260%、葡语15068/163324=9.2258%；
+macro10.2349%。epoch15英语24.9701%、西语3.8282%、葡语8.9950%。这只能说明旧英语
+验证域表现，不能宣称新英语同域不收敛/语料坏；当时未建立新的英语validation。
+独立权重SHA和完整15轮metrics仍未返回，不伪称已审查完整曲线或H200权重字节。
+
+### 新验证集的构建及身份
+
+新增configs/english_countries_newval.workzone.json、scripts/run_english_newval.py及
+training/english_newval{,_cache,_run}.py。没有修改被旧准备契约锁定的训练/准备模块，
+也不放宽旧数据身份。新入口核对旧封存report/contract/config、上面三项已返回SHA、
+旧run_plan全部输入、两套原缓存index/config/summary、vocab及model config/index。
+原完整模型仍仅在H200本地路径加载，不下载或在本机加载。
+
+以实际881749条训练清单为准排除所有语言已训练ID/规范路径，再排除全部旧validation、
+旧heldout保护路径和新三国test路径。从已封存released_english_pool.jsonl重用原
+original_ready/temporal2x recovery释放规则、原路径冲突隔离和去重优先级。不能把未选中
+原始行直接视为合格。只读清单/JSON元数据，不重新执行MFA或全量WAV字节扫描。
+
+新英语validation目标小时数读取旧英语validation真实总时长，不硬编码为4小时或2808条。
+对剩余合格池按来源×release×时长×标签密度×CTC压力分层、按可用时长比例分配，
+seed20260923，完整音频略超目标；三国必须均有容量且被选中，不足明确停止。新英语
+记录保留原ID/路径/文本/音素/来源，只改变split和新数据版本。报告容量、排除原因、
+分层配额、实际小时/条数、交集和SHA。训练清单和480小时选样不变。仍为用户确认的
+path_only_no_audio_byte_audit_user_requested，不声称不同路径同字节/说话人隔离。
+
+原西葡validation原行另存legacy_es_pt_rows.jsonl，可与旧清单过滤出的字节比较；新
+混合validation仅更新版本元数据，ID/音频/标签保持。新目录默认
+outputs/english_countries_refresh_newval_v1，拒绝已有目录和嵌套输入目录。准备到封存前
+中断的目录保留现场、另选新目录；完整plan可被后续阶段严格复用，不改旧outputs。
+
+### Encoder缓存复用、训练与恢复
+
+原约130GiB训练cache直接引用原位置，不复制、不重算；正式Head trainer仍校验每个
+原训练tensor SHA。只对新英语validation调用冻结Qwen Encoder，保持原ln_post1024/
+bf16、batch8/512samples分片。完成的英语缓存重跑先验证后复用，不再次加载Qwen。
+
+组合新验证缓存时，从原验证缓存提取原ES/PT的BF16状态和标签，与新英语特征重组为
+标准validation分片。只加载所需源分片，首次读取前验证tensor SHA，最多保留4个源
+分片在CPU缓存中；不把所有训练特征放内存。smoke也只从现有特征复制小子集，不跑
+Encoder。所有新缓存保留manifest/model/vocab身份，完成缓存重复运行校验后返回。
+
+smoke为独立1epoch Head，不用于正式初始化。正式训练从fresh Head直接请求40epoch，
+没有5epoch pilot步骤；minimum_epochs=5只是早停的原最小轮数。其余batch256、
+LR3e-4、weight_decay1e-4、clip5、seed20260825、h512/k5/dropout0.1/time2、
+all_samples_once、macro选点、patience6、scheduler patience2/factor0.5均沿用。
+沿用现有trainer参数耦合：early-stopping-min-delta同时作为macro PER早停绝对改善值
+和validation loss调度器threshold，本轮均为0.0005；没有改训练器或引入新调度算法。
+新三语validation负责选点/调度/早停，旧英语不进入这些决策。早停后不会为凑40轮继续。
+
+训练结束才用新best Head对旧validation cache做一次独立old_domain_control.json，
+包含原英语及西葡S/D/I/PER等，不修改checkpoint。完整模型不会在此Head对照中加载。
+PER、检索召回、最终ASR WER继续区分，本轮没有运行LLM转写或重跑Ziyan检索。
+
+### 工区命令及小文件回传
+
+先在同一挂载仓库拉取，实际远端SHA见本次最终回复：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+容器内项目根目录，原Qwen环境。准备仅CPU/清单元数据；run依次执行新增英语cache、
+复用ES/PT/小smoke、正式40epoch上限训练、旧域对照，不再中途要求跑pilot：
+
+```bash
+python -B scripts/run_english_newval.py prepare
+python -B scripts/run_english_newval.py run --gpu 4
+```
+
+4保留为显式物理GPU参数，可替换为用户已分配卡。run中断后：
+
+```bash
+python -B scripts/run_english_newval.py run --gpu 4 --resume
+```
+
+缓存自动复用已验证分片；Head恢复新实验的optimizer/scheduler/epoch状态，不跨验证集
+续用旧Head。无Head状态时可从尚未开始的阶段继续；已有状态必须--resume。所有阶段
+有stage/实际分片或样本数量/耗时/10秒活动提示。并发锁冲突检查PID，不删锁绕过。
+支持显式cache/smoke/train分步诊断；没有pilot子命令。自定义--output-dir后每步保持一致。
+
+prepare返回prepare_bundle.zip（report/plan/包内sha256.txt），包含真实可用/选中小时与
+分国家来源摘要；成功后即可继续run。run返回return_bundle.zip（report/plan/cache/
+smoke/正式训练report、完整metrics、旧域对照及包内sha256.txt），无需传权重、WAV或
+特征张量。当前新验证容量/选中小时及H200训练结果均待回传，不从本地夹具外推。
+
+### 本地验证范围
+
+定向52 passed；全量783 passed（43.85s）。新增测试从真实fast.prepare产物开始，真实
+构建新清单/特征分片、运行Head CLI、保存epoch/optimizer状态并恢复，验证正式请求
+为40epoch且没有pilot。仅MFA/Encoder输入及CUDA硬件边界替换为合成特征/CPU；没有
+本地加载完整Qwen。验证三国来源均覆盖、训练与新验证ID/路径不交叉、进入合格池的
+test重叠音频仍被排除、ES/PT复用BF16数值/标签逐值相等、全部旧产物字节不改、
+英语提取完成后的中断恢复不重复加载Encoder、源/新缓存篡改阻断、配置/清单漂移
+阻断。额外覆盖Head已完成但完成标记尚未发布时中断：恢复只校验并发布结果，不在
+早停后多训一轮；新JSON通过完整临时文件的独占硬链接原子发布，不替换已有文件。
+修改范围Ruff/strict Mypy、CLI help和git diff --check通过；全仓仍为既有Ruff11项/
+Mypy8项，未改未知草稿或被旧契约锁定的模块。本地只证明链路与身份/恢复逻辑，
+不证明新语料的实际容量、PER改善或H200性能。
+
 ## 0.168 2026-10-15 新英语480h快速准备与GPU训练衔接（准备终端回传，H200待继续）
 
 主线仍为仅替换三语480h中的英语，保留原西语/葡语480h、旧validation8101条、90类

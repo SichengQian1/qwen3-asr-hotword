@@ -1,0 +1,13 @@
+{
+  "source_run": "outputs/english_countries_refresh_fast_v1",
+  "output": "outputs/english_countries_refresh_newval_v1",
+  "source_run_plan_sha256": "76543fea57f1bead99027942e5abe37e34254ee3499c5b42f4d97999f1f02aab",
+  "source_train_sha256": "10fdbdbbdb8ef352cd7a143b742fd962627b40a98a44d0b54701311f0b94fbfe",
+  "source_validation_sha256": "d43d143f12cc4bbc9273476540640c43e1e46d095ce1e1893a6667ce4b044499",
+  "validation_seed": 20260923,
+  "epochs": 40,
+  "training_overrides": {
+    "minimum-learning-rate": 0.000005,
+    "early-stopping-min-delta": 0.0005
+  }
+}
