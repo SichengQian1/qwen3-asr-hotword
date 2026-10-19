@@ -90,7 +90,19 @@ def _index(
     return bundle, variants, by_variant
 
 
-def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+CheckpointLoader = Callable[
+    [Path, dict[str, Any], PhonemeVocab, dict[str, Any]], tuple[Path, dict[str, Any]]
+]
+Preparer = Callable[[Path, Path], tuple[dict[str, Any], dict[str, Any]]]
+
+
+def prepare_preview(
+    root: Path,
+    config: Path,
+    *,
+    checkpoint_loader: CheckpointLoader | None = None,
+    noisy_audio_root: Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     cfg = _json(config)
     inputs: dict[str, Any] = {}
     _checked(config, inputs)
@@ -115,7 +127,7 @@ def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str,
         raise ValueError("baseline table snapshot differs")
     vocab_path = _checked((root / cfg_old["vocab"]).resolve(), inputs, cfg["vocab_sha256"])
     vocab = load_phoneme_vocab(vocab_path)
-    head, checkpoint = _snapshot(root, cfg, vocab, inputs)
+    head, checkpoint = (checkpoint_loader or _snapshot)(root, cfg, vocab, inputs)
     if checkpoint["sha256"] == cfg["baseline_checkpoint_sha256"]:
         raise ValueError("preview checkpoint is the old baseline Head")
     model = (root / cfg_old["model"]).resolve()
@@ -135,7 +147,7 @@ def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str,
         or len(variants) != report["review"]["active_pronunciation_variants_per_audio"]
     ):
         raise ValueError("baseline index size differs")
-    groups, records_by_group, baseline = {}, {}, {}
+    groups, records_by_group, baseline, pairing = {}, {}, {}, {}
     if set(cfg["datasets"]) != {"en_chile", "en_colombia", "en_mexico"}:
         raise ValueError("preview requires exactly the three clean English datasets")
     for name, count in cfg["datasets"].items():
@@ -144,17 +156,41 @@ def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str,
         if previous["language"] != "en" or len(old_config["sources"]) != 1:
             raise ValueError(f"baseline group is not one English source: {name}")
         original = old_config["sources"][0]
-        spec = external.SourceSpec(
-            name, Path(original["audio_dir"]), Path(original["transcripts"]["path"])
+        audio_dir = (
+            (noisy_audio_root / name / "en/wav").resolve()
+            if noisy_audio_root
+            else Path(original["audio_dir"])
         )
+        spec = external.SourceSpec(name, audio_dir, Path(original["transcripts"]["path"]))
         _checked(spec.transcript_path, inputs, original["transcripts"]["sha256"])
         records, audit = external.build_external_dataset((spec,), language="en")
-        if len(records) != count or [r.to_dict() for r in records] != previous["records"]:
+        ignored_record_fields = {"audio_path"} if noisy_audio_root else set()
+        if len(records) != count or [
+            {k: v for k, v in r.to_dict().items() if k not in ignored_record_fields}
+            for r in records
+        ] != [
+            {k: v for k, v in r.items() if k not in ignored_record_fields}
+            for r in previous["records"]
+        ]:
             raise ValueError(f"baseline sample/reference identity differs: {name}")
-        with stage_progress(f"Verify baseline audio SHA256 {name}", total=count, every=100) as tick:
-            for n, record in enumerate(records, 1):
-                _checked(record.audio_path, inputs, old["inputs"][str(record.audio_path)]["sha256"])
+        changed = 0
+        condition = "noisy" if noisy_audio_root else "baseline"
+        with stage_progress(
+            f"Verify {condition} audio SHA256 {name}", total=count, every=100
+        ) as tick:
+            for n, (record, clean) in enumerate(zip(records, previous["records"], strict=True), 1):
+                old_digest = old["inputs"][clean["audio_path"]]["sha256"]
+                _checked(record.audio_path, inputs, None if noisy_audio_root else old_digest)
+                changed += inputs[str(record.audio_path)]["sha256"] != old_digest
                 tick(n)
+        if noisy_audio_root:
+            if not changed:
+                raise ValueError(f"all noisy files are identical to clean baseline: {name}")
+            pairing[name] = {
+                "sample_count": count,
+                "changed_files": changed,
+                "identical_files": count - changed,
+            }
         current = external._run_config(
             model=model,
             checkpoint=head,
@@ -168,7 +204,12 @@ def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str,
             saved_raw_rank_depth=64,
         )
         ignored = {"git_commit", "ctc_checkpoint"}
-        if {k: v for k, v in current.items() if k not in ignored} != {
+        comparable: dict[str, Any] = dict(current)
+        if noisy_audio_root:
+            comparable["sources"] = [
+                {**s, "audio_dir": original["audio_dir"]} for s in comparable["sources"]
+            ]
+        if {k: v for k, v in comparable.items() if k not in ignored} != {
             k: v for k, v in old_config.items() if k not in ignored
         } or old_config["ctc_checkpoint"]["sha256"] != cfg["baseline_checkpoint_sha256"]:
             raise ValueError(f"settings differ beyond Head/revision: {name}")
@@ -177,10 +218,14 @@ def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str,
             **previous,
             "config": current,
             "audit": audit,
+            "records": [r.to_dict() for r in records],
             "baseline_details": str(details),
             "baseline_target_ids": previous["target_ids"],
         }
-        metrics = _old_metrics(groups[name], {"config": old_config, "bundle": bundle})
+        metrics = _old_metrics(
+            {**groups[name], "records": previous["records"]},
+            {"config": old_config, "bundle": bundle},
+        )
         fields = (
             "sample_count",
             "expected_target_sample_pairs",
@@ -228,6 +273,12 @@ def prepare_preview(root: Path, config: Path) -> tuple[dict[str, Any], dict[str,
             "inference/english_head_preview.py": _sha(Path(__file__)),
         },
     }
+    if noisy_audio_root:
+        plan["audio_pairing"] = {
+            "groups": pairing,
+            "snr_verified": False,
+            "clean_audio_hashes_from_sealed_baseline": True,
+        }
     return plan, {
         "bundle": bundle,
         "variants": variants,
@@ -284,6 +335,7 @@ def run_preview(
     audit_only: bool = False,
     detector_factory: Callable[..., Any] | None = None,
     retrieve_function: external.RetrieveFunction | None = None,
+    prepare_function: Preparer | None = None,
 ) -> dict[str, Any]:
     cfg = _json(config)
     protected = [(root / cfg[k]).resolve() for k in ("baseline_run", "checkpoint")]
@@ -297,7 +349,7 @@ def run_preview(
     if output.exists() and not resume and not audit_only:
         raise FileExistsError(f"output exists; use --resume for identical inputs: {output}")
     with stage_progress("Verify frozen baseline, index, Head snapshot and English samples"):
-        plan, runtime = prepare_preview(root, config)
+        plan, runtime = (prepare_function or prepare_preview)(root, config)
     old_top7 = plan["baseline_same_retained_targets"]["top7"]
     print(
         f"Frozen Head epoch={plan['checkpoint']['epoch_metrics']['epoch']} "
@@ -313,6 +365,7 @@ def run_preview(
             "samples": {n: len(r) for n, r in runtime["records"].items()},
             "baseline": plan["baseline_same_retained_targets"],
             "model_loaded": False,
+            **({"audio_pairing": plan["audio_pairing"]} if "audio_pairing" in plan else {}),
         }
     # Also protect every input directory discovered from the source plan.
     if any(
@@ -446,6 +499,23 @@ def run_preview(
         ],
         "return_file": str(output / "return_bundle.zip"),
     }
+    if "audio_pairing" in plan:
+        report["audio_pairing"] = plan["audio_pairing"]
+        report["comparison_kind"] = "old_head_clean_reference_vs_final_head_noisy_audio"
+        report["reference_clean_old_head"] = report.pop("baseline_same_retained_targets")
+        report.pop("recall_delta_percentage_points")
+        for group_metrics in metrics.values():
+            group_metrics["reference_clean_old_head"] = group_metrics.pop(
+                "baseline_same_retained_targets"
+            )
+        report["limitations"] = [
+            "Three English noisy datasets are evaluated with the full joint EN/ES/PT index.",
+            "Head and noise both differ from the old clean reference; no isolated noise effect.",
+            "Epoch21 clean recall is not a same-Head clean control for this final checkpoint.",
+            "10dB is provider naming; byte changes do not verify SNR or acoustic correspondence.",
+            "Retrieval recall is not CTC PER or ASR WER; no LLM transcription or tuning is run.",
+            "Original reference-conditioned fillers and training/test isolation limits remain.",
+        ]
     with stage_progress("Publish comparison, return bundle and output checksums"):
         external._write_or_verify_json(output / "report.json", report)
         _return_bundle(output)

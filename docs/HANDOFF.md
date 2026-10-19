@@ -1,5 +1,102 @@
 # 工作交接记录
 
+## 0.171 2026-10-19 最终best第27轮与英语6,000条10dB/联合4k入口（待工区）
+
+用户已回传0.169的run_completed终端JSON，并明确要求用最终best重新测三套带噪英语。
+正式head_report显示：请求40轮，实际27轮、early_stopped=true、best_epoch=27；
+best路径outputs/english_countries_refresh_newval_v1/head/ctc_head_best.pt。不是
+smoke_head的epoch1，也不是0.170复制的epoch21。新英语validation为2943/54377=
+5.4122% PER，ES4837/129906=3.7235%、PT14340/163324=8.7801%，宏平均5.9719%、
+混合音素PER6.3635%。选择指标validation_macro_per；Head838746参数、Encoder冻结。
+这些数字来自终端摘要，实际权重SHA及完整metrics/marker尚未独立回传；不据此推断
+带噪检索或最终ASR效果，也没有修改/重启训练或改变早停。
+
+0.170的epoch21干净英语结果也已终端回传：Head SHA
+71853594931df390a02dc01d76574ff2b3245fe13d6a0f138c21cee1c84b8bf4；同6,000条/4k表/
+4,374分母，Top5=3804（86.9684%）、Top7=3859（88.2259%）；旧Head为3175/3215。
+Top7净增644，漏项1159→515；参考外输出8468→9229，不能说误匹配已解决。已复算
+分组和汇总，尚未拿到该预览完整返回包，不能冒称独立核验全部输入或逐样本原件。
+
+### 本次范围和身份契约
+
+新增configs/english_best_noise10db_4k.workzone.json、scripts/run_english_best_noise.py、
+inference/english_best_noise.py及独立测试；扩展0.170预览封装的checkpoint/preparation
+边界以复用原推理/评分/词面合并/Top5/7导出。默认干净预览路径仍要求同音频SHA，
+只有明确传入带噪根目录才允许audio_path变化；没有修改旧Anchor、评分、门控或训练
+源码/配置。分支codex/g2p-coverage-scan，起点本地/跟踪/实际远端均
+d83964e289f4fdbbe61fcd06063a48915dacfb7a。既有7个未提交测试修改和未知资料不动，
+不随本次交付提交。
+
+完整三语4k表仍为SHA6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b，
+4,000词面/4,012发音变体；90类vocab仍为SHA
+0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4。冻结目标和
+原参考读取旧clean4k的sealed run_config/report/逐样本/索引与原干净transcripts，
+复算旧3175/3215及4374分母，仅作资产/口径核验。带噪目录里的转写和词表不采用。
+每组必须与原2,000个ID/参考/语言严格一致，三个带噪WAV目录为：
+
+```text
+/host_home/star/两波验证集-可直接推理/2026-10-09-带噪10dB/en_chile/en/wav
+/host_home/star/两波验证集-可直接推理/2026-10-09-带噪10dB/en_colombia/en/wav
+/host_home/star/两波验证集-可直接推理/2026-10-09-带噪10dB/en_mexico/en/wav
+```
+
+工区读取training_completed.json，按其中SHA验证head/report.json、plan.json及best.pt；
+必须是完成的正式训练、cache_sha256_verified=true、test_set_used=false、宏平均选点、
+best27/完成27/请求40及所给best路径。CPU读取Head小权重，核验vocab、Temporal2x
+结构/权重、epoch、validation loss/PER/errors/reference及报告分语种汇总。将实际SHA
+和报告/plan身份固定进新run_config，结束及恢复时重新检查；源best变化会阻断，不
+自动追随新文件或改成latest。无需用户再次手工复制、hash或寻找权重。
+
+只扫描这6,000条带噪WAV，旧clean WAV hash来自封存plan，不重新读取clean WAV。
+逐组报告changed_files/identical_files；整组全相同拒绝，部分相同明确保留计数。
+snr_verified=false，字节不同不能证明实际10dB或逐条声学对应。冻结模型metadata/
+检索代码及所有非音频设置，只允许明确的Head和audio_dir变更。原阈值0.75、edit0.35、
+posterior0.5、Anchor Top64发音及词面Top5/7保持，不评测ES/PT音频，不跑LLM或训练。
+
+**比较限制：**本次best27+noise与旧480h Head+clean同时改变两项，旧参考在report中
+明确标为reference_clean_old_head，省略召回差值字段，不能把差值叫噪声损失。
+epoch21干净88.23%也不是同Head干净对照；本次不自动额外推理6,000条clean或旧Head。
+之后如需噪声效应，另行固定best27对clean配对。保持原参考条件化fillers及训练测试
+隔离范围，不将目录名或本地mock当实测。
+
+### 工区命令、输出与恢复
+
+容器内项目根目录、原Qwen环境；完整模型只在H200加载。拉取并比对最终回复远端SHA：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_english_best_noise.py --gpu 4
+```
+
+4换成用户已分配物理卡；一条命令先核验后推理，自带阶段/实际样本数量/耗时/10秒
+活动提示。可选--audit-only（不带GPU）只核验CPU小权重、带噪文件及元数据，不加载
+Qwen、不写结果；常规运行已包含同样核验，无须再单独审计一遍。
+默认新目录outputs/english_best_ep27_noise10db_4k_v1，拒绝已有目录/嵌套输入；所有
+旧输出和epoch21结果保留。中断后保持同Git/配置/Head/音频身份，执行：
+
+```bash
+python -B scripts/run_english_best_noise.py --gpu 4 --resume
+```
+
+复用已核验样本分片，不重复完成的推理；完成后恢复不再加载模型。注意0.170封装因
+本次新增边界SHA发生变化，旧epoch21目录不能用新代码强行--resume；若需恢复旧任务，
+使用其原d83964e版本。这个限制不影响读取旧报告，也不覆盖旧文件。
+
+report.json给出真实Head SHA/epoch/验证统计、当前Top5/7同4374分母命中/召回/参考外
+输出、三组结果及加噪字节配对摘要。六份下游JSON在languages/en/delivery/；逐样本
+仍有CTC/候选/门控取证。完成后回传新目录return_bundle.zip即可，内含report.json、
+run_config.json、checkpoint_metadata.json及包内SHA清单，不含权重/WAV/特征张量。
+
+### 本地验证范围
+
+定向11 passed，覆盖旧干净入口身份/恢复回归、新final best真实权重读取、只使用
+带噪WAV（clean WAV缺失仍可跑）、忽略带噪自带参考、完整多语索引、同分母、权重/
+报告/plan/epoch不符阻断、全同音频拒绝/部分同字节报告、中断续跑不重算和旧资产
+字节不改。全量770 passed（85.48s）；修改范围Ruff、strict Mypy、CLI help和
+git diff --check通过。全仓仍为既有Ruff11项/Mypy8项，不改未知草稿或7处既有测试修改。
+本地仅用小型合成音频/检索边界和真实小Head，不声称已获得best27带噪召回。
+
 ## 0.170 2026-10-16 第21轮Head快照：干净英语6,000条/三语4k同口径预览（待工区）
 
 用户确认以0.164的联合4k版本严格配对，只测en_chile/en_colombia/en_mexico各2,000条，

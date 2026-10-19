@@ -1,0 +1,21 @@
+{
+  "baseline_run": "outputs/reviewed_joint_4000_retrieval_480h_v1",
+  "training_run": "outputs/english_countries_refresh_newval_v1",
+  "checkpoint": "outputs/english_countries_refresh_newval_v1/head/ctc_head_best.pt",
+  "expected_epoch": 27,
+  "expected_epochs_completed": 27,
+  "expected_epochs_requested": 40,
+  "audio_root": "/host_home/star/两波验证集-可直接推理/2026-10-09-带噪10dB",
+  "output": "outputs/english_best_ep27_noise10db_4k_v1",
+  "baseline_checkpoint_sha256": "320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265",
+  "table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "expected_surfaces": 4000,
+  "datasets": {"en_chile": 2000, "en_colombia": 2000, "en_mexico": 2000},
+  "expected_baseline": {
+    "sample_count": 6000,
+    "expected_target_sample_pairs": 4374,
+    "top5_hits": 3175,
+    "top7_hits": 3215
+  }
+}
