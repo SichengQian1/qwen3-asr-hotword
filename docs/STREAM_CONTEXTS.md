@@ -1,5 +1,78 @@
 # 英语流式 RAG 时间线交付 v1
 
+## 2026-10-20 三语全量入口（当前采用）
+
+用户已回传20条smoke完成终端摘要，并明确要求直接全量、补回西葡测试，不等待大包
+回传或下游联调。新增独立入口，原英语入口、smoke及其他outputs保持原样：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_multilingual_stream.py --effect same-step --gpu 4
+```
+
+使用configs/multilingual_stream_contexts.workzone.json：英语三国各2,000条，共6,000；
+西语和葡语分别wave1–4各100条、各400，合计6,800。英语沿用2026-10-09-带噪10dB
+根目录，西葡沿用2026-09-29-带噪10dB根目录/waveN/es或pt/wav。完整模型只在H200
+加载，4替换成已分配的物理GPU；单GPU进程按EN→ES→PT顺序执行，每语种独立加载
+一次detector，保留English/Spanish/Portuguese原提示；每个前缀仍只检索一次并导出
+两个K值，全部音频搜索同一完整三语4k/4012发音索引，不调Anchor/门控、不重训。
+
+该入口按用户决定直接full，无须--smoke-run；不把终端smoke摘要冒称为文件独立核验
+或真实下游联调通过。same-step仍指当前前缀结果供当前步使用，实际ASR消费由下游
+负责。next-step可另建目录运行，指标分开，不能将尚未送出的末次检索计入已交付召回。
+
+默认新目录：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step
+```
+
+不覆写旧目录。中断后保持同Git、配置、Head、词表及音频，重复命令加--resume；
+校验并复用完整前缀分片，已完成目录恢复只核验SHA、打印摘要，不加载完整模型。
+正常命令自带预检，无须先跑--audit-only；此选项可独立做CPU预检，不写输出。
+命名阶段、样本/真实前缀总数、耗时及10秒活动提示持续可见。
+
+原clean联合4k封存plan/report固定ID、参考、语言和每组target_ids；重新核对英语
+4,374目标对及西葡各自原分母，不依据带噪目录自带文本重新定目标。Head额外锁定
+本次工区已回传SHA872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466，
+仍通过training_completed marker/report/plan验证best27。原参考只进入资产核验和
+检索后评分，不送入前缀模型/候选生成。完整WAV只hash本轮6,800条；原clean WAV
+不重新读取。字节加噪配对分别报告，SNR未独立核验，重复记录不删除。
+
+每语种、每数据集分别给Top5/7两种口径，分母是原目标词×音频，不乘时间步：
+
+- last_context：末步实际交付候选的目标召回、输出数及完整参考外词数。same-step末步
+  输入完整音频；这个指标自身不能反映热词是否赶在对应词被解码前送达。
+- ever_delivered：整条时间线上曾交付的词面集合，每词×音频只计一次。该集合可以超过
+  K，不能与固定TopK召回混称，也不等于及时召回或ASR提升。
+
+两个视图都报告完整参考外词×音频数量；不能据此评判每个前缀当时的精确率。无词级
+真值时间，不计算“及时召回率”或词后延迟；不输出CTC PER或最终ASR WER。参考匹配
+复用生产normalize_match_words的完整连续词组规则，预建词组索引避免4k×每句重复
+归一化；warning/warnings、标点、撇号、多词短语均由测试与strict_phrase_match对照。
+
+下游仍取delivery/stream_contexts.json、durations.json、audio_manifest.json；英语key
+保持encl@@en/encol@@en/enmx@@en，西葡配置明确使用wave1@@es…wave4@@es及
+wave1@@pt…wave4@@pt。这是本次交付映射，下游应按manifest/config对齐，不假称已经
+验证其数据集路由。逐前缀CTC/候选在prefix_shards，逐样本计量在sample_metrics.jsonl。
+
+**无需回传大包。**终端结束直接打印terminal_summary.json的三语指标及Head/表/vocab/
+run_config身份，复制最后一段JSON即可。若终端丢失，在项目根目录执行：
+
+```bash
+cat outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step/terminal_summary.json
+```
+
+另生成summary_bundle.zip，只含terminal_summary.json、report.json、checkpoint_metadata.json
+及包内SHA，不含run_config、时间线、音频清单、因果取证、WAV或权重。完整产物保留
+工区并封存，传输大文件不是继续全量的前置条件。prefix_compute_seconds只计前缀准备
+与检索，不含模型加载/网络/ASR；不能将三语这些指标称为最终流式端到端结果。
+
+---
+
+以下保留0.172英语小样本入口及原时序契约记录；全量操作以上面的新入口为准。
+
 这是供方2026-10-19文件契约的RAG生产端。它读取因果音频前缀，产出供下游流式ASR
 回放使用的JSON；不启动vLLM、不输出ASR转写，也不是实时网络接口或实时性能验收。
 源码、配置、Head、词表和输入身份写入run_config，原有整句结果不改。

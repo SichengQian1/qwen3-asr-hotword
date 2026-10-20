@@ -1,5 +1,82 @@
 # 工作交接记录
 
+## 0.173 2026-10-20 三语流式全量6,800条与终端精简指标入口（待工区）
+
+0.172工区终端已回传：20条（智利7/哥伦比亚7/墨西哥6）、68次前缀检索，Top5/7
+同源、供方validator通过；其utts=40/chunks=136为两个mode累计，不是40条独立音频。
+best27实际Head SHA为872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466。
+sum前缀准备+检索2.9651s、最大0.6738s、超过2s为0；加载另48.4s。这是终端摘要，
+完整文件尚未独立核验，没有实际ASR消费、WER、及时召回或端到端时延结果。
+
+用户明确表示return_bundle过大不能回传，要求直接英语6,000条并补跑之前西葡，各
+语种重新测流式指标。该决定替代0.172“先回包/联调再全量”的顺序；不继续要求传大包。
+新入口无smoke硬前置，也不冒称下游已确认时序。分支codex/g2p-coverage-scan；起点
+本地/跟踪/实际远端均0b4a4bfe46fe0e8a27993a00643352106eaac247。7处既有未提交测试
+修改及未知资料保留；新增模块复用旧代码，未修改训练/Anchor/门控/旧配置或旧outputs。
+
+### 范围、指标与交付
+
+新增configs/multilingual_stream_contexts.workzone.json、scripts/run_multilingual_stream.py、
+evaluation/multilingual_stream_assets.py、evaluation/stream_retrieval_metrics.py和
+inference/multilingual_stream_run.py。完整操作和口径见docs/STREAM_CONTEXTS.md首节。
+英语三国各2,000条、合6,000，西葡分别wave1–4各100条、各400，总6,800。英语沿用
+2026-10-09-带噪10dB根目录，西葡沿用2026-09-29-带噪10dB/waveN/es或pt/wav。
+保留各自原ID/参考/target_ids，英语分母4,374，西葡从同一sealed clean4k plan/report
+重算并验证各自原分母；不重建目标/词表，不采用带噪目录新参考。完整三语4k/4012
+发音及90类vocab和0.75/0.35/0.5原门控不变；Head通过训练marker验证并额外锁定上面
+已回传实际SHA。单进程按三语顺序跑，每语种加载一次detector，保留原语种提示。
+
+继续调用0.172原因果音频前缀/检索函数和原供方validator，不改变两种effect定义。
+same-step末步为完整音频前缀，next-step最后检索不额外塞尾槽；指标只按实际交付
+context评分。每语种/数据集、每K分别给last_context目标召回及ever_delivered曾交付
+覆盖率，后者每词×音频只计一次、集合可能>K，不当成固定TopK或及时召回。两者还
+给输出词×音频及完整参考外数量；无词级真值，不宣称逐前缀精确率/词后延迟，未跑
+LLM/最终ASR WER或CTC PER。参考仅在检索后的独立计量使用，不进入前缀推理。
+原参考条件化词表限制仍在；旧Head+clean不是新Head+noise流式配对对照，不自动
+把差值归因于噪声或流式。时延只计RAG，不包含ASR/网络及加载，SNR未独立验证。
+
+下游取delivery下stream_contexts.json、durations.json、audio_manifest.json；英语key
+保持原样，西葡本次配置声明wave1@@es…wave4@@es及wave1@@pt…wave4@@pt，路由尚未
+经下游运行确认。逐前缀取证在prefix_shards，逐样本计量在sample_metrics.jsonl。
+终端最后直接打印三语精简JSON，保存terminal_summary.json；可直接贴回，不传大包。
+summary_bundle.zip仅含summary/report/checkpoint小身份和包内SHA，不包含run_config、
+delivery、音频清单或因果取证；完整产物留工区并SHA封存，不回传大包不是阻塞条件。
+
+### 工区运行和恢复
+
+容器内项目根目录、原Qwen环境；完整模型只由用户在H200加载：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_multilingual_stream.py --effect same-step --gpu 4
+```
+
+实际远端SHA以交付回复为准，4换成已分配物理卡。正常命令自带完整预检，不必另跑
+--audit-only；保留阶段、实际样本/前缀总数、耗时和10秒活动提示。默认独立新目录
+outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step，不覆盖旧20条。
+中断后同代码/输入重复命令加--resume，校验每个前缀摘要/PCM后只计算缺失；已完成
+目录恢复只核验SHA并打印摘要。next-step另建full_next-step，不能混用effect恢复。
+独占锁防并行覆盖，不删锁绕过活进程。回传终端最后JSON即可，或：
+
+```bash
+cat outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step/terminal_summary.json
+```
+
+三份下游文件仍需对齐manifest，在下游运行后才有真实流式转写指标；本次全量入口
+只负责RAG生成/计量。新全量尚未在H200实际运行，不能引用本地夹具作为三语召回。
+
+### 本地验证
+
+新增5项三语测试，与0.170–0.172定向回归共24 passed（50.56s）；全量783 passed
+（114.43s）。另从HEAD归档原测试夹具到临时目录，独立验证新三语/旧英语流式共
+13 passed（24.87s），确认不依赖本地7处未提交测试修改。覆盖三语提示/完整索引、
+原分母、参考不入前缀、曾交付与末步区分、next-step短音频空context、SHA漂移/
+坏路径/门控阻断、缺失前缀续跑、完成不重载、旧文件不改及精简包不含大产物。
+全量通过后只补齐西葡时长桶到三语汇总，防止继承英语单语数量，并定向复验。
+新增文件Ruff/strict Mypy、CLI help、git diff --check通过；全仓既有Ruff11项/Mypy8项
+未改。均为CPU小音频/真实小Head及模拟检索边界，不加载完整Qwen，不声称H200实测。
+
 ## 0.172 2026-10-20 供方2秒流式context适配：因果前缀与20条smoke入口（待工区）
 
 用户提供stream-interface-接口手册.rar，先要求只读解释、随后批准实现。包只含Markdown
