@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""校验流式 RAG 交付文件 stream_contexts_<tag>.json 是否符合契约。
+
+每个边界值支持两种形态：
+  - 标准态（推荐）：候选列表，按得分降序。元素为 "词 (音素)" 字符串
+    或 {"word":..,"phoneme":..,"score":..} 字典；空召回为 []。
+  - 简单态：已截断拼好的字符串 "Vocabulary:\\n词 (音素)\\n..."；空召回为 ""。
+
+K 表达：mode 名形如 RAG_top7_stream / RAG_top5_stream。若为标准态，
+校验每个边界条数 <= K（RAG 若交付全量候选，条数可 > K 但校验会提示，
+此时应在交付前按 K 截断，或把 mode 名改为不带 _topN 的形态）。
+
+用法：
+  python validate_stream_contexts.py --ctx stream_contexts.json
+  python validate_stream_contexts.py --ctx stream_contexts.json --durations durations.json
+
+--durations 可选：{key: {utt: 秒}}，额外校验数组长度 == ceil(时长/2)。
+"""
+import argparse, json, math, re, sys
+
+PREFIX = "Vocabulary:"
+MODE_K_RE = re.compile(r"_top(\d+)_", re.IGNORECASE)
+ITEM_RE = re.compile(r"^\S+\s*\(.+\)$")
+
+
+def check_item(item, path, errors):
+    if isinstance(item, str):
+        if not ITEM_RE.match(item.strip()):
+            errors.append(f"{path}: 候选应为 \"词 (音素)\"，实际: {item!r}")
+    elif isinstance(item, dict):
+        if not (item.get("word") and item.get("phoneme")):
+            errors.append(f"{path}: 候选 dict 需含 word 与 phoneme: {item!r}")
+    else:
+        errors.append(f"{path}: 候选类型错误 type={type(item).__name__}, {item!r}")
+
+
+def check_boundary(v, path, k, errors):
+    """v 为某个边界的值；k 为 mode 推断的 topK（无则 None）。"""
+    if isinstance(v, str):
+        if v == "":
+            return
+        lines = v.split("\n")
+        if lines[0] != PREFIX:
+            errors.append(f"{path}: 简单态首行必须是 '{PREFIX}'，实际: {lines[0]!r}")
+        cnt = 0
+        for ln in lines[1:]:
+            if not ln.strip():
+                continue
+            cnt += 1
+            if "(" not in ln or not ln.strip().endswith(")"):
+                errors.append(f"{path}: 行格式应为 '词 (音素)'，实际: {ln!r}")
+        if k and cnt > k:
+            errors.append(f"{path}: 简单态含 {cnt} 条 > mode 声明的 top{k}（应由 RAG 按 K 截断）")
+        return
+    if isinstance(v, list):
+        for j, item in enumerate(v):
+            check_item(item, f"{path}[{j}]", errors)
+        if k and len(v) > k:
+            errors.append(f"{path}: 候选 {len(v)} 条 > mode 声明的 top{k}（RAG 应截断，或改用不带 _topN 的 mode）")
+        return
+    errors.append(f"{path}: 边界值必须是列表（标准态）或字符串（简单态），type={type(v).__name__}, {v!r}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ctx", required=True)
+    ap.add_argument("--durations", default=None)
+    ap.add_argument("--chunk-sec", type=float, default=2.0)
+    args = ap.parse_args()
+
+    data = json.load(open(args.ctx, encoding="utf-8"))
+    dur = json.load(open(args.durations, encoding="utf-8")) if args.durations else None
+
+    n_modes = n_utts = n_chunks = 0
+    errors = []
+
+    for mode, by_key in data.items():
+        if mode.startswith("_"):
+            continue
+        m = MODE_K_RE.search(mode)
+        k = int(m.group(1)) if m else None
+        if not isinstance(by_key, dict):
+            errors.append(f"mode {mode}: 值必须是 {{key: {{utt: [...]}}}}")
+            continue
+        for key, by_utt in by_key.items():
+            if not isinstance(by_utt, dict):
+                errors.append(f"{mode}/{key}: 值必须是 {{utt: [...]}}")
+                continue
+            for utt, arr in by_utt.items():
+                n_utts += 1
+                p = f"{mode}/{key}/{utt}"
+                if not isinstance(arr, list) or not arr:
+                    errors.append(f"{p}: 值必须是非空数组")
+                    continue
+                n_chunks += len(arr)
+                for i, v in enumerate(arr):
+                    check_boundary(v, f"{p}[{i}]", k, errors)
+                if dur is not None:
+                    d = dur.get(key, {}).get(utt)
+                    if d is None:
+                        errors.append(f"{p}: --durations 里缺该 utt")
+                    else:
+                        expect = math.ceil(d / args.chunk_sec)
+                        if len(arr) != expect:
+                            errors.append(f"{p}: 数组长度 {len(arr)} != ceil({d}s/{args.chunk_sec}) = {expect}")
+    n_modes = len([m for m in data if not m.startswith("_")])
+
+    if errors:
+        print(f"FAIL: {len(errors)} 个问题", file=sys.stderr)
+        for e in errors[:60]:
+            print("  -", e, file=sys.stderr)
+        sys.exit(1)
+    print(f"VALID modes={n_modes} utts={n_utts} chunks={n_chunks} chunk_size={args.chunk_sec}s")
+
+
+if __name__ == "__main__":
+    main()

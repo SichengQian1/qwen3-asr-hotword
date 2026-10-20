@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "version": 1,
+    "chunk_size_sec": 2.0,
+    "language": "en",
+    "form": "standard (每个边界=按得分降序的候选列表；K 由 mode 名 RAG_top{K}_stream 表达)",
+    "note": "降级/等值模式样例：RAG_top7 全句真实召回复制到每个 2s 边界。数组长度=ceil(音频时长/2)。",
+    "recall_source": "rag-result-en-20261019-noise/en_mexico_top7.json"
+  },
+  "RAG_top7_stream": {
+    "enmx@@en": {
+      "10168_quite_0022": [
+        ["Good (ɡ ʊ d)", "Pass (pʰ æ s)"],
+        ["Good (ɡ ʊ d)", "Pass (pʰ æ s)"],
+        ["Good (ɡ ʊ d)", "Pass (pʰ æ s)"]
+      ],
+      "10168_quite_0063": [
+        ["Time (tʰ aj m)"],
+        ["Time (tʰ aj m)"]
+      ],
+      "10181_quite_0059": [
+        ["Air (ɛ ɹ)", "Resort (ɹ i s ɒ ɹ t)"],
+        ["Air (ɛ ɹ)", "Resort (ɹ i s ɒ ɹ t)"],
+        ["Air (ɛ ɹ)", "Resort (ɹ i s ɒ ɹ t)"]
+      ],
+      "10181_quite_0061": [
+        ["kNow (n ow)", "Love (l ɐ v)", "Meat (mʲ iː t)"],
+        ["kNow (n ow)", "Love (l ɐ v)", "Meat (mʲ iː t)"],
+        ["kNow (n ow)", "Love (l ɐ v)", "Meat (mʲ iː t)"]
+      ]
+    }
+  }
+}

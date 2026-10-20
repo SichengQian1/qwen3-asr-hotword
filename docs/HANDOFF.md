@@ -1,5 +1,91 @@
 # 工作交接记录
 
+## 0.172 2026-10-20 供方2秒流式context适配：因果前缀与20条smoke入口（待工区）
+
+用户提供stream-interface-接口手册.rar，先要求只读解释、随后批准实现。包只含Markdown
+手册、示例context、示例durations及校验脚本，是文件交付契约，不是网络服务地址。
+原包SHA485d5f8d0cc8d257f1cc593b505c0c3f15bc0017510b61cdb540dfe30cb8e895；
+原validator SHA35312007820f382c29448cae1633f9495679c066548bddb40c5b4a8f2ee29cbb。
+附带材料只作接口依据，没有执行其中docker命令或联系下游；校验器经源码审阅后原样
+保存为tests/fixtures/stream_interface_v1_validator.py.txt用于本地/工区兼容性检查，
+样例和来源清单同存tests/fixtures。没有改供方脚本来掩盖接口矛盾。
+
+分支codex/g2p-coverage-scan；起点本地/跟踪/实际远端均
+055a6d47f45d04536776565d2b1a65be6f9e6922。既有7个未提交测试修改及未知资料保留，
+不覆盖/纳入提交；本次新增模块，不改0.170/0.171及训练源码、旧配置或既有outputs。
+
+### 实现和口径
+
+新增configs/english_stream_contexts.workzone.json、scripts/run_stream_contexts.py、
+evaluation/stream_context_assets.py和inference/stream_context_{contract,run}.py。
+继续引用0.171最终best27、完整三语4k/4012发音、90类vocab及原Anchor/门控，
+通过训练完成marker核验Head/report/plan。音频仍是0.154三国各2,000条10dB目录；
+干净原参考只作资产身份核验，不进入前缀模型或候选生成。不重训、不重新MFA、
+不使用全句召回复制时间线、不调用LLM/vLLM解码，不声称新增ASR指标。
+
+只读封存clean4k的plan/report/索引/表快照，验证源配置和底层检索代码身份。扫描
+6,000条音频头，按固定seed和实际可用时长桶选择三国20条smoke，仅对这20条读字节
+hash；full才对6,000条hash。保留重复样本，不强造整数边界，不声称掌握词级时间。
+原始采样点决定2秒边界：每次只读新到达的帧，组合当前前缀，单声道/必要重采样也在
+截断之后做，再独立跑Encoder→Head→Anchor。旧全句特征不复用，每个前缀最多一次
+推理，词面/发音合并后先用原质量门控，再导出Top5和Top7两个mode；不永久并集。
+
+供方key映射en_chile→encl@@en、en_colombia→encol@@en、en_mexico→enmx@@en。
+候选为原word/胜出phoneme/score对象，按分数排序，空列表[]。供方手册要求全候选
+由ASR截K，但其validator把>K判ERROR；本版一次检索、分别按mode截5/7，完整合格
+列表保留在prefix_shards。不做Vocabulary拼接或orig/join_phon/nospace改写。
+
+时序没有默认值，--effect必须明确：same-step使用当前前缀，next-step首步[]、整体
+延后一块；均恰好ceil(T/2)槽，尾段保留、整数边界不多槽。next-step最后一次前缀
+不被消费，<2秒音频context全空。两种时序分别对应手册第3/6节，**实际主口径仍需
+下游确认**。当前same-step命令用于先检验前缀链路，不能说下游已经确认当步使用。
+语音末词在next-step可能来不及注入，不可误归为CTC漏召回。
+
+### 运行、结果和恢复
+
+详细契约和操作见docs/STREAM_CONTEXTS.md。容器内项目根目录、原Qwen环境：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_stream_contexts.py smoke --effect same-step --gpu 4
+```
+
+实际远端SHA以交付回复为准，4换成已分配物理卡。前缀/样本计数、耗时及10秒活动
+提示覆盖准备、加载、推理和封存；正常命令包含完整预检，不必再单独--audit-only。
+默认新目录outputs/english_stream_contexts_ep27_noise10db_v1/smoke_same-step。
+中断保持同代码/配置/Head/音频/effect，重复上面命令加--resume；每个前缀摘要与PCM
+输入身份校验后复用，已完成目录恢复只验SHA、不加载模型；不覆盖旧目录或嵌套输入。
+
+回传该目录return_bundle.zip：含delivery/stream_contexts.json、durations.json、
+audio_manifest.json、因果审计和report/config/checkpoint小身份及包内SHA，不含WAV/
+权重/全量前缀原件。两个mode共享一次前缀推理，JSON不增加_meta假设。smoke只含
+选定20条，下游必须按audio_manifest选同样音频，不能将源目录6,000条当作smoke范围。
+内部自检及供方原脚本都会验证，结构通过不等同于ASR采用已生效或实时速度已验收。
+
+先核对smoke、让下游验证真实context采用/部分及最终转写，再用相同effect启动full：
+
+```bash
+python -B scripts/run_stream_contexts.py full --effect same-step --gpu 4 \
+  --smoke-run outputs/english_stream_contexts_ep27_noise10db_v1/smoke_same-step
+```
+
+full要求已完成且同Head/配置/代码/音频/effect的smoke，输出独立full_same-step；不会
+自动从smoke扩跑。next-step另建smoke_next-step/full_next-step，不混目录或指标。
+prefix_compute_seconds仅RAG前缀准备/计算耗时，不是ASR端到端时延。下游最终WER、
+目标命中、参考外落字与实际context采用仍待真实运行。本地没有访问H200完整模型。
+
+### 本地验证
+
+新增8项流式适配测试及旧入口回归共19 passed。使用真实小WAV验证任意采样点、
+短句/整2秒/不足2秒尾段、8k双声道先截断再重采样、改变未来1秒不改变前2秒输入；
+模拟检索边界验证完整多语索引、每前缀只算一次、Top5/7同源、两种effect、候选可消失
+而不永久累计、原校验脚本通过和>K矛盾。还覆盖无输出预检、坏分片拒绝、缺失前缀
+续跑、音频漂移阻断、full必须匹配smoke和旧资产不变。全量778 passed（101.70s）；
+随后仅收紧汇总内存，不在内存保留全部前缀CTC详情，仍逐前缀写盘并由定向回归验证。
+新增文件Ruff/strict Mypy、CLI help、git diff --check通过。全仓既有Ruff11项/Mypy8项
+未改。全部模型/检索硬件边界为小型CPU夹具，不能当成工区召回、WER或实时性能。
+
 ## 0.171 2026-10-19 最终best第27轮与英语6,000条10dB/联合4k入口（待工区）
 
 用户已回传0.169的run_completed终端JSON，并明确要求用最终best重新测三套带噪英语。

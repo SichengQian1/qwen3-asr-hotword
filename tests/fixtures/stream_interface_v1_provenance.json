@@ -1,0 +1,18 @@
+{
+  "archive_sha256": "485d5f8d0cc8d257f1cc593b505c0c3f15bc0017510b61cdb540dfe30cb8e895",
+  "source": "User-provided stream-interface manual v1, 2026-10-19",
+  "members": {
+    "stream_interface_v1_validator.py.txt": {
+      "original_member": "validate_stream_contexts.py",
+      "sha256": "35312007820f382c29448cae1633f9495679c066548bddb40c5b4a8f2ee29cbb"
+    },
+    "stream_interface_v1_sample.json": {
+      "original_member": "stream_contexts_sample.json",
+      "sha256": "35121fb4806c7265bcfaeac2d784ceac7083d5db89a09bb57236c62fff9570e1"
+    },
+    "stream_interface_v1_durations.json": {
+      "original_member": "durations_sample.json",
+      "sha256": "d7db1cea200baaf5dabbb10f87ecd661380e9657b563bc9345b6d92b474a57a2"
+    }
+  }
+}

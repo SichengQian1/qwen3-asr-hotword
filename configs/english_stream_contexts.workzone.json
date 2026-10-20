@@ -1,0 +1,14 @@
+{
+  "retrieval_config": "configs/english_best_noise10db_4k.workzone.json",
+  "dataset_keys": {
+    "en_chile": "encl@@en",
+    "en_colombia": "encol@@en",
+    "en_mexico": "enmx@@en"
+  },
+  "output_root": "outputs/english_stream_contexts_ep27_noise10db_v1",
+  "smoke_samples": 20,
+  "selection_seed": "english-stream-20261020-v1",
+  "chunk_seconds": 2,
+  "retention_policy": "current_prefix_only",
+  "candidate_form": "objects_truncated_per_mode"
+}
