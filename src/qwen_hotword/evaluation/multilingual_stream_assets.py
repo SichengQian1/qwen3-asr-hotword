@@ -32,6 +32,12 @@ def prepare_multilingual_stream(root: Path, config: Path) -> tuple[dict[str, Any
     old = _json(_verified(source, "run_config.json", inputs))
     old_report = _json(_verified(source, "report.json", inputs))
     additional = cfg["additional_datasets"]
+    wave_directories = cfg["wave_directories"]
+    if set(wave_directories) != {f"wave{w}" for w in range(1, 5)} or any(
+        not isinstance(name, str) or not name or name in {".", ".."} or Path(name).name != name
+        for name in wave_directories.values()
+    ):
+        raise ValueError("four explicit wave directory names required")
     if set(additional) != {f"wave{w}_{lang}" for lang in ("es", "pt") for w in range(1, 5)}:
         raise ValueError("all four original ES/PT waves required")
     if set(old["groups"]) != set(KEYS) | set(additional):
@@ -43,6 +49,9 @@ def prepare_multilingual_stream(root: Path, config: Path) -> tuple[dict[str, Any
         lang, wave = info["language"], info["wave"]
         if lang not in ("es", "pt") or group != f"{wave}_{lang}":
             raise ValueError(f"invalid language/wave mapping: {group}")
+        directory = wave_directories[wave]
+        if info["key"] != f"{directory}@@{lang}":
+            raise ValueError(f"downstream key differs from audio directory: {group}")
         previous = old["groups"][group]
         if previous["language"] != lang or len(previous["config"]["sources"]) != 1:
             raise ValueError(f"baseline language/source differs: {group}")
@@ -50,7 +59,7 @@ def prepare_multilingual_stream(root: Path, config: Path) -> tuple[dict[str, Any
         text = _checked(
             Path(original["transcripts"]["path"]), inputs, original["transcripts"]["sha256"]
         )
-        audio = (root / cfg["wave_audio_root"] / wave / lang / "wav").resolve()
+        audio = (root / cfg["wave_audio_root"] / directory / lang / "wav").resolve()
         spec = external.SourceSpec(group, audio, text)
         records, _ = external.build_external_dataset(
             (spec,), language="pt-BR" if lang == "pt" else lang
@@ -79,7 +88,7 @@ def prepare_multilingual_stream(root: Path, config: Path) -> tuple[dict[str, Any
             raise ValueError(f"retrieval settings differ: {group}")
         plan["gate"][group] = _validated_source_gate(previous["config"])
         with stage_progress(
-            f"Verify noisy headers and SHA {group}", total=len(records), every=100
+            f"Verify noisy headers and SHA {directory}/{lang}", total=len(records), every=100
         ) as tick:
             for n, (record, clean) in enumerate(zip(records, previous["records"], strict=True), 1):
                 path = _checked(record.audio_path, inputs)

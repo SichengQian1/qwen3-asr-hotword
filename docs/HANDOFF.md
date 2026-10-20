@@ -20,7 +20,7 @@ sum前缀准备+检索2.9651s、最大0.6738s、超过2s为0；加载另48.4s。
 evaluation/multilingual_stream_assets.py、evaluation/stream_retrieval_metrics.py和
 inference/multilingual_stream_run.py。完整操作和口径见docs/STREAM_CONTEXTS.md首节。
 英语三国各2,000条、合6,000，西葡分别wave1–4各100条、各400，总6,800。英语沿用
-2026-10-09-带噪10dB根目录，西葡沿用2026-09-29-带噪10dB/waveN/es或pt/wav。
+2026-10-09-带噪10dB根目录，西葡沿用2026-09-29-带噪10dB/<当前wave目录>/es或pt/wav。
 保留各自原ID/参考/target_ids，英语分母4,374，西葡从同一sealed clean4k plan/report
 重算并验证各自原分母；不重建目标/词表，不采用带噪目录新参考。完整三语4k/4012
 发音及90类vocab和0.75/0.35/0.5原门控不变；Head通过训练marker验证并额外锁定上面
@@ -36,7 +36,7 @@ LLM/最终ASR WER或CTC PER。参考仅在检索后的独立计量使用，不�
 把差值归因于噪声或流式。时延只计RAG，不包含ASR/网络及加载，SNR未独立验证。
 
 下游取delivery下stream_contexts.json、durations.json、audio_manifest.json；英语key
-保持原样，西葡本次配置声明wave1@@es…wave4@@es及wave1@@pt…wave4@@pt，路由尚未
+保持原样，西葡本次配置声明当前wave目录名@@es/pt，路由尚未
 经下游运行确认。逐前缀取证在prefix_shards，逐样本计量在sample_metrics.jsonl。
 终端最后直接打印三语精简JSON，保存terminal_summary.json；可直接贴回，不传大包。
 summary_bundle.zip仅含summary/report/checkpoint小身份和包内SHA，不包含run_config、
@@ -65,6 +65,15 @@ cat outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step/termin
 
 三份下游文件仍需对齐manifest，在下游运行后才有真实流式转写指标；本次全量入口
 只负责RAG生成/计量。新全量尚未在H200实际运行，不能引用本地夹具作为三语召回。
+
+工区补充：9e8bc26版本预检在3.5s因旧wave1/es/wav不存在退出，尚未进入写结果/加载
+完整模型。用户明确四目录当前为wave1_标贝、wave2_澳鹏、wave3_海天、wave4_澳鹏0921。
+补充wave_directories映射及对应下游key（如wave1_标贝@@es）；原waveN_es/pt逻辑分组、
+封存参考/target_ids及评分口径继续保留，不在磁盘重命名、不改旧outputs。拉取后直接
+重复上面运行命令即可，不删目录、不需--resume。英/西/葡本轮均从标称10dB目录读音频，
+不混用clean WAV；原clean参考仅作身份/评分，实际SNR仍未独立复测。
+目录修复定向13 passed（28.55s）、全量783 passed（118.74s）；修改范围Ruff/Mypy及
+git diff --check通过，未知文件和7处既有测试修改继续保留。
 
 ### 本地验证
 

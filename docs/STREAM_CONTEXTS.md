@@ -13,10 +13,23 @@ python -B scripts/run_multilingual_stream.py --effect same-step --gpu 4
 
 使用configs/multilingual_stream_contexts.workzone.json：英语三国各2,000条，共6,000；
 西语和葡语分别wave1–4各100条、各400，合计6,800。英语沿用2026-10-09-带噪10dB
-根目录，西葡沿用2026-09-29-带噪10dB根目录/waveN/es或pt/wav。完整模型只在H200
+根目录，西葡沿用2026-09-29-带噪10dB根目录/<当前wave目录>/es或pt/wav。完整模型只在H200
 加载，4替换成已分配的物理GPU；单GPU进程按EN→ES→PT顺序执行，每语种独立加载
 一次detector，保留English/Spanish/Portuguese原提示；每个前缀仍只检索一次并导出
 两个K值，全部音频搜索同一完整三语4k/4012发音索引，不调Anchor/门控、不重训。
+
+西葡四个目录已按用户提供的新名称配置（只改读取映射，不在磁盘重命名）：
+
+| 原测试分组 | 当前目录 |
+|---|---|
+| wave1 | wave1_标贝 |
+| wave2 | wave2_澳鹏 |
+| wave3 | wave3_海天 |
+| wave4 | wave4_澳鹏0921 |
+
+wave_directories区分原参考分组与当前音频目录；原waveN_es/pt继续绑定封存目标及参考。
+下游key同步采用当前目录名@@es/pt。此次“旧wave1目录不存在”在预检阶段退出，尚未写
+新运行目录或加载完整模型；拉取修复后直接重复运行命令，无须删除输出或加--resume。
 
 该入口按用户决定直接full，无须--smoke-run；不把终端smoke摘要冒称为文件独立核验
 或真实下游联调通过。same-step仍指当前前缀结果供当前步使用，实际ASR消费由下游
@@ -53,8 +66,8 @@ python -B scripts/run_multilingual_stream.py --effect same-step --gpu 4
 归一化；warning/warnings、标点、撇号、多词短语均由测试与strict_phrase_match对照。
 
 下游仍取delivery/stream_contexts.json、durations.json、audio_manifest.json；英语key
-保持encl@@en/encol@@en/enmx@@en，西葡配置明确使用wave1@@es…wave4@@es及
-wave1@@pt…wave4@@pt。这是本次交付映射，下游应按manifest/config对齐，不假称已经
+保持encl@@en/encol@@en/enmx@@en，西葡使用上表当前目录名，例如wave1_标贝@@es、
+wave4_澳鹏0921@@pt。这是本次交付映射，下游应按manifest/config对齐，不假称已经
 验证其数据集路由。逐前缀CTC/候选在prefix_shards，逐样本计量在sample_metrics.jsonl。
 
 **无需回传大包。**终端结束直接打印terminal_summary.json的三语指标及Head/表/vocab/

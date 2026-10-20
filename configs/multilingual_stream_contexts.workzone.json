@@ -1,17 +1,23 @@
 {
   "english_stream_config": "configs/english_stream_contexts.workzone.json",
   "wave_audio_root": "/host_home/star/两波验证集-可直接推理/2026-09-29-带噪10dB",
+  "wave_directories": {
+    "wave1": "wave1_标贝",
+    "wave2": "wave2_澳鹏",
+    "wave3": "wave3_海天",
+    "wave4": "wave4_澳鹏0921"
+  },
   "checkpoint_sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
   "output_root": "outputs/multilingual_stream_contexts_ep27_noise10db_v1",
   "full_run_authorization": "user_requested_direct_full_2026-10-20",
   "additional_datasets": {
-    "wave1_es": {"language": "es", "wave": "wave1", "key": "wave1@@es", "expected_samples": 100},
-    "wave2_es": {"language": "es", "wave": "wave2", "key": "wave2@@es", "expected_samples": 100},
-    "wave3_es": {"language": "es", "wave": "wave3", "key": "wave3@@es", "expected_samples": 100},
-    "wave4_es": {"language": "es", "wave": "wave4", "key": "wave4@@es", "expected_samples": 100},
-    "wave1_pt": {"language": "pt", "wave": "wave1", "key": "wave1@@pt", "expected_samples": 100},
-    "wave2_pt": {"language": "pt", "wave": "wave2", "key": "wave2@@pt", "expected_samples": 100},
-    "wave3_pt": {"language": "pt", "wave": "wave3", "key": "wave3@@pt", "expected_samples": 100},
-    "wave4_pt": {"language": "pt", "wave": "wave4", "key": "wave4@@pt", "expected_samples": 100}
+    "wave1_es": {"language": "es", "wave": "wave1", "key": "wave1_标贝@@es", "expected_samples": 100},
+    "wave2_es": {"language": "es", "wave": "wave2", "key": "wave2_澳鹏@@es", "expected_samples": 100},
+    "wave3_es": {"language": "es", "wave": "wave3", "key": "wave3_海天@@es", "expected_samples": 100},
+    "wave4_es": {"language": "es", "wave": "wave4", "key": "wave4_澳鹏0921@@es", "expected_samples": 100},
+    "wave1_pt": {"language": "pt", "wave": "wave1", "key": "wave1_标贝@@pt", "expected_samples": 100},
+    "wave2_pt": {"language": "pt", "wave": "wave2", "key": "wave2_澳鹏@@pt", "expected_samples": 100},
+    "wave3_pt": {"language": "pt", "wave": "wave3", "key": "wave3_海天@@pt", "expected_samples": 100},
+    "wave4_pt": {"language": "pt", "wave": "wave4", "key": "wave4_澳鹏0921@@pt", "expected_samples": 100}
   }
 }

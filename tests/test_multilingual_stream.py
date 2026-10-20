@@ -38,7 +38,12 @@ def multilingual_case(stream_case):
     )
     for info in cfg["additional_datasets"].values():
         info["expected_samples"] = 2
-        directory = Path(cfg["wave_audio_root"]) / info["wave"] / info["language"] / "wav"
+        directory = (
+            Path(cfg["wave_audio_root"])
+            / cfg["wave_directories"][info["wave"]]
+            / info["language"]
+            / "wav"
+        )
         directory.mkdir(parents=True)
         for utt in ("same", "negative"):
             sf.write(
@@ -100,8 +105,16 @@ def test_three_languages_direct_full_metrics_and_small_return(multilingual_case)
         str(c.noisy_root) in s["audio_path"] for s in plan["samples"] if s["language"] == "en"
     )
     contexts = read(c.multi_output / "delivery/stream_contexts.json")
-    assert "wave1@@es" in contexts["RAG_top5_stream"]
-    assert "wave1@@pt" in contexts["RAG_top5_stream"]
+    assert "wave1_标贝@@es" in contexts["RAG_top5_stream"]
+    assert "wave1_标贝@@pt" in contexts["RAG_top5_stream"]
+    for info in c.multi_cfg["additional_datasets"].values():
+        key = info["key"]
+        assert key in contexts["RAG_top5_stream"]
+        manifest = read(c.multi_output / "delivery/audio_manifest.json")
+        assert all(
+            c.multi_cfg["wave_directories"][info["wave"]] in row["audio_path"]
+            for row in manifest[key].values()
+        )
     details = [
         json.loads(s) for s in (c.multi_output / "sample_metrics.jsonl").read_text().splitlines()
     ]
@@ -196,7 +209,7 @@ def test_resume_missing_prefixes_and_bad_inputs(multilingual_case):
 
 def test_missing_wave_reference_or_retrieval_drift_rejected(multilingual_case, monkeypatch):
     c = multilingual_case
-    audio = Path(c.multi_cfg["wave_audio_root"]) / "wave1/es/wav/same.wav"
+    audio = Path(c.multi_cfg["wave_audio_root"]) / "wave1_标贝/es/wav/same.wav"
     audio.rename(audio.with_name("wrong.wav"))
     with pytest.raises(ValueError, match="mismatch"):
         prepare_multilingual_stream(c.root, c.multi_config)
@@ -230,7 +243,7 @@ def test_next_step_is_scored_from_delivered_contexts_and_drift_is_blocked(multil
                 if durations[key][utt] <= 2:
                     assert steps == [[]]
     assert report["by_language"]["en"]["RAG_top7_stream"]["last_context"]["target_hits"] < 9
-    path = Path(c.multi_cfg["wave_audio_root"]) / "wave4/pt/wav/same.wav"
+    path = Path(c.multi_cfg["wave_audio_root"]) / "wave4_澳鹏0921/pt/wav/same.wav"
     path.write_bytes(path.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="resume run_config differs"):
         run_multilingual_stream(
