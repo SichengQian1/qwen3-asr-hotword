@@ -1,0 +1,49 @@
+{
+  "official_config": "configs/joint_4000_mfa.workzone.json",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "source_sha256": {
+    "Makefile": "b685da084f3718a92440117ba3d6c9e154fc0eede4edd4342283cf6cfb979b84",
+    "g2p_postprocess.cpp": "f3e6b97d72f8814d92b0c9b5c6b06071aa41a0a39843b0ff6ad325e04619f461",
+    "g2p_postprocess.h": "e2f843e3dbc45cf726270657aeefeee84a13eb5ae67d91155ee40b07e2531952",
+    "g2p_preprocess.cpp": "b321427e85b78371d101d368d21744ae78316b39d9cce0f5213167fd479ff12d",
+    "g2p_preprocess.h": "c2da1f5e3aadd2f707c0431603c6a777cd23516912b61575f91994b5ad9d7c1f",
+    "mmservice_g2p_main.cpp": "f5d5dedefd01c6c0056eb13f8b80133b9e1e8988b0004336f29dca3b802d6a87",
+    "unicode_util.h": "3c3ec55a904f3e7c95576c0edc5d255b4cca3520569a2fa94cdf5a28f058fb67"
+  },
+  "cases": {
+    "en": [
+      "cat",
+      "warning",
+      "warnings",
+      "arrive",
+      "arrived",
+      "January",
+      "don't",
+      "New York",
+      "ﬁre",
+      "GPT4"
+    ],
+    "es": [
+      "casa",
+      "mañana",
+      "niño",
+      "niño",
+      "alegría",
+      "alegría",
+      "guitarra",
+      "pingüino",
+      "San José"
+    ],
+    "pt": [
+      "casa",
+      "amanhã",
+      "coração",
+      "água",
+      "você",
+      "você",
+      "São Paulo",
+      "AÇÃO"
+    ]
+  }
+}

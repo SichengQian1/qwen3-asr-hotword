@@ -1,5 +1,75 @@
 # 工作交接记录
 
+## 0.178 2026-10-21 MMService G2P原版C++已在x86编译，三语小词表兼容对照入口（待工区）
+
+用户回到G2P替代验证，确认使用本仓库三套官方MFA模型，不重训CTC、不重算Encoder。
+附件mmservice_g2p_cpp.zip只含源码；工区上传目录实际为mm/，其原程序为AArch64且
+没有执行权限。工区uname=x86_64、g++13.3、aligner内MFA3.4.0/Pynini2.1.7/OpenFST
+1.8.4，具备libfst.so.26和头文件。用户已在新目录
+outputs/mm_g2p_x86_2LrhDuRR复制源码并编译成功（13.349s），使用OPENFST=$CONDA_PREFIX、
+CXX=g++、CXXFLAGS='-std=c++17 -O2'覆盖原Makefile路径和强制旧ABI参数；源码未修改。
+readelf确认新程序是x86-64，ldd无not found且libfst/libstdc++来自aligner。两条
+PROJECT_OUTPUT/SymbolTableIterator弃用警告未阻断编译；这些只证明构建/依赖可用，
+尚无真实G2P发音一致性结果。原ARM程序、构建目录及旧模型均保留。
+
+### 已确认的模型契约与小测范围
+
+- EN/ES为Phonetisaurus，grapheme_order=2，附有graphemes.sym；PT为Pynini，无该表。
+  ES meta的unicode_decomposition=true；C++输入只做手写NFC，未按模型执行NFKD。
+  这是待验证差异；还需确认FST是否实际内嵌输入符号表。C++按是否内嵌符号表切换
+  bigram/Unicode模式，不能仅凭ZIP里有graphemes.sym认定已读入。
+- 新增scripts/compare_mmservice_g2p_smoke.py、phonemes/mmservice_smoke.py、
+  configs/mmservice_g2p_smoke.workzone.json及6项测试。27个固定输入为EN10/ES9/PT8，
+  包含常用词、warning/warnings、arrive/arrived、大小写、短语、撇号、重音字母及
+  NFC/NFD组合字符；GPT4是数字策略边界，不作为正常可用训练标签。
+- 核验编译目录7份源码/Makefile与附件原件SHA一致，记录新二进制SHA并要求x86-64
+  ELF和执行权限；三套官方ZIP及90类vocab仍使用既有固定SHA。只把指定官方成员
+  复制到全新输出目录，不调用extractall、不补字符表、不改FST或执行西语专项修复。
+- 同环境调用官方mfa g2p --num_jobs 1 --num_pronunciations 1；输入为项目规范化的
+  唯一词，短语按词序拼接孤立词Top1。C++分别运行原始发音和默认后处理，使用同一
+  批原始surface，保存完整JSONL及stderr。核对原始词名/顺序/数量，不靠输出行号
+  或删重音把MFA变更的key冒充原词。两边缺词、空结果、OOV或失败不会算作一致。
+- 对比原始发音字符串及经项目90类映射后的Token ID，另外保存C++后处理与项目
+  后处理的字符串一致性。counts含全部输入数、MFA可用、C++ok/可用、双方可用、
+  原始一致、ID一致、双方不可用和数字策略阻塞数量；逐词明细保留原始输出与OOV。
+  C++某语种进程失败时记录明确process_failed并继续另两语种，MFA基线执行失败则
+  停止并返回failed和日志包。completed仅代表取证程序跑完，replacement_verified
+  固定为false；小测不能替代全词表/训练词典或独立真实发音质量审核。
+
+### 工区执行与回传
+
+本地/跟踪/实际远端起点1c5b45c5b4c2b4d0cd117f931fa0460d383ebbd9，分支
+codex/g2p-coverage-scan，原7份测试修改及未跟踪资料未动。推送SHA见交付回复。
+容器内仓库根目录执行，使用已有aligner环境，不需要GPU、Qwen、音频或下载依赖：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+conda run --no-capture-output -n aligner python -B scripts/compare_mmservice_g2p_smoke.py \
+  --binary outputs/mm_g2p_x86_2LrhDuRR/mmservice_g2p
+```
+
+默认新建outputs/mmservice_g2p_smoke_v1_<随机后缀>，打印实际目录；也可显式提供新的
+--output-dir。拒绝已有目录，无resume；中断保留原尝试，重跑创建新目录，不删除
+旧输出。每个模型读取、MFA调用、C++调用都有阶段/已知输入数量/耗时和10秒活动提示。
+默认每个外部进程timeout=300秒，可用--timeout设置；超时保留日志并标记失败。
+各进程耗时包含加载/启动，仅诊断用，不直接解释成C++吞吐加速倍数。
+
+回传终端打印的return_file，即该新目录return_bundle.zip。包内为report.json、
+comparison.jsonl、input_cases.json、各语言model_inventory.json、词表、官方raw.dict、
+C++两份输出/日志及sha256.txt；不含FST模型、模型ZIP、MFA缓存、权重或音频。
+即使failed也尽量形成日志包；预检失败未创建目录时只回传错误。下一步依据结果定位
+模型装载/字符编码/前后处理/音素解码差异，保留原版对照后再讨论单因素修复，之后
+扩到真实训练词表，不直接替换任何生产字典、热词表或CTC标签。
+
+本地6项定向测试通过，覆盖三语同输入与短语拼接、原FST不改、不打包大模型、
+源码/官方资产漂移与ARM程序拒绝、双方失败/OOV/数字/变更key不计一致、C++错误
+继续另两语种、官方失败日志包、输出缺行/错序和真实子进程超时。全量797 passed
+（67.88s），补充官方模型漂移断言后再跑定向测试；新增范围Ruff/strict Mypy、CLI
+help和git diff --check通过。
+全仓既有Ruff11/Mypy8项未改。所有模型读取/执行在本地测试中为明确夹具边界，
+没有在本地执行附件程序、安装OpenFST或宣称三语真实一致率。
+
 ## 0.177 2026-10-21 干净英语每地区100条、真实目标数1–3、best27 Top7单文件清单（待工区）
 
 用户临时插入下游交付任务，G2P替代验证暂停。已确认使用原干净英语三组各2000条，
