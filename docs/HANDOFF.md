@@ -1,5 +1,107 @@
 # 工作交接记录
 
+## 0.175 2026-10-21 新英语同域验证best27最终训练报告归档与三阶段对照
+
+用户要求补齐“27轮完整训练结果，对比之前”。本次从既有终端附件提取完整正式
+head_report，不再把smoke_head epoch1或早先epoch21预览当成最终训练。已归档：
+
+- docs/results/2026-10-21_english_newval_ep27_head_report.json：完整最终head_report，
+  SHA57c44ca7d3cebea5696de607efd2af2bb3b26df231e951afde11b9ee84e90398。
+- docs/results/2026-10-21_english_refresh_oldval_ep9_head_report.json：同一批新训练数据、
+  仍用旧英语validation的过渡轮完整head_report，SHA
+  fc2585700aa980a3d558808e8bee0dbcf71ed3a116f7a4a9bd80409eed00d43b。
+
+来源分别为此前b53a3c88附件与a5edc3c4附件，文件SHA为
+f1fb358d09d6da23724f34cf7db561cf5993fee0adea9aeebac3a7f074871c7b、
+4534f6caa4b5e65071ab110ead4dff38ac4f986253c279a27061b0ba1b552b2e。
+日期为本地补归档日期，不推断原训练开始/结束日期。原始480h best25对照继续引用
+0.141已归档的错误数/reference，不伪造未收到的该次完整report原件。
+
+关键身份交叉核验：将终端完整head_report保存为JSON后的SHA恰好等于后续0.172
+工区smoke回传checkpoint.training_report_sha256（57c44…0398），不是只有百分比相近。
+对应smoke终端附件SHA为f159d0617a8ecbbcbfc9b97900a20596903e3f8eb2f30fefae25e101aeacf5b0。
+因此完整最终报告内容已归档且与后续声明报告SHA一致；仍未在本地访问工区原路径、
+权重或缓存，不把这种跨回传一致性表述为已本地检查全部工区文件。
+
+### 本轮最终正式训练事实
+
+正式目录outputs/english_countries_refresh_newval_v1/head，选用ctc_head_best.pt，
+Head SHA872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466由后续
+smoke及0.174检索回传共同声明，已固定在检索配置中；非latest/smoke目录。
+
+| 项目 | 已返回最终值 |
+|---|---|
+| 请求/实际/最佳epoch | 40 / 27 / 27，early_stopped=true |
+| 训练样本/分片 | 881749 / 1723，每轮all_samples_once |
+| 验证样本/分片 | 7492 / 15；EN2199、ES2631、PT2662 |
+| Head/Encoder | Temporal2x，h512/k5/dropout0.1，838746可训练；Encoder317477504参数冻结 |
+| 最佳/末轮训练loss、PER | 0.2415060505、6.3940862%；PER为三语训练音素微平均 |
+| 最佳/末轮验证loss | 0.2587039483 |
+| Macro验证PER / 混合音素PER | 5.9719233% / 6.3635082% |
+| 选点/早停指标 | validation_macro_per；worst-group PER/loss作选点后续排序 |
+| 初始/最终/下限LR | 3e-4 / 7.5e-5 / 5e-6；未到LR下限仍可触发早停 |
+| patience / min_delta | 6 / 0.0005；minimum_epochs=5 |
+| batch / weight_decay / clip / seed | 256 / 1e-4 / 5 / 20260825 |
+| 报告训练时间 | 18091.92445s，约5.0255h，含各epoch训练/验证；不含Encoder提取 |
+| cache_sha256_verified / test_set_used | true / false（报告声明） |
+
+best与final分组PER、loss、训练统计一致，因为最终epoch与best同为27。保存best依据
+任何更优的选择排序，而早停计数只有超过min_delta的改善才重置；best27与第27轮
+早停不构成矛盾。实际逐轮何时降LR/改善/累计stale仍须读取metrics.jsonl，不能由
+最终report倒推出27个epoch的数据或宣布曲线完全收敛。
+
+### 与原480h和过渡轮的比较
+
+| 阶段 | 最佳/实际epoch | 英语验证域 | EN PER（errors/ref） | ES PER（errors/ref） | PT PER（errors/ref） |
+|---|---|---|---|---|---|
+| 原英语480h，0.141 | 25/26，上限30 | 原英语2808条 | 3.9111%（3039/77701） | 3.7389%（4857/129906） | 8.8560%（14464/163324） |
+| 换英语后仍用旧validation，0.169 | 9/15，上限30 | 原英语2808条 | 17.4528%（13561/77701） | 4.0260%（5230/129906） | 9.2258%（15068/163324） |
+| 新英语同域validation，本轮 | 27/27，上限40 | 新英语2199条 | 5.4122%（2943/54377） | 3.7235%（4837/129906） | 8.7801%（14340/163324） |
+
+本轮只替换英语训练480h，西葡训练480h及原西葡验证数据/标签/特征保留；新英语
+validation从未入选本轮480h的合格池冻结。过渡轮与本轮使用同一881749条训练清单/
+已完成Encoder特征，但新validation负责选点、调度、早停，Head从新初始化，且
+epoch上限30→40、LR下限1e-5→5e-6、min_delta0.001→0.0005。因此不是只换验证数据
+的一项消融，不将差异单独归于新英语语料、训练轮数或早停参数。
+
+ES/PT验证样本数与reference_phonemes三阶段相同，按同组PER可比较数值：本轮相对
+原480h，ES少20个错误、下降0.015396个百分点；PT少124个错误、下降0.075923个百分点。
+相对过渡轮ES少393错/下降0.302526pp，PT少728错/下降0.445740pp。结论是这两组
+保留验证集表现基本保持并略好，不宣称统计显著改善或全部来源/语种均泛化提升。
+
+英语3.9111%与17.4528%使用同旧验证集，可描述过渡轮在旧英语域上的退化；新5.4122%
+来自不同新验证集，不能把17.4528%→5.4122%称为同集降低12.04pp，也不能从旧3.9111%
+与新5.4122%断定本轮退步。三阶段Macro/overall PER同样因英语验证域变化不能直接
+当同集提升。需要best27在旧validation上的old_domain_control才能补齐旧域比较。
+CTC PER、0.170/0.174检索召回和最终ASR WER继续分开，不用检索代替训练验证。
+
+### 完整逐轮结果仍需回收，现有文件只读即可
+
+最终head_report已收齐并归档；缺的“完整27轮训练”具体指head/metrics.jsonl，及用于
+旧域公平比较的old_domain_control.json。源码execute(run)在返回run_completed前调用
+old_english_control，并将文件放入return_bundle；按成功返回路径文件应已产生，但
+此前终端JSON只打印head_report，不包含control数值，所以是尚缺回传，不先要求重跑。
+
+在容器内项目根目录，只读现有3个小结果文件打一个独立小包，不执行训练/Encoder，
+不读/传权重，不包含大plan或缓存，不覆盖原return_bundle：
+
+```bash
+R=outputs/english_countries_refresh_newval_v1
+O=$(mktemp -d outputs/english_ep27_details_XXXXXXXX)
+tar -czf "$O/ep27_details.tar.gz" -C "$R" head/metrics.jsonl old_domain_control.json training_completed.json
+ls -lh "$O/ep27_details.tar.gz"
+```
+
+返回这个新小包；若tar报告缺文件，保留现场并返回报错，不为补档自动重训或重算对照。
+收到后核对marker的报告/Head SHA与已归档身份、metrics epoch连续1–27及最后/最佳
+统计，并据old_domain_control校验best27及旧8101条/EN2808的同域对照，再补曲线和
+早停/学习率轨迹。源码/运行参数保持不变；文档更新后不必启动旧run或用新Git恢复训练。
+
+本轮归档起点本地/跟踪/实际远端0430559f2efdbb90e00c8eee301c1bc251d22d0c；原7处
+测试修改和未知资料不动。只改文档与小结果JSON，已复算两份报告分组PER/Macro/
+overall、样本总数、同集差值及最终报告SHA交叉身份，git diff --check；不重复与归档
+无关的模型单元测试。归档提交推送当前codex/g2p-coverage-scan，远端SHA见交付回复。
+
 ## 0.174 2026-10-21 三语6,800条带噪因果前缀检索完成（终端结果归档）
 
 用户要求归档本次最新终端JSON，并核对前面是否有遗漏结果供讨论。本轮只归档已返回
@@ -98,7 +200,7 @@ delivery并列，保存逐前缀完整CTC/候选/得分/截止点及恢复身份
 |---|---|---|
 | 新英语fast准备、smoke/cache/pilot/formal | 0.168–0.169已有规模、SHA、缓存及旧验证训练结果 | 不是未完成；原章节部分历史文字仍描述当时待执行 |
 | 新英语同域validation准备 | 对话已回2199条/4.0023396658h；合格未选池343.5264709325h；EN/ES/PT为2199/2631/2662、合7492 | 0.169尚未独立补齐这次实测prepare结果和三国配额；完整plan/分层/清单SHA未返回 |
-| best27正式训练 | 0.171已有best27/early-stop、三语PER；本次Head SHA亦与0.173一致 | 完整27轮metrics、cache报告身份和old_domain_control.json数值未独立回传；不把训练结束当作旧域对照已核验 |
+| best27正式训练 | 0.175已补完整最终head_report及跨回传SHA核对、三阶段比较 | 完整27轮metrics、cache报告身份和old_domain_control.json数值仍待回；不把最终报告代替逐轮曲线 |
 | epoch21干净英语6,000条/4k | 0.171已有Top5=3804/4374、Top7=3859/4374及Head SHA | 附件终端分组/原小report尚未单独形成结果文件归档；不是需要重跑的实验 |
 | epoch21或best27独立整句带噪英语 | 对话曾安排，0.171有best27入口 | 本聊天未见这两个独立run完成摘要；本次流式末步不替代其独立run身份 |
 | 20条流式smoke | 0.173已记20条/68次、身份及耗时 | 完整产物未回；用户已明确取消回大包前置，不再阻塞全量 |
@@ -461,7 +563,7 @@ return_bundle.zip即可，内含report.json、run_config.json、checkpoint_metad
 全仓仍有既有Ruff11项/Mypy8项，未碰这些问题或未知测试修改。本地使用小型模拟
 音频/检索边界及真实小Head保存/读取，没有加载完整Qwen或产生H200召回实测。
 
-## 0.169 2026-10-16 新英语同域验证与40轮Head训练入口（代码交付，工区待执行）
+## 0.169 2026-10-16 新英语同域验证与40轮Head训练入口（最终报告见0.175）
 
 用户指出0.168替换英语训练来源后仍用旧英语validation选点，明确批准修正：新英语
 validation必须来自未入选本轮480小时的合格池；三个原test.json继续封存。保留原三语

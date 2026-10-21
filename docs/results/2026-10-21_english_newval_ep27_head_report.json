@@ -1,0 +1,140 @@
+{
+  "best_checkpoint_path": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_newval_v1/head/ctc_head_best.pt",
+  "best_epoch": 27,
+  "best_train_loss": 0.24150605048234072,
+  "best_train_phoneme_error_rate": 0.06394086215535204,
+  "best_validation_by_group": {
+    "en": {
+      "phoneme_error_rate": 0.0541221472313662,
+      "phoneme_errors": 2943,
+      "reference_phonemes": 54377,
+      "sample_count": 2199
+    },
+    "es": {
+      "phoneme_error_rate": 0.037234615799116286,
+      "phoneme_errors": 4837,
+      "reference_phonemes": 129906,
+      "sample_count": 2631
+    },
+    "pt": {
+      "phoneme_error_rate": 0.08780093556366486,
+      "phoneme_errors": 14340,
+      "reference_phonemes": 163324,
+      "sample_count": 2662
+    }
+  },
+  "best_validation_loss": 0.2587039482526708,
+  "best_validation_macro_phoneme_error_rate": 0.05971923286471578,
+  "best_validation_phoneme_error_rate": 0.06363508214736757,
+  "best_validation_worst_group": "pt",
+  "best_validation_worst_group_phoneme_error_rate": 0.08780093556366486,
+  "blank_id": 0,
+  "cache_sha256_verified": true,
+  "checkpoint_selection_metric": "validation_macro_per",
+  "ctc_trainable_parameters": 838746,
+  "early_stopped": true,
+  "early_stopping_metric": "validation_macro_per",
+  "early_stopping_min_delta": 0.0005,
+  "early_stopping_patience": 6,
+  "encoder_frozen_parameters": 317477504,
+  "epochs_completed": 27,
+  "epochs_requested": 40,
+  "final_learning_rate": 7.5e-05,
+  "final_train_loss": 0.24150605048234072,
+  "final_train_phoneme_error_rate": 0.06394086215535204,
+  "final_validation_by_group": {
+    "en": {
+      "phoneme_error_rate": 0.0541221472313662,
+      "phoneme_errors": 2943,
+      "reference_phonemes": 54377,
+      "sample_count": 2199
+    },
+    "es": {
+      "phoneme_error_rate": 0.037234615799116286,
+      "phoneme_errors": 4837,
+      "reference_phonemes": 129906,
+      "sample_count": 2631
+    },
+    "pt": {
+      "phoneme_error_rate": 0.08780093556366486,
+      "phoneme_errors": 14340,
+      "reference_phonemes": 163324,
+      "sample_count": 2662
+    }
+  },
+  "final_validation_loss": 0.2587039482526708,
+  "final_validation_macro_phoneme_error_rate": 0.05971923286471578,
+  "final_validation_phoneme_error_rate": 0.06363508214736757,
+  "final_validation_worst_group": "pt",
+  "final_validation_worst_group_phoneme_error_rate": 0.08780093556366486,
+  "head_config": {
+    "dropout": 0.1,
+    "head_type": "temporal_upsample",
+    "hidden_dimension": 512,
+    "input_dimension": 1024,
+    "kernel_size": 5,
+    "num_classes": 90,
+    "time_upsampling_factor": 2
+  },
+  "initial_learning_rate": 0.0003,
+  "initial_validation_by_group": {
+    "en": {
+      "phoneme_error_rate": 3.1569413538812365,
+      "phoneme_errors": 171665,
+      "reference_phonemes": 54377,
+      "sample_count": 2199
+    },
+    "es": {
+      "phoneme_error_rate": 1.3631548966175542,
+      "phoneme_errors": 177082,
+      "reference_phonemes": 129906,
+      "sample_count": 2631
+    },
+    "pt": {
+      "phoneme_error_rate": 1.1478962063138303,
+      "phoneme_errors": 187479,
+      "reference_phonemes": 163324,
+      "sample_count": 2662
+    }
+  },
+  "initial_validation_loss": 16.022600846053823,
+  "initial_validation_macro_phoneme_error_rate": 1.8893308189375404,
+  "initial_validation_phoneme_error_rate": 1.5426214086597796,
+  "initial_validation_worst_group": "en",
+  "initial_validation_worst_group_phoneme_error_rate": 3.1569413538812365,
+  "latest_checkpoint_path": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_newval_v1/head/ctc_head_latest.pt",
+  "max_gradient_norm": 5.0,
+  "metrics_path": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_newval_v1/head/metrics.jsonl",
+  "minimum_epochs": 5,
+  "minimum_learning_rate": 5e-06,
+  "num_classes": 90,
+  "resumed_from_epoch": 0,
+  "scheduler_factor": 0.5,
+  "scheduler_patience": 2,
+  "seed": 20260825,
+  "selection_metric": "validation_macro_phoneme_error_rate_then_worst_group_phoneme_error_rate_then_validation_loss",
+  "status": "completed",
+  "test_set_used": false,
+  "train_batch_size": 256,
+  "train_cache_dir": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_fast_v1/training/cache/train",
+  "train_feature_bytes": 138772069023,
+  "train_sample_count": 881749,
+  "train_samples_per_epoch": 881749,
+  "train_sampling_plan_fingerprint": null,
+  "train_sampling_policy": "all_samples_once",
+  "train_shard_count": 1723,
+  "training_seconds": 18091.924452942098,
+  "training_state_path": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_newval_v1/head/training_state_latest.pt",
+  "validation_cache_dir": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_newval_v1/cache/validation",
+  "validation_feature_bytes": 1155863075,
+  "validation_groups": [
+    "en",
+    "es",
+    "pt"
+  ],
+  "validation_sample_count": 7492,
+  "validation_sample_groups_sha256": "436ef0f8a4207654b77f2bbe5ee31f3f64204c6ff36307f4538bdaf0a5587064",
+  "validation_shard_count": 15,
+  "vocab_path": "/host_home/star/q00933266/qwen3-asr-hotword/configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "weight_decay": 0.0001
+}
