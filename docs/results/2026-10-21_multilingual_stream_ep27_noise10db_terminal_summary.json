@@ -1,0 +1,148 @@
+{
+  "status": "completed",
+  "effect": "same-step",
+  "sample_count": 6800,
+  "sample_counts_by_language": {
+    "en": 6000,
+    "es": 400,
+    "pt": 400
+  },
+  "prefix_count": 26354,
+  "checkpoint_sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+  "checkpoint_epoch": 27,
+  "table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "run_config_sha256": "47134f2d4489a260ea2bdeb8a7d120b0b4e0658ff687335952846ebe20224743",
+  "by_language": {
+    "en": {
+      "RAG_top5_stream": {
+        "last_context": {
+          "sample_count": 6000,
+          "expected_target_sample_pairs": 4374,
+          "target_hits": 3654,
+          "selected_word_sample_pairs": 12145,
+          "words_absent_from_full_reference": 8488,
+          "target_recall": 0.8353909465020576
+        },
+        "ever_delivered": {
+          "sample_count": 6000,
+          "expected_target_sample_pairs": 4374,
+          "target_hits": 3732,
+          "selected_word_sample_pairs": 13059,
+          "words_absent_from_full_reference": 9324,
+          "target_recall": 0.8532235939643347
+        }
+      },
+      "RAG_top7_stream": {
+        "last_context": {
+          "sample_count": 6000,
+          "expected_target_sample_pairs": 4374,
+          "target_hits": 3698,
+          "selected_word_sample_pairs": 12726,
+          "words_absent_from_full_reference": 9025,
+          "target_recall": 0.8454503886602652
+        },
+        "ever_delivered": {
+          "sample_count": 6000,
+          "expected_target_sample_pairs": 4374,
+          "target_hits": 3759,
+          "selected_word_sample_pairs": 13428,
+          "words_absent_from_full_reference": 9666,
+          "target_recall": 0.8593964334705075
+        }
+      }
+    },
+    "es": {
+      "RAG_top5_stream": {
+        "last_context": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 724,
+          "target_hits": 616,
+          "selected_word_sample_pairs": 1879,
+          "words_absent_from_full_reference": 1246,
+          "target_recall": 0.850828729281768
+        },
+        "ever_delivered": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 724,
+          "target_hits": 632,
+          "selected_word_sample_pairs": 2927,
+          "words_absent_from_full_reference": 2277,
+          "target_recall": 0.8729281767955801
+        }
+      },
+      "RAG_top7_stream": {
+        "last_context": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 724,
+          "target_hits": 638,
+          "selected_word_sample_pairs": 2382,
+          "words_absent_from_full_reference": 1725,
+          "target_recall": 0.8812154696132597
+        },
+        "ever_delivered": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 724,
+          "target_hits": 645,
+          "selected_word_sample_pairs": 3337,
+          "words_absent_from_full_reference": 2673,
+          "target_recall": 0.8908839779005525
+        }
+      }
+    },
+    "pt": {
+      "RAG_top5_stream": {
+        "last_context": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 736,
+          "target_hits": 529,
+          "selected_word_sample_pairs": 1794,
+          "words_absent_from_full_reference": 1248,
+          "target_recall": 0.71875
+        },
+        "ever_delivered": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 736,
+          "target_hits": 564,
+          "selected_word_sample_pairs": 2358,
+          "words_absent_from_full_reference": 1776,
+          "target_recall": 0.7663043478260869
+        }
+      },
+      "RAG_top7_stream": {
+        "last_context": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 736,
+          "target_hits": 553,
+          "selected_word_sample_pairs": 2160,
+          "words_absent_from_full_reference": 1589,
+          "target_recall": 0.751358695652174
+        },
+        "ever_delivered": {
+          "sample_count": 400,
+          "expected_target_sample_pairs": 736,
+          "target_hits": 585,
+          "selected_word_sample_pairs": 2539,
+          "words_absent_from_full_reference": 1935,
+          "target_recall": 0.7948369565217391
+        }
+      }
+    }
+  },
+  "prefix_compute_seconds": {
+    "sum": 602.8678998077521,
+    "mean": 0.02287576458252076,
+    "max": 0.5214525449555367,
+    "over_2s_count": 0
+  },
+  "schema_validation": {
+    "status": "pass",
+    "modes": 2,
+    "unique_utterances": 6800,
+    "mode_boundary_count": 52708
+  },
+  "downstream_format_validator_passed": true,
+  "qwen_decoder_used": false,
+  "word_timestamps_available": false,
+  "output_dir": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step"
+}
