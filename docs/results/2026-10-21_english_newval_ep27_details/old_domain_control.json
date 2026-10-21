@@ -1,0 +1,474 @@
+{
+  "checkpoint_sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+  "diagnostics": {
+    "checkpoint_epoch_metrics": {
+      "epoch": 27,
+      "loss": 0.2587039482526708,
+      "phoneme_error_rate": 0.06363508214736757,
+      "phoneme_errors": 22120,
+      "reference_phonemes": 347607
+    },
+    "checkpoint_path": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/english_countries_refresh_newval_v1/head/ctc_head_best.pt",
+    "ctc_pressure_buckets": {
+      "minimum_ratio_gt_0_50_le_0_75": {
+        "blank_frame_ratio": 0.22739438657407407,
+        "blank_frames": 25148,
+        "deletions": 3078,
+        "errors": 6203,
+        "hypothesis_reference_length_ratio": 0.9632609710175246,
+        "hypothesis_tokens": 59858,
+        "input_frames": 110592,
+        "insertions": 795,
+        "phoneme_error_rate": 0.09982137397209571,
+        "reference_tokens": 62141,
+        "sample_count": 850,
+        "substitutions": 2330
+      },
+      "minimum_ratio_gt_0_75_le_0_90": {
+        "blank_frame_ratio": 0.10483870967741936,
+        "blank_frames": 156,
+        "deletions": 206,
+        "errors": 267,
+        "hypothesis_reference_length_ratio": 0.8337552742616033,
+        "hypothesis_tokens": 988,
+        "input_frames": 1488,
+        "insertions": 9,
+        "phoneme_error_rate": 0.22531645569620254,
+        "reference_tokens": 1185,
+        "sample_count": 15,
+        "substitutions": 52
+      },
+      "minimum_ratio_le_0_50": {
+        "blank_frame_ratio": 0.5594753906843563,
+        "blank_frames": 567016,
+        "deletions": 7110,
+        "errors": 28975,
+        "hypothesis_reference_length_ratio": 0.9904292843094228,
+        "hypothesis_tokens": 304661,
+        "input_frames": 1013478,
+        "insertions": 4166,
+        "phoneme_error_rate": 0.0941954779668731,
+        "reference_tokens": 307605,
+        "sample_count": 7236,
+        "substitutions": 17699
+      }
+    },
+    "head_config": {
+      "dropout": 0.1,
+      "head_type": "temporal_upsample",
+      "hidden_dimension": 512,
+      "input_dimension": 1024,
+      "kernel_size": 5,
+      "num_classes": 90,
+      "time_upsampling_factor": 2
+    },
+    "top_deletions": [
+      {
+        "count": 839,
+        "token": "a",
+        "token_id": 2
+      },
+      {
+        "count": 839,
+        "token": "i",
+        "token_id": 19
+      },
+      {
+        "count": 733,
+        "token": "e",
+        "token_id": 13
+      },
+      {
+        "count": 662,
+        "token": "s",
+        "token_id": 39
+      },
+      {
+        "count": 471,
+        "token": "o",
+        "token_id": 32
+      },
+      {
+        "count": 399,
+        "token": "u",
+        "token_id": 45
+      },
+      {
+        "count": 371,
+        "token": "d",
+        "token_id": 9
+      },
+      {
+        "count": 334,
+        "token": "j",
+        "token_id": 22
+      },
+      {
+        "count": 334,
+        "token": "t",
+        "token_id": 40
+      },
+      {
+        "count": 311,
+        "token": "w",
+        "token_id": 49
+      },
+      {
+        "count": 292,
+        "token": "ɐ",
+        "token_id": 57
+      },
+      {
+        "count": 292,
+        "token": "ɾ",
+        "token_id": 79
+      },
+      {
+        "count": 264,
+        "token": "x",
+        "token_id": 51
+      },
+      {
+        "count": 241,
+        "token": "n",
+        "token_id": 30
+      },
+      {
+        "count": 233,
+        "token": "ɛ",
+        "token_id": 67
+      },
+      {
+        "count": 205,
+        "token": "ə",
+        "token_id": 65
+      },
+      {
+        "count": 202,
+        "token": "ɹ",
+        "token_id": 78
+      },
+      {
+        "count": 202,
+        "token": "ɪ",
+        "token_id": 73
+      },
+      {
+        "count": 182,
+        "token": "ɫ",
+        "token_id": 74
+      },
+      {
+        "count": 167,
+        "token": "l",
+        "token_id": 26
+      }
+    ],
+    "top_insertions": [
+      {
+        "count": 465,
+        "token": "e",
+        "token_id": 13
+      },
+      {
+        "count": 459,
+        "token": "a",
+        "token_id": 2
+      },
+      {
+        "count": 362,
+        "token": "i",
+        "token_id": 19
+      },
+      {
+        "count": 342,
+        "token": "s",
+        "token_id": 39
+      },
+      {
+        "count": 296,
+        "token": "t̪",
+        "token_id": 44
+      },
+      {
+        "count": 289,
+        "token": "o",
+        "token_id": 32
+      },
+      {
+        "count": 270,
+        "token": "ɾ",
+        "token_id": 79
+      },
+      {
+        "count": 179,
+        "token": "u",
+        "token_id": 45
+      },
+      {
+        "count": 157,
+        "token": "n",
+        "token_id": 30
+      },
+      {
+        "count": 132,
+        "token": "x",
+        "token_id": 51
+      },
+      {
+        "count": 119,
+        "token": "j",
+        "token_id": 22
+      },
+      {
+        "count": 103,
+        "token": "w",
+        "token_id": 49
+      },
+      {
+        "count": 101,
+        "token": "t",
+        "token_id": 40
+      },
+      {
+        "count": 96,
+        "token": "d̪",
+        "token_id": 12
+      },
+      {
+        "count": 91,
+        "token": "ɐ",
+        "token_id": 57
+      },
+      {
+        "count": 81,
+        "token": "d",
+        "token_id": 9
+      },
+      {
+        "count": 79,
+        "token": "ɛ",
+        "token_id": 67
+      },
+      {
+        "count": 78,
+        "token": "l",
+        "token_id": 26
+      },
+      {
+        "count": 74,
+        "token": "p",
+        "token_id": 35
+      },
+      {
+        "count": 65,
+        "token": "c",
+        "token_id": 7
+      }
+    ],
+    "top_substitutions": [
+      {
+        "count": 689,
+        "hypothesis_id": 44,
+        "hypothesis_token": "t̪",
+        "reference_id": 40,
+        "reference_token": "t"
+      },
+      {
+        "count": 489,
+        "hypothesis_id": 2,
+        "hypothesis_token": "a",
+        "reference_id": 53,
+        "reference_token": "æ"
+      },
+      {
+        "count": 443,
+        "hypothesis_id": 79,
+        "hypothesis_token": "ɾ",
+        "reference_id": 78,
+        "reference_token": "ɹ"
+      },
+      {
+        "count": 411,
+        "hypothesis_id": 19,
+        "hypothesis_token": "i",
+        "reference_id": 73,
+        "reference_token": "ɪ"
+      },
+      {
+        "count": 391,
+        "hypothesis_id": 13,
+        "hypothesis_token": "e",
+        "reference_id": 73,
+        "reference_token": "ɪ"
+      },
+      {
+        "count": 363,
+        "hypothesis_id": 39,
+        "hypothesis_token": "s",
+        "reference_id": 52,
+        "reference_token": "z"
+      },
+      {
+        "count": 344,
+        "hypothesis_id": 13,
+        "hypothesis_token": "e",
+        "reference_id": 67,
+        "reference_token": "ɛ"
+      },
+      {
+        "count": 298,
+        "hypothesis_id": 19,
+        "hypothesis_token": "i",
+        "reference_id": 13,
+        "reference_token": "e"
+      },
+      {
+        "count": 295,
+        "hypothesis_id": 12,
+        "hypothesis_token": "d̪",
+        "reference_id": 9,
+        "reference_token": "d"
+      },
+      {
+        "count": 234,
+        "hypothesis_id": 32,
+        "hypothesis_token": "o",
+        "reference_id": 34,
+        "reference_token": "ow"
+      },
+      {
+        "count": 232,
+        "hypothesis_id": 44,
+        "hypothesis_token": "t̪",
+        "reference_id": 42,
+        "reference_token": "tʰ"
+      },
+      {
+        "count": 231,
+        "hypothesis_id": 13,
+        "hypothesis_token": "e",
+        "reference_id": 19,
+        "reference_token": "i"
+      },
+      {
+        "count": 223,
+        "hypothesis_id": 2,
+        "hypothesis_token": "a",
+        "reference_id": 57,
+        "reference_token": "ɐ"
+      },
+      {
+        "count": 214,
+        "hypothesis_id": 57,
+        "hypothesis_token": "ɐ",
+        "reference_id": 2,
+        "reference_token": "a"
+      },
+      {
+        "count": 194,
+        "hypothesis_id": 2,
+        "hypothesis_token": "a",
+        "reference_id": 65,
+        "reference_token": "ə"
+      },
+      {
+        "count": 169,
+        "hypothesis_id": 32,
+        "hypothesis_token": "o",
+        "reference_id": 45,
+        "reference_token": "u"
+      },
+      {
+        "count": 166,
+        "hypothesis_id": 45,
+        "hypothesis_token": "u",
+        "reference_id": 32,
+        "reference_token": "o"
+      },
+      {
+        "count": 157,
+        "hypothesis_id": 55,
+        "hypothesis_token": "ð",
+        "reference_id": 9,
+        "reference_token": "d"
+      },
+      {
+        "count": 152,
+        "hypothesis_id": 45,
+        "hypothesis_token": "u",
+        "reference_id": 57,
+        "reference_token": "ɐ"
+      },
+      {
+        "count": 129,
+        "hypothesis_id": 19,
+        "hypothesis_token": "i",
+        "reference_id": 22,
+        "reference_token": "j"
+      }
+    ],
+    "validation": {
+      "blank_frame_ratio": 0.5262456488248496,
+      "blank_frames": 592320,
+      "deletions": 10394,
+      "errors": 35445,
+      "hypothesis_reference_length_ratio": 0.9853773343290262,
+      "hypothesis_tokens": 365507,
+      "input_frames": 1125558,
+      "insertions": 4970,
+      "phoneme_error_rate": 0.0955568555876969,
+      "reference_tokens": 370931,
+      "sample_count": 8101,
+      "substitutions": 20081
+    },
+    "validation_by_group": {
+      "en": {
+        "blank_frame_ratio": 0.7194587855441714,
+        "blank_frames": 270069,
+        "deletions": 2453,
+        "errors": 16268,
+        "hypothesis_reference_length_ratio": 0.9895110745035457,
+        "hypothesis_tokens": 76886,
+        "input_frames": 375378,
+        "insertions": 1638,
+        "phoneme_error_rate": 0.2093666748175699,
+        "reference_tokens": 77701,
+        "sample_count": 2808,
+        "substitutions": 12177
+      },
+      "es": {
+        "blank_frame_ratio": 0.4832308119480131,
+        "blank_frames": 180997,
+        "deletions": 1747,
+        "errors": 4837,
+        "hypothesis_reference_length_ratio": 0.9937416285621912,
+        "hypothesis_tokens": 129093,
+        "input_frames": 374556,
+        "insertions": 934,
+        "phoneme_error_rate": 0.037234615799116286,
+        "reference_tokens": 129906,
+        "sample_count": 2631,
+        "substitutions": 2156
+      },
+      "pt": {
+        "blank_frame_ratio": 0.376051583498392,
+        "blank_frames": 141254,
+        "deletions": 6194,
+        "errors": 14340,
+        "hypothesis_reference_length_ratio": 0.9767578555509294,
+        "hypothesis_tokens": 159528,
+        "input_frames": 375624,
+        "insertions": 2398,
+        "phoneme_error_rate": 0.08780093556366486,
+        "reference_tokens": 163324,
+        "sample_count": 2662,
+        "substitutions": 5748
+      }
+    },
+    "validation_loss": 0.5018268309468297,
+    "validation_macro_phoneme_error_rate": 0.11146740872678368
+  },
+  "purpose": "old_domain_control_only_not_used_for_training_decisions",
+  "test_set_used": false
+}

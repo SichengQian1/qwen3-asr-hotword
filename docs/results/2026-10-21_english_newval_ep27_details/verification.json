@@ -1,0 +1,316 @@
+{
+  "status": "pass",
+  "received_date": "2026-10-21",
+  "source_bundle_sha256": "6a355eaa84badd6b3937560fa60ab373e7c3b2ab26e4156ad0d1c6035ba1953e",
+  "source_bundle_bytes": 6300,
+  "source_members": {
+    "head/metrics.jsonl": {
+      "sha256": "49ba23b76006fc672fd7521d74285e3185b0317a0cb7ffb7fc716760c7271a35",
+      "bytes": 25584
+    },
+    "old_domain_control.json": {
+      "sha256": "69cb6f4c3dc2baf57e92ce5173f0ffe181ffdcbcf36aa57954bb8e434eb2f0ba",
+      "bytes": 10924
+    },
+    "training_completed.json": {
+      "sha256": "f129d1758a32f443f8a3a36e5fa9329896b22a39d1df17a2a1f9110425c415a4",
+      "bytes": 292
+    }
+  },
+  "report_sha256": "57c44ca7d3cebea5696de607efd2af2bb3b26df231e951afde11b9ee84e90398",
+  "checkpoint_sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+  "declared_plan_sha256": "dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83",
+  "epoch_count": 27,
+  "best_epoch": 27,
+  "early_stop_stale_epochs": 6,
+  "last_significant_macro_improvement_epoch": 21,
+  "significant_macro_improvement_epochs": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    10,
+    13,
+    16,
+    20,
+    21
+  ],
+  "last_six_epochs_macro_improvement": 0.00040816747276117143,
+  "lr_changes_after_epoch": [
+    {
+      "after_epoch": 20,
+      "from": 0.0003,
+      "to": 0.00015
+    },
+    {
+      "after_epoch": 26,
+      "from": 0.00015,
+      "to": 7.5e-05
+    }
+  ],
+  "early_stopping_replay": [
+    {
+      "epoch": 1,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.08397722231836946,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 2,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.07311178032860748,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 3,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06934361594023551,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 4,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06752120442709282,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 5,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06597518739905707,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 6,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06496671639927735,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 7,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.0642844476079312,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 8,
+      "stale_epochs": 1,
+      "patience_reference_macro_per": 0.0642844476079312,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 9,
+      "stale_epochs": 2,
+      "patience_reference_macro_per": 0.0642844476079312,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 10,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06301051554576108,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 11,
+      "stale_epochs": 1,
+      "patience_reference_macro_per": 0.06301051554576108,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 12,
+      "stale_epochs": 2,
+      "patience_reference_macro_per": 0.06301051554576108,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 13,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06208874782912591,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 14,
+      "stale_epochs": 1,
+      "patience_reference_macro_per": 0.06208874782912591,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 15,
+      "stale_epochs": 2,
+      "patience_reference_macro_per": 0.06208874782912591,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 16,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06156854496215694,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 17,
+      "stale_epochs": 1,
+      "patience_reference_macro_per": 0.06156854496215694,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 18,
+      "stale_epochs": 2,
+      "patience_reference_macro_per": 0.06156854496215694,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 19,
+      "stale_epochs": 3,
+      "patience_reference_macro_per": 0.06156854496215694,
+      "significant_improvement": false,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.0003
+    },
+    {
+      "epoch": 20,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.06105157267485386,
+      "significant_improvement": true,
+      "learning_rate_used": 0.0003,
+      "learning_rate_after_scheduler": 0.00015
+    },
+    {
+      "epoch": 21,
+      "stale_epochs": 0,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": true,
+      "learning_rate_used": 0.00015,
+      "learning_rate_after_scheduler": 0.00015
+    },
+    {
+      "epoch": 22,
+      "stale_epochs": 1,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": false,
+      "learning_rate_used": 0.00015,
+      "learning_rate_after_scheduler": 0.00015
+    },
+    {
+      "epoch": 23,
+      "stale_epochs": 2,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": false,
+      "learning_rate_used": 0.00015,
+      "learning_rate_after_scheduler": 0.00015
+    },
+    {
+      "epoch": 24,
+      "stale_epochs": 3,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": false,
+      "learning_rate_used": 0.00015,
+      "learning_rate_after_scheduler": 0.00015
+    },
+    {
+      "epoch": 25,
+      "stale_epochs": 4,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": false,
+      "learning_rate_used": 0.00015,
+      "learning_rate_after_scheduler": 0.00015
+    },
+    {
+      "epoch": 26,
+      "stale_epochs": 5,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": false,
+      "learning_rate_used": 0.00015,
+      "learning_rate_after_scheduler": 7.5e-05
+    },
+    {
+      "epoch": 27,
+      "stale_epochs": 6,
+      "patience_reference_macro_per": 0.060127400337476954,
+      "significant_improvement": false,
+      "learning_rate_used": 7.5e-05,
+      "learning_rate_after_scheduler": 7.5e-05
+    }
+  ],
+  "old_domain_comparison": {
+    "en": {
+      "original_best25_errors": 3039,
+      "reference_tokens": 77701,
+      "original_best25_per": 0.03911146574690159,
+      "best27_old_domain_errors": 16268,
+      "best27_old_domain_per": 0.2093666748175699,
+      "delta_percentage_points": 17.02552090706683
+    },
+    "es": {
+      "original_best25_errors": 4857,
+      "reference_tokens": 129906,
+      "original_best25_per": 0.037388573276061154,
+      "best27_old_domain_errors": 4837,
+      "best27_old_domain_per": 0.037234615799116286,
+      "delta_percentage_points": -0.015395747694486872
+    },
+    "pt": {
+      "original_best25_errors": 14464,
+      "reference_tokens": 163324,
+      "original_best25_per": 0.08856016262153756,
+      "best27_old_domain_errors": 14340,
+      "best27_old_domain_per": 0.08780093556366486,
+      "delta_percentage_points": -0.0759227057872694
+    }
+  },
+  "checks": [
+    "member whitelist and counts",
+    "report/marker/later Head identity agreement",
+    "contiguous epochs 1-27",
+    "all per-epoch ratios/counts",
+    "best/final report agreement",
+    "sum epoch duration",
+    "early-stopping threshold and patience",
+    "loss scheduler and recorded learning rates",
+    "old-domain S/D/I totals and ratios",
+    "ES/PT old/new validation counts and errors identical"
+  ],
+  "limitations": [
+    "No independent model-weight, audio or complete feature-cache byte inspection.",
+    "Plan SHA corroborated with prior metadata; plan file absent.",
+    "The package has no sender checksum manifest; local source hashes are computed here.",
+    "No new model inference, training, retrieval or ASR decoding performed."
+  ]
+}
