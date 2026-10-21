@@ -1,0 +1,18 @@
+{
+  "baseline_run": "outputs/reviewed_joint_4000_retrieval_480h_v1",
+  "training_run": "outputs/english_countries_refresh_newval_v1",
+  "checkpoint": "outputs/english_countries_refresh_newval_v1/head/ctc_head_best.pt",
+  "checkpoint_sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+  "expected_epoch": 27,
+  "expected_epochs_completed": 27,
+  "expected_epochs_requested": 40,
+  "baseline_checkpoint_sha256": "320123fe7a6815d37e9ef4dc042b19a10521e6ce9c00d1a226e22c9e77ba4265",
+  "table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "expected_surfaces": 4000,
+  "datasets": {"en_chile": 2000, "en_colombia": 2000, "en_mexico": 2000},
+  "expected_target_sample_pairs": 4374,
+  "samples_per_dataset": 100,
+  "seed": "english-clean-targets1to3-20261021-v1",
+  "output": "outputs/english_clean_ep27_top7_selection_300_v1"
+}

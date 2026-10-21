@@ -1,5 +1,83 @@
 # 工作交接记录
 
+## 0.177 2026-10-21 干净英语每地区100条、真实目标数1–3、best27 Top7单文件清单（待工区）
+
+用户临时插入下游交付任务，G2P替代验证暂停。已确认使用原干净英语三组各2000条，
+每组只在冻结真实目标数1–3的候选池中抽100条，合计300；使用最终epoch27、完整
+三语4000词索引、整段Top7。下游只需新版sample_selection.json。用户贴出的旧文件
+对应multi_nested_prompt formal100；旧负例/嵌套配额和优先错候选压力选样不继承。
+
+新增scripts/build_english_sample_selection.py、inference/english_sample_selection.py、
+configs/english_sample_selection.workzone.json及8项测试；不修改旧检索、评分、门控、
+训练、模型或outputs。起点本地/跟踪/实际origin的codex/g2p-coverage-scan均为
+a2190945c90417b4b1a8593e44057b4292e9b3a1。原7份测试修改和未知资料保留，不提交。
+
+### 数据、选样和候选口径
+
+- 只读旧封存outputs/reviewed_joint_4000_retrieval_480h_v1的run_config/report、词表
+  快照及发音索引，保留每个英语组的target_ids、2000个ID/参考/干净路径；复算全体
+  6000条目标分母须等于4374。按生产strict_phrase_match匹配冻结目标，重复说同一
+  词只算一个，不用selected_matches数量决定入选，也不从参考重新构造目标词表。
+- 对每组的1–3目标候选统一按seed+source+sample_id的SHA排序取前100，固定seed为
+  english-clean-targets1to3-20261021-v1。1/2/3不另设等额配额；不足100则停止，不补
+  0目标/4目标或按检索命中重选。元数据扫描全部6000条，只对选中300条读取WAV字节，
+  与旧封存SHA核验；不执行全语料字节去重，不声称新增字节/说话人隔离。
+- best27通过既有load_completed_best核对训练完成marker、plan/report、权重、词表和
+  统计，并固定Head SHA872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466。
+  table/vocab完整SHA在新配置中，沿用0.170–0.176；仍搜索全部4000词面/4012发音。
+- 正常只对这300条补跑Encoder→best27 Head→原Anchor Top64→词面合并和门控→Top7。
+  沿用score>=0.75、edit<=0.35、posterior>=0.5，不调参、不跑最终LLM转写或训练。
+  Top7是最多7个合格词面；零候选保留空数组，不补齐、不重选成功音频。
+- 支持显式--reuse-run读取已完成、封存的同Head/同表/同参数/同干净音频整段结果；
+  验证配置、代码SHA、逐样本参考/路径/音频SHA及Top5重放，再精确提取Top7。
+  epoch21、带噪或流式结果不能冒充。当前记录只有epoch21干净6000完成证据，因此
+  默认执行300条新检索，不自动扫描/猜测其他outputs。使用reuse时prepare/run都必须
+  提供同一个路径，使恢复契约一致。
+
+### 单一交付与工区命令
+
+JSON保留samples内case_id/sample_id/audio_path/reference_text/language、expected_*、
+selected_matches及选样原因；候选保留实际hotword_id/surface/score/edit_ratio/
+posterior_confidence。新增source区分地区，case_id全局唯一，原sample_id不改。
+本次primary_group为one_target/two_targets/three_targets，actual_group_counts据实统计；
+不虚构旧嵌套压力分组。containment_expected_ids保留全部冻结命中目标，与expected一致，
+不执行旧人工嵌套集的longest-match删减，redundant_family_ids为空；JSON写明此政策。
+evaluation_scope为external_english_clean_300_target_count_1_to_3、test_set_used=true，
+并内含Head/表/vocab身份、各地区数量、Top7门控和clean条件，不能照抄旧validation标记。
+
+容器内仓库根目录、原Qwen环境执行；分支codex/g2p-coverage-scan，远端SHA见交付回复：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/build_english_sample_selection.py --prepare-only
+python -B scripts/build_english_sample_selection.py --gpu 4 --resume
+```
+
+第一条Python只CPU核验、选样和冻结plan，打印各组可选/选中数量及1/2/3分布，不发布
+带空候选的最终交付。第二条只对选中300条推理并发布JSON；4可换为已分配物理GPU。
+也可以在全新目录省略prepare-only，直接带--gpu一步完成。阶段均有命名、真实计数、
+耗时和10秒活动提示，不估算虚假ETA。中断后沿用第二条恢复已核验分片；完成后恢复
+不再加载Qwen。代码/配置/Head/参考/音频或分片漂移会拒绝，不删除分片绕过。
+
+默认新目录outputs/english_clean_ep27_top7_selection_300_v1，首次拒绝覆盖；所有旧输出
+保留。内部run_config.json、sample_shards、report.json只留工区。唯一交下游文件是：
+
+```text
+outputs/english_clean_ep27_top7_selection_300_v1/sample_selection.json
+```
+
+终端status=completed后确认sample_count=300、三个source各100及delivery_sha256；
+若需本地核验，回传小report.json或终端摘要即可，不要求return_bundle、WAV或权重。
+
+本地19项新/旧入口定向测试通过，全量791 passed（68.14s）；新增8项覆盖真值计数、
+重复词/子串、0/4目标排除、顺序无关的固定抽样、缺额拒绝、每地区配额、只hash选中
+音频、真实Top7与门控/空候选、身份漂移、原资产不变、分片续跑及封存clean复用。
+最新进度/复用代码核验补充后再跑新增测试。新增范围Ruff/strict Mypy、CLI help和
+git diff --check通过；全仓仍有11个既有Ruff、8个既有Mypy问题，未改相关文件。
+本地使用小Head及模拟检索边界；真实300条选择/召回、可用池数量和最终交付SHA待工区，
+不把这些本地测试当成已完成H200检索或ASR质量结果。
+
 ## 0.176 2026-10-21 best27完整曲线与旧域对照核验完成（本轮收尾）
 
 用户返回ep27_details.tar.gz，要求总结后开始下一任务。本次只读核验小包并归档，
