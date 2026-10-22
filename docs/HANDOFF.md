@@ -552,6 +552,13 @@ overall、样本总数、同集差值及最终报告SHA交叉身份，git diff -
 
 ## 0.174 2026-10-21 三语6,800条带噪因果前缀检索完成（终端结果归档）
 
+2026-10-22补充同事使用说明：
+[MULTILINGUAL_HOTWORD_EVALUATION_GUIDE.md](MULTILINGUAL_HOTWORD_EVALUATION_GUIDE.md)。
+集中记录联合4k表/epoch27身份、干净及带噪目录、三类评测入口、恢复和新目录政策、
+Top5/7分母与报告字段、下游交付；区分历史干净Head与最终带噪Head，仅整理已有
+记录，不重跑推理或新增实测。分支codex/g2p-coverage-scan，工区在仓库根目录
+git pull --ff-only origin codex/g2p-coverage-scan后阅读，无需返回新的结果文件。
+
 用户要求归档本次最新终端JSON，并核对前面是否有遗漏结果供讨论。本轮只归档已返回
 数据、复算指标和梳理状态，不重跑推理/训练、不调门控、不改任何outputs。完整终端
 摘要按字段和值保存为docs/results/2026-10-21_multilingual_stream_ep27_noise10db_terminal_summary.json，
