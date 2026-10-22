@@ -1,0 +1,22 @@
+{
+  "manifest": "outputs/english_countries_refresh_fast_v1/frozen/full_ctc_train.jsonl",
+  "manifest_sha256": "10fdbdbbdb8ef352cd7a143b742fd962627b40a98a44d0b54701311f0b94fbfe",
+  "expected_counts": {"en": 263609, "es": 296399, "pt": 321741},
+  "full_comparison_config": "configs/mmservice_g2p_full.workzone.json",
+  "sources": {
+    "en": ["outputs/english_countries_refresh_v1/manifest/build_config.json"],
+    "es": [
+      "outputs/es_ar_full_manifests_v1/slr61/build_config.json",
+      "outputs/es_ar_full_manifests_v1/common_voice_rioplatense_v26/build_config.json",
+      "outputs/es_latam_cv_auxiliary_170h_full_manifest_v1/build_config.json",
+      "outputs/es_noah_mobile_full_manifest_v1/build_config.json"
+    ],
+    "pt": [
+      "outputs/noah_pt_full_500h/build_config.json",
+      "outputs/noah_pt_finance_200h/full_manifest_v1/build_config.json",
+      "outputs/pt_external_train_sources_v1/mls/full_manifest_v1/build_config.json",
+      "outputs/pt_external_train_sources_v1/common_voice/full_manifest_v2_digitguard/build_config.json",
+      "outputs/pt_external_train_sources_v1/fleurs/full_manifest_v2_digitguard/build_config.json"
+    ]
+  }
+}

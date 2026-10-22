@@ -1,5 +1,98 @@
 # 工作交接记录
 
+## 0.181 2026-10-22 联合4k差异分片已核验，扩到实际三语480h训练词汇（待工区）
+
+用户明确本轮“全量”指训练用到的语料。此次是G2P/训练标签差异审计，不是音频热词
+检索，不运行CTC/Encoder/Qwen，不把一致率称为发音准确率、PER、召回率或WER。
+
+### 已返回证据与阶段结论
+
+实际读取Downloads/return_part_001.txt至005.txt，5份编号/总数/包SHA一致，Base64
+还原ZIP为110627字节，SHA
+c44e84a1db30012e6bb907c0d451d294343a184f5c2b7e963dbc3444338868fa。
+5个成员及sha256.txt完整通过，原report SHA
+c3702627672f5449ecd9c22a0f74b8a671a536614a1be19d7779b7425945c47f；
+原清单记录SHA899dce41fe414df03a85a0a8fd76e65b706a35bf85081b9199913bb2c359b117。
+源仍outputs/mmservice_g2p_full_v1_553359315a。保留586案例（EN16/ES539/PT31，
+各含3条对照）及586旧标签逐项用当前90类复算IPA/ID、native/适配/重建标签比较；
+全部difference_flags复算与原report一致。返回720条词结果中703成功raw一致、17双方
+失败；全4209词/4192成功一致仍来自原报告，不能说本地读到了省略的全部成功结果。
+17份本地可用源码/配置/vocab身份匹配，25份工区大资产或证据未在本地，不冒称重读。
+
+- 与旧表标签native不一致：EN13/1640、ES445/1197、PT28/1175；额外现有ES清理后
+  ES剩47，总剩88/4012。EN13是8个含重音/ñ等独立词涉及的词面失败，并非13套不同
+  G2P音素替换；EN填充881全部一致。
+- ES149条原生不可用均含ã导致的未支持组合波浪号，共153处OOV；额外现有ES清理后
+  149全部可用，但不等于全部与旧标签一致。剩47中43条仍不同于项目重建标签，均有
+  替代拼写来源（39 strip_acute、3 enye_via_ni、1二者）；另4条Aeroclub Chañar
+  Ladeado/Carnaval Porteño/Lasaña/entraña是新官方+C++/项目重建相同而旧表不同。
+  新项目参考与适配C++总差44，其中额外1条ñquis已与旧表相同；不要混淆这两个集合。
+  数字策略异常Avenida 9 de Julio也与旧表相同，但双方省略数字不算完整词面正确。
+  不能为追平旧代理标签把原拼写读音硬改回去，真实读音未另行审核。
+- PT28中10词面失败涉及9个连字符词；其余18新官方与C++一致但旧表不同，包含São
+  Paulo旧s a w、新s ɐ̃ w̃等实际鼻化差别，亦有其它元音/辅音不同。旧来源字段为null，
+  不能直接断言全部历史错误来自某一规则。此结果支持扩查训练标签，不是生产替代许可。
+
+### 全量运行范围及比较方法
+
+新增scripts/compare_mmservice_g2p_training.py、phonemes/mmservice_training.py及
+mmservice_training_labels.py、configs/mmservice_g2p_training.workzone.json与测试。
+默认读取最新实际训练的固定清单
+outputs/english_countries_refresh_fast_v1/frozen/full_ctc_train.jsonl，SHA
+10fdbdbbdb8ef352cd7a143b742fd962627b40a98a44d0b54701311f0b94fbfe；
+881749条，EN263609/ES296399/PT321741。仅实际入选的每语种约480h，英语为三国
+新语料，不使用旧Swift英语；不扩大到未入选池或验证/test。
+
+由配置列出的10份原full-manifest build_config.json，绑定其source TSV路径和对应
+MFA dictionary.path（EN1/ES4/PT5）。只读取词典和清单文字，不读取原TSV/WAV；
+不按大多数票合并跨来源同词不同发音。词典可能只有历史size/mtime而无SHA，重新
+记录当前SHA，并逐句重建词典ID与固定训练清单实际ID核对；无法核对的句子明确列
+baseline_not_verified，不从整句音素反猜词边界或把源词典差异归成C++推理错误。
+同一来源TSV不允许多份build配置静默覆盖；找不到对应build/源词典则明确停止。
+
+项目extract_word_tokens先NFC/casefold分词，按语种去重后分别调用原C++默认输出；
+这测的是规范单词输入，不证明C++对原始整句前处理完全等价。只生成诊断输出，不改
+词典、90类、门控或检索；本轮不重新跑官方MFA。对照为已有生产MFA标签兼容性，
+不是新一轮同输入官方核心算法对照。后者若有需要只针对返回的差异词另做控制实验。
+
+分别给出native与existing_es_cleanup两支：逐source×word标签对、按词出现次数
+加权（重复词计多次）、句子整体ID相等/不同/不可用。词统计参照不可用单列，不计入
+有效参照差异率；word_reference_attribution_verified只有该语种全部句子的词典重建
+均与实际训练标签相等才为true。句子直接对实际ID比较，并另列baseline_verified各类，
+避免把未经验证的词典归属解释成已确认的训练词标签。PT不套ES去鼻化。
+
+### 工区命令、输出与回传
+
+修改前本地/远端均c669e30ffb9530b59825b7474f65dc8c961cbbdf，其相对e319aa6仅为
+说明文档更新，已保留。分支codex/g2p-coverage-scan，推送SHA见本轮回复；原7份测试
+修改及未跟踪资料不改。在容器仓库根目录使用既有aligner（pynini/OpenFST），无GPU：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+conda run --no-capture-output -n aligner python -B scripts/compare_mmservice_g2p_training.py
+```
+
+默认新建outputs/mmservice_g2p_training_<随机后缀>，--output-dir只可指定新且不与
+输入目录嵌套的目录；不改旧输出，无resume，失败后保留诊断，新目录重试。预检
+失败不建目录；缺路径或源归属错误只返回报错，不猜字典。--timeout默认7200秒/语种
+C++子进程；命名阶段、扫描实际完成数/881749、C++实际已写词数、10秒活动提示，
+超时/Ctrl+C沿用已测进程组清理。词典转换/模型检查是CPU工作，不读取完整Qwen。
+
+完整report.json、words.jsonl（全部源词对，含发音/ID/频次/来源）、samples.jsonl
+（每句ID、语种、源、重建核对及两支状态）、分语种words.txt/C++输出/日志保留新目录。
+回传return_summary.zip即可：report、按实际词频优先的每语种/分支最多20条差异示例、
+完整逐词/逐句文件SHA及包成员清单；不包含大逐样本文件、FST、权重、音频或缓存。
+同时生成每份<=32768字节的return_part_NNN.txt，可像本次一样回传全部编号TXT，
+不必另外传ZIP。工区真实差异数尚待运行，本地测试不作为全量结果。
+
+本地新增7项训练审计测试，连同既有G2P测试44项通过；全量835 passed（136.61s）。
+覆盖实际训练词域/词频分母、同词多来源不同标签不合并、ES适配/PT鼻化、源字典与
+实际ID不符时单列、缺路径/身份漂移/test输入/未知TSV来源拒绝、C++失败保留小摘要、
+原文件不变及小包/分片校验。原生FST/C++用mock，不声称H200实测。新增模块/脚本/
+测试Ruff、Python3.10严格Mypy（follow-imports=silent）、CLI help、3.10语法及
+git diff --check通过；未改原全表审计代码或处理无关全局lint/typing问题。
+
 ## 0.180 2026-10-22 G2P项目规则小测已核验，联合4k终端返回、精简证据待核验
 
 用户回传outputs/mmservice_g2p_pipeline_v1_07b51fbf3a对应return_bundle(4).zip，
