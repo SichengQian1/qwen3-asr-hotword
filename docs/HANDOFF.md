@@ -1,5 +1,90 @@
 # 工作交接记录
 
+## 0.180 2026-10-22 G2P项目规则小测已核验，扩到现用联合4k全部4012变体（待工区）
+
+用户回传outputs/mmservice_g2p_pipeline_v1_07b51fbf3a对应return_bundle(4).zip，
+包SHA12d51a06d807cdec2780b411a1c848207121a373345ea1742e1ea1939d7d2006。
+52项小证据校验及逐项ID/统计复算通过，代码/配置/vocab身份与bce9d21交付相符。
+
+- 官方西语同FST/字符表只切换unicode_decomposition：True为3/8成功，False为8/8，
+  默认True完整复现原MFA；内嵌与外部字符表的283个符号ID全部相同。原5个缺词在
+  True下均无未知metadata字符，但发生Composition failure；False全部恢复。此结论
+  限于MFA3.4.0与这份固定西语模型，不泛化成所有MFA版本/模型错误。
+- 将False的8个孤立词结果按9个原surface词序拼接，和C++raw逐项9/9一致。对比
+  现用代理修复规则则native5/9、额外ES清理后7/9：pingüino的ĩ/i、San José的ã/a
+  是既有ES鼻化清理差异。剩余2项是同一alegría的NFC/NFD输入，旧代理alegria输出
+  a l e ɣ ɾ j a，保留原拼写的官方False及C++均为a l e ɣ ɾ i a。不能以旧代理标签
+  为绝对真值强改C++；真实读音仍需审核。EN8个普通输入一致，ﬁre/数字策略差异仍在；
+  PT8/8一致。小测未证明全词表替代或发音准确率，也没有改生产规则/标签。
+
+### 扩测范围与参照层
+
+用户明确选择“现用三语联合4000热词表”，不是训练语料全量词典。新增
+scripts/compare_mmservice_g2p_full.py、phonemes/mmservice_full.py、
+mmservice_rewriter.py、mmservice_process.py及配置/测试。冻结源仍为
+outputs/reviewed_joint_4000_retrieval_480h_v1/reviewed_keyword_table.json，SHA
+6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b；4000唯一词面，
+4012 retained发音变体，目标/填充、跨语言同形词、同词多发音全部保留。核验源封存
+report/清单、expanded_table_sha256及变体pronunciation与90类ID一致性。三套ZIP、
+vocab仍固定旧SHA；x86二进制仍为outputs/mm_g2p_x86_2LrhDuRR/mmservice_g2p，
+SHA d6596db29acec77bee00df8fb999e2e2352d3d9f0acc3067c0e324be3c98f094，
+另核验7份编译源码/Makefile。原C++、原小测代码和全部既有outputs均不改。
+
+实际比较分为以下参照，报告中不得混用分母或命名：
+
+1. word_engine：项目分词的同一唯一词，官方重写算法与C++raw用同一原FST、内嵌
+   输入字符表/Unicode模式及phones.sym；官方侧明确不做metadata字符过滤或NFKD。
+   C++仍保留自身前处理；这里只固定提交词，没有直接观察其内部token，word差异
+   不能直接判为纯推理核心缺陷。官方算法用原MFA3.4.0类，内存绑定符号，不改磁盘。
+   记录官方/C++各自成功、raw/ID一致和双方失败；双方失败不算一致。原CLI默认的
+   字符清理/分解另做一层，不把算法控制支路说成未修改的官方默认策略。
+2. official_default与project_rules：三语各自正常MFA CLI Top1，记录缺词、额外输出
+   key、歧义，按原词序组装；西语再调用现有prepare/finalize缺词代理及发音清理，
+   保存代理计划/原始发音/规则出处。新结果只写诊断目录，不替换训练词典或热词表。
+3. saved_table：直接比较4012份已存标签；同时统计每个语言×规范词面是否所有输入
+   形式都命中至少一个原有变体，避免把另一个合法发音计作整词失败。逐变体、原始
+   输入、语言×规范词面分母分开；target/filler分开统计。表标签是兼容参照而非读音真值。
+4. adapter：C++默认输出额外应用“已有ES清理”的结果单列，PT鼻化保留，不能把该
+   适配支路当成native。保存raw和final两次C++surface结果，还直接核对其IPA后处理
+   与Python字符串规范化是否一致，避免共享ID转换再次规范化掩盖差异。
+
+词面/唯一词推理可复用同一输入，审计仍保留全部发音变体索引与来源。数字/空词生成
+策略的拒绝和已有标签比较分别记录，不能用删除数字后的输出冒充完整热词读音。
+不读取音频/Encoder/Head/Qwen、不测检索召回或最终WER，不修改90类/门控/检索。
+
+### 工区执行、进度与回传
+
+本地及核实远端起点bce9d21bfb94aa125f0fc62f8db887d3c25c02a0，分支
+codex/g2p-coverage-scan；原7份测试修改及未跟踪资料保留。推送SHA见交付回复。
+容器内仓库根目录，使用已有aligner，不需GPU或重新编译：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+conda run --no-capture-output -n aligner python -B scripts/compare_mmservice_g2p_full.py
+```
+
+默认新建outputs/mmservice_g2p_full_v1_<随机后缀>，可用--output-dir指定新目录；
+拒绝已有目录，无resume。中断/失败保留诊断，重试使用新目录，不删除旧输出。
+--jobs默认1，--timeout默认1800秒/子进程。命名阶段+10秒活动提示；C++显示真实
+已写JSONL行数，官方同输入worker每100词显示实际计数，MFA stdout实时转发且完整
+stderr留日志。超时或Ctrl+C会终止该子进程组，避免后台孤儿进程；执行中断尽量封存
+failed报告及日志包，预检失败不创建目录。耗时含启动/加载，不宣称线上加速倍数。
+
+回传新目录return_bundle.zip与终端摘要。包内report.json、input_inventory.jsonl、
+case_comparison.jsonl、word_engine_comparison.jsonl、differences.tsv、各语种词表/
+C++输出/官方同输入及默认dict/ES代理与修复dict/日志和sha256.txt；不含模型FST、
+ZIP、MFA缓存或音频。可在新目录运行sha256sum --quiet -c sha256.txt复核。
+replacement_verified仍为false；本次全表实测结果尚未返回，不把本地夹具结果当成
+实际三语一致率。正式训练词典全量扫描不在本轮范围内。
+
+本地新增15项测试与既有18项G2P测试共33项通过，全量824 passed（130.56s）。覆盖
+跨语同形词/多发音全部保留、逐变体与任一变体分母、ES代理来源/PT鼻化、身份漂移、
+空结果/双方失败、子进程失败/超时/中断和原始证据保护；实际子进程超时与中断清理
+有本地测试，MFA/原生FST和C++推理明确使用夹具，不宣称工区4k结果。新增代码Ruff、
+Python3.10严格Mypy、CLI help、3.10语法及git diff --check通过。全仓仍有原Ruff11项，
+全局Mypy仍先被NumPy类型桩与项目3.10目标不兼容阻断，未修无关文件或环境。
+
 ## 0.179 2026-10-22 G2P小测回传核验、项目规则与C++原生输出分层对照（新实验待工区）
 
 用户回传return_bundle(3).zip，包SHA为

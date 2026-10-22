@@ -1,0 +1,9 @@
+{
+  "table_config": "configs/joint_4000_mfa.workzone.json",
+  "table_config_sha256": "2a8d46e7b99e782c88f73176aae9531d93b217714f9f680697dc6a700b6c3d90",
+  "cpp_config": "configs/mmservice_g2p_smoke.workzone.json",
+  "cpp_config_sha256": "f0ca4d3996378ed0dee9b49bcc46dd819f8d717997ba76482a443f30c2ef9c01",
+  "binary": "outputs/mm_g2p_x86_2LrhDuRR/mmservice_g2p",
+  "binary_sha256": "d6596db29acec77bee00df8fb999e2e2352d3d9f0acc3067c0e324be3c98f094",
+  "expected_variants": 4012
+}
