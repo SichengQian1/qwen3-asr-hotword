@@ -1,6 +1,6 @@
 # 工作交接记录
 
-## 0.180 2026-10-22 G2P项目规则小测已核验，扩到现用联合4k全部4012变体（待工区）
+## 0.180 2026-10-22 G2P项目规则小测已核验，联合4k终端返回、精简证据待核验
 
 用户回传outputs/mmservice_g2p_pipeline_v1_07b51fbf3a对应return_bundle(4).zip，
 包SHA12d51a06d807cdec2780b411a1c848207121a373345ea1742e1ea1939d7d2006。
@@ -75,8 +75,48 @@ failed报告及日志包，预检失败不创建目录。耗时含启动/加载�
 case_comparison.jsonl、word_engine_comparison.jsonl、differences.tsv、各语种词表/
 C++输出/官方同输入及默认dict/ES代理与修复dict/日志和sha256.txt；不含模型FST、
 ZIP、MFA缓存或音频。可在新目录运行sha256sum --quiet -c sha256.txt复核。
-replacement_verified仍为false；本次全表实测结果尚未返回，不把本地夹具结果当成
-实际三语一致率。正式训练词典全量扫描不在本轮范围内。
+replacement_verified仍为false；正式训练词典全量扫描不在本轮范围内。
+
+用户随后返回outputs/mmservice_g2p_full_v1_553359315a终端completed摘要，尚未返回
+实际report/逐词文件。终端称：语言×词输入4209，双方成功4192且raw全一致、双方失败
+17（不算一致）；已存标签native一致EN1627/1640、ES752/1197、PT1147/1175，额外
+ES清理后ES1150/1197。PT新官方/C++成功1165全一致，但仅1147匹配旧标签，需查18条
+旧标签差异；另10条失败。ES有1条策略阻断却被C++接受，不能并入合格输入一致率。
+以上只据终端，不能宣称本地独立核验、真实发音正确率或已经可替代。
+
+### 大包无法回传时：只打包已有差异，不重跑G2P
+
+用户反馈return_bundle.zip约900多KB无法传回。新增
+scripts/package_mmservice_g2p_result.py及phonemes/mmservice_compact.py；保留全部
+带difference_flags或额外ES清理后仍有旧变体不一致的案例，另取每语种最多3条无差异
+对照；保留这些案例的全部旧标签/变体来源、组成词官方/C++结果，以及全部raw不一致
+或失败词。原report按字节原样保留，不含过程日志和无关成功案例。
+
+仅读取原sha256.txt及四份report/inventory/case/word证据，按原SHA核验这四份文件、
+从完整记录复算总计及分语种计数，生成后再核验原文件未变。不会重新读取模型、二进制、
+原始音频或重新推理；模型/代码身份是原report中的记录，不冒称重新验证实物。
+分支codex/g2p-coverage-scan，修改前本地/远端均548a81c3e5749c252cfe895ec5c275955c957da6，
+原7份测试修改和未跟踪资料保留。推送SHA见本次回复。容器内仓库根目录执行：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/package_mmservice_g2p_result.py outputs/mmservice_g2p_full_v1_553359315a
+```
+
+不需要aligner或GPU。默认另建同级outputs/mmservice_g2p_compact_<随机后缀>，不改原
+目录/return_bundle；拒绝已有或与原目录嵌套的输出，无resume，失败重试用新目录。
+命名阶段及10秒活动提示。打印return_compact.zip实际字节数/SHA和所有文本分片路径；
+每份return_part_NNN.txt默认不超过32768字节，可用--part-kib调小（最小4）。
+回传精简ZIP，或回传全部编号TXT（二选一）。TXT首行含包SHA及分片编号，余下Base64
+按编号拼接后可恢复ZIP；用户无需手动还原。包内sha256.txt核对精简成员，
+compact_report.json记录原证据SHA、选择范围、计数复核及省略项。实际压缩大小/分片数
+须以工区打印为准，不用本地合成夹具估计实测大小。
+
+精简回传另补4项测试，连同既有G2P测试37项通过：覆盖差异/变体标签保留、多分片按
+编号还原与字节上限、原文件不变、证据SHA或计数异常及嵌套输出拒绝。新增脚本/模块
+Ruff、Python3.10严格Mypy（follow-imports=silent）、CLI help及3.10语法检查通过；
+全量828 passed（132.84s），git diff --check通过。原推理与封存身份代码未改。
 
 本地新增15项测试与既有18项G2P测试共33项通过，全量824 passed（130.56s）。覆盖
 跨语同形词/多发音全部保留、逐变体与任一变体分母、ES代理来源/PT鼻化、身份漂移、

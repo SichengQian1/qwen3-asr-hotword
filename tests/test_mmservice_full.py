@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import sys
@@ -11,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from qwen_hotword.evaluation.wave_keywords import _key
+from qwen_hotword.phonemes import mmservice_compact as compact
 from qwen_hotword.phonemes import mmservice_full as full
 from qwen_hotword.phonemes import mmservice_process as process_module
 from qwen_hotword.phonemes import mmservice_rewriter as worker
@@ -458,3 +461,68 @@ def test_exact_worker_uses_same_tokens_and_symbols_no_metadata_filter(
     rows = [json.loads(s) for s in (tmp_path / "out/words.jsonl").read_text().splitlines()]
     assert rows[0]["input"] == "á" and rows[1]["status"] == "error"
     assert all(full._sha(p) == digest for p, digest in before.items())
+
+
+def test_compact_evidence_retains_differences_labels_and_reassembles_bounded_parts(setup):
+    c = setup
+    full.run(c.root, c.config, c.output, mfa="mfa", runner=c.runner, inspector=c.inspector)
+    before = {p: full._sha(p) for p in c.output.rglob("*") if p.is_file()}
+    calls = len(c.calls)
+    result = compact.package(c.output, c.root / "compact", part_kib=4)
+    assert result["status"] == "completed" and result["inference_rerun"] is False
+    assert len(c.calls) == calls
+    archive = Path(result["return_file"])
+    assert len(result["text_parts"]) > 1
+    pieces = []
+    for index, part in enumerate(result["text_parts"], start=1):
+        path = Path(part["path"])
+        assert path.stat().st_size <= 4096 and full._sha(path) == part["sha256"]
+        header, payload = path.read_text().splitlines()
+        assert json.loads(header)["part"] == index
+        pieces.append(payload)
+    assert base64.b64decode("".join(pieces), validate=True) == archive.read_bytes()
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == result["zip_sha256"]
+    with zipfile.ZipFile(archive) as handle:
+        assert handle.read("report.json") == (c.output / "report.json").read_bytes()
+        for line in handle.read("sha256.txt").decode().splitlines():
+            digest, name = line.split(maxsplit=1)
+            assert hashlib.sha256(handle.read(name)).hexdigest() == digest
+        cases = [json.loads(s) for s in handle.read("cases.jsonl").decode().splitlines()]
+        saved = [json.loads(s) for s in handle.read("saved_labels.jsonl").decode().splitlines()]
+        original = compact._rows(c.output / "case_comparison.jsonl")
+        expected = {(r["language"], r["surface"]) for r in original if r["difference_flags"]}
+        assert expected <= {(r["language"], r["surface"]) for r in cases}
+        assert {v["variant_index"] for r in cases for v in r["saved_variants"]} == {
+            r["variant_index"] for r in saved
+        }
+        assert not any("model" in name or name.endswith(".log") for name in handle.namelist())
+    assert all(full._sha(p) == digest for p, digest in before.items())
+    with pytest.raises(ValueError, match="new output"):
+        compact.package(c.output, archive.parent)
+
+
+@pytest.mark.parametrize("kind", ["hash", "counts", "inside_source"])
+def test_compact_rejects_changed_evidence_or_unsafe_destination(setup, kind):
+    c = setup
+    full.run(c.root, c.config, c.output, mfa="mfa", runner=c.runner, inspector=c.inspector)
+    destination = c.root / "compact"
+    if kind == "hash":
+        with (c.output / "case_comparison.jsonl").open("a") as handle:
+            handle.write("{}\n")
+    elif kind == "counts":
+        report = json.loads((c.output / "report.json").read_text())
+        report["totals"]["cpp_ok"] += 1
+        save(c.output / "report.json", report)
+        manifest = c.output / "sha256.txt"
+        entries = [line.split(maxsplit=1) for line in manifest.read_text().splitlines()]
+        manifest.write_text(
+            "".join(
+                f"{full._sha(c.output / name)}  {name}\n"
+                for _, name in entries
+            )
+        )
+    else:
+        destination = c.output / "compact"
+    with pytest.raises(ValueError):
+        compact.package(c.output, destination)
+    assert not destination.exists()
