@@ -33,10 +33,18 @@ def rows(path: Path) -> Iterator[dict[str, Any]]:
             yield row
 
 
-def source_key(value: str) -> str:
-    if not isinstance(value, str) or not Path(value).is_absolute() or ".." in Path(value).parts:
-        raise ValueError(f"absolute source TSV path required: {value}")
-    return os.path.normpath(value)
+def source_key(value: str, root: Path) -> str:
+    """Join historical repository-relative provenance lexically, without filesystem IO."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or not Path(value).parts
+        or ".." in Path(value).parts
+        or not root.is_absolute()
+    ):
+        raise ValueError(f"absolute or repository-relative source TSV path required: {value}")
+    return os.path.normpath(str(root / value))
 
 
 def sample(row: dict[str, Any], vocab_size: int) -> tuple[str, list[str], list[int]]:
@@ -72,7 +80,12 @@ def dictionary_labels(path: Path, vocab: PhonemeVocab) -> dict[str, dict[str, An
 
 
 def inventory(
-    manifest: Path, sources: dict[str, dict[str, Any]], vocab: PhonemeVocab, total: int
+    manifest: Path,
+    sources: dict[str, dict[str, Any]],
+    vocab: PhonemeVocab,
+    total: int,
+    *,
+    root: Path,
 ) -> dict[str, Any]:
     frequencies: Counter[tuple[str, str]] = Counter()
     stats: dict[str, Counter[str]] = defaultdict(Counter)
@@ -82,12 +95,17 @@ def inventory(
     ) as update:
         for number, row in enumerate(rows(manifest), 1):
             lang, words, stored = sample(row, len(vocab.tokens))
-            key = source_key(row["source_tsv"])
+            key = source_key(row["source_tsv"], root)
             if key not in sources or sources[key]["language"] != lang:
                 raise ValueError(f"training source TSV has no same-language build config: {key}")
             source = sources[key]
             metrics = stats[lang]
             metrics["samples"] += 1
+            metrics[
+                "source_tsv_absolute_samples"
+                if Path(row["source_tsv"]).is_absolute()
+                else "source_tsv_repository_relative_samples"
+            ] += 1
             metrics["word_tokens"] += len(words)
             labels = [source["labels"].get(word) for word in words]
             ready = all(label is not None and label["usable"] for label in labels)
@@ -198,6 +216,8 @@ def sentence_effect(
     vocab: PhonemeVocab,
     total: int,
     output: Path,
+    *,
+    root: Path,
 ) -> dict[str, Any]:
     metrics: dict[str, Any] = {
         lang: {"samples": 0, "hours": 0.0, "native": Counter(), "existing_es_cleanup": Counter()}
@@ -211,7 +231,7 @@ def sentence_effect(
     ):
         for number, row in enumerate(rows(manifest), 1):
             lang, words, stored = sample(row, len(vocab.tokens))
-            key = source_key(row["source_tsv"])
+            key = source_key(row["source_tsv"], root)
             reference = [sources[key]["labels"].get(word) for word in words]
             valid = all(r is not None and r["usable"] for r in reference)
             verified = valid and [i for r in reference if r for i in r["token_ids"]] == stored

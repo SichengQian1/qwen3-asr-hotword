@@ -77,7 +77,7 @@ def run(
             for relative in paths:
                 build_path = _checked(root / relative, identities)
                 build = _read(build_path)
-                key = source_key(build["tsv"]["path"])
+                key = source_key(build["tsv"]["path"], root)
                 if key in sources:
                     raise ValueError(f"duplicate source TSV build configuration: {key}")
                 # Historical build configs can have size/mtime only. Do not claim they
@@ -126,6 +126,9 @@ def run(
         "test_set_used": False,
         "official_g2p_rerun": False,
         "ctc_or_dictionary_modified": False,
+        "source_tsv_root": str(root),
+        "source_tsv_path_policy": "absolute paths retained; relative paths joined to explicit "
+        "repository root; lexical normalization only, no source TSV stat/read/resolve",
         "replacement_verified": False,
         "reference": "existing source-specific MFA dictionaries; validated against ACTUAL frozen "
         "sentence labels; no majority merging of different source pronunciations",
@@ -147,7 +150,7 @@ def run(
     examples: list[dict[str, Any]] = []
     try:
         total = sum(cfg["expected_counts"].values())
-        data = inventory(manifest, sources, vocab, total)
+        data = inventory(manifest, sources, vocab, total, root=root)
         frequencies = data["frequencies"]
         if {k: v["samples"] for k, v in data["stats"].items()} != cfg["expected_counts"]:
             raise ValueError("per-language frozen training counts differ")
@@ -204,7 +207,7 @@ def run(
                     sources[source]["language"] == lang for source, _ in frequencies
                 )
         sentences = sentence_effect(
-            manifest, sources, decoded, vocab, total, output / "samples.jsonl"
+            manifest, sources, decoded, vocab, total, output / "samples.jsonl", root=root
         )
         for lang in LANGUAGES:
             report["by_language"][lang]["sentence_label_comparison"] = sentences[lang]

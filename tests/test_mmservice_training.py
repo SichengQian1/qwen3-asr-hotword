@@ -12,6 +12,7 @@ import pytest
 from qwen_hotword.phonemes import mmservice_training as training
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab, tokenize_ipa_to_vocab
 from qwen_hotword.phonemes.mmservice_smoke import _sha
+from qwen_hotword.phonemes.mmservice_training_labels import source_key
 
 VOCAB = Path("configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json").resolve()
 
@@ -258,3 +259,58 @@ def test_failed_cpp_stops_with_small_failure_summary(audit):
     result = execute(audit)
     assert result["status"] == "failed"
     assert Path(result["return_file"]).is_file()
+
+
+@pytest.mark.parametrize("relative_build", [False, True])
+def test_mixed_absolute_and_relative_source_paths_use_explicit_root(
+    audit, monkeypatch, relative_build
+):
+    # The actual work-zone failure used this relative historical source spelling.
+    relative = "outputs/es_ar_train_sources_v1/slr61/source.tsv"
+    absolute = str(audit.root / relative)
+    audit.records[3]["source_tsv"] = relative
+    spanish_build = Path(audit.builds["es"][0])
+    build = json.loads(spanish_build.read_text())
+    build["tsv"]["path"] = relative if relative_build else absolute
+    save(spanish_build, build)
+    # Two spellings of one English source must retain ONE source-word label pair.
+    audit.records[0]["source_tsv"] = "first/source.tsv"
+    audit.manifest.write_text("".join(json.dumps(r) + "\n" for r in audit.records))
+    config = json.loads(audit.config.read_text())
+    config["manifest_sha256"] = _sha(audit.manifest)
+    save(audit.config, config)
+    before = {p: _sha(p) for p in audit.root.rglob("*") if p.is_file()}
+    elsewhere = audit.root / "unrelated_cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    result = execute(audit)
+    assert result["status"] == "completed" and len(audit.calls) == 3
+    es = result["by_language"]["es"]
+    assert es["source_tsv_repository_relative_samples"] == 1
+    assert es["baseline_reconstructed_equal"] == 1
+    assert es["sentence_label_comparison"]["existing_es_cleanup"]["equal"] == 1
+    en = result["by_language"]["en"]
+    assert en["source_word_pairs"] == 3 and en["word_tokens"] == 4
+    assert en["sentence_label_comparison"]["native"]["different"] == 1
+    rows = [json.loads(s) for s in (audit.output / "words.jsonl").read_text().splitlines()]
+    assert {r["source_tsv"] for r in rows if r["language"] == "es"} == {absolute}
+    assert all(_sha(p) == digest for p, digest in before.items())
+    assert not Path(absolute).exists()  # provenance is matched without touching the source TSV
+
+
+@pytest.mark.parametrize(
+    "value", ["", ".", "../outside.tsv", "outputs/../outside.tsv", "/a/../b", "a\x00b"]
+)
+def test_invalid_source_path_still_rejected(value, tmp_path):
+    with pytest.raises(ValueError):
+        source_key(value, tmp_path)
+
+
+def test_relative_source_aliases_cannot_silently_override_a_build(audit):
+    build_path = Path(audit.builds["en"][1])
+    build = json.loads(build_path.read_text())
+    build["tsv"]["path"] = "first/source.tsv"
+    save(build_path, build)
+    with pytest.raises(ValueError, match="duplicate source TSV"):
+        execute(audit)
+    assert not audit.output.exists() and not audit.calls

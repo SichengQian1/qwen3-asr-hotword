@@ -49,6 +49,10 @@ MFA dictionary.path（EN1/ES4/PT5）。只读取词典和清单文字，不读�
 记录当前SHA，并逐句重建词典ID与固定训练清单实际ID核对；无法核对的句子明确列
 baseline_not_verified，不从整句音素反猜词边界或把源词典差异归成C++推理错误。
 同一来源TSV不允许多份build配置静默覆盖；找不到对应build/源词典则明确停止。
+历史训练清单source_tsv可为仓库相对路径，build_config常为绝对路径；两处统一按
+显式仓库root作纯字符串拼接/规范化，不按当前cwd或Manifest父目录、不对TSV做
+stat/read/resolve。清单扫描和整句比较共用这一规则，原清单字节/SHA不变；每语种
+记录source_tsv_absolute_samples与source_tsv_repository_relative_samples。
 
 项目extract_word_tokens先NFC/casefold分词，按语种去重后分别调用原C++默认输出；
 这测的是规范单词输入，不证明C++对原始整句前处理完全等价。只生成诊断输出，不改
@@ -79,6 +83,11 @@ conda run --no-capture-output -n aligner python -B scripts/compare_mmservice_g2p
 C++子进程；命名阶段、扫描实际完成数/881749、C++实际已写词数、10秒活动提示，
 超时/Ctrl+C沿用已测进程组清理。词典转换/模型检查是CPU工作，不读取完整Qwen。
 
+首次工区outputs/mmservice_g2p_training_2a281eb184在清单扫描起始因旧版误要求
+source_tsv绝对路径而失败（相对值outputs/es_ar_train_sources_v1/slr61/source.tsv）。
+10份词典预检完成11.3秒，尚无C++推理结果，by_language为空；不是词典/训练标签
+差异结论。修正后保留该失败目录，拉取并原命令重跑，自动新建目录，无需回传失败包。
+
 完整report.json、words.jsonl（全部源词对，含发音/ID/频次/来源）、samples.jsonl
 （每句ID、语种、源、重建核对及两支状态）、分语种words.txt/C++输出/日志保留新目录。
 回传return_summary.zip即可：report、按实际词频优先的每语种/分支最多20条差异示例、
@@ -92,6 +101,10 @@ C++子进程；命名阶段、扫描实际完成数/881749、C++实际已写词�
 原文件不变及小包/分片校验。原生FST/C++用mock，不声称H200实测。新增模块/脚本/
 测试Ruff、Python3.10严格Mypy（follow-imports=silent）、CLI help、3.10语法及
 git diff --check通过；未改原全表审计代码或处理无关全局lint/typing问题。
+路径兼容另补9项回归，覆盖真实相对路径、build/清单绝对相对混用、改变cwd仍按显式
+root关联、整句阶段同规则、词频不拆组、原文件不变及重复归属/非法路径仍拒绝。
+修正后相关G2P测试53 passed，全量844 passed（135.39s），新增/改动代码Ruff、
+严格Mypy、CLI help、Python3.10语法及git diff --check通过；工区重跑结果仍待返回。
 
 ## 0.180 2026-10-22 G2P项目规则小测已核验，联合4k终端返回、精简证据待核验
 
