@@ -1,5 +1,64 @@
 # 工作交接记录
 
+## 0.184 2026-10-23 最新联合4k带噪三语时延差异：只读逐前缀归因入口（待工区）
+
+用户观察英语约15ms、西葡约40–50ms，并明确指英语三国6000条、西葡wave1–4各400条
+带噪音频、同一最新三语联合4000词表；不是0.75的9月单语formal100结果。当前相关
+已归档主运行是0.174的epoch27/noise10db/same-step。该轮只返回总耗时摘要，本地没有
+prefix_shards原件，不能把代码推断或本地合成CPU结果称为真实三语耗时归因。
+
+源码核对：三语检索相同联合索引，无按语言选择快速算法的分支。Top64只限制精排
+条目数，不能限制截断前的postings/offset聚合。精排对每个候选检查随其音素长度
+变化的窗口、重复调用编辑距离和后验求和；Top64相同不保证工作量相同。
+原始整段/前缀入口external._retrieve_waveform不显式禁GC，而旧streaming
+CumulativeAudioCtcDetector.__call__在Anchor/精排期间禁GC；两条入口不可混用时延。
+编辑距离有RapidFuzz/Python回退，当前环境不能替代历史运行后端证据。
+
+新增scripts/diagnose_joint_retrieval_latency.py、evaluation/joint_latency.py和独立测试。
+仅读取已封存run_config/report/prefix_shards及固定词表/index；不读音频、模型或权重，
+不重新生成CTC、不重放检索、不改90类/标签/门控/生产实现和任何旧outputs。
+逐项核对源sha256清单及prefix内部摘要、音频声明SHA/累计截止点、逐样本完整步数、
+完整三语覆盖、固定表SHA与原运行声明index SHA。缺失阶段计时、残缺Top64、重复/缺失
+前缀及错表立即失败，不静默补0或将Top5当完整候选。
+
+输出分语种decode/Anchor/rerank/sort/gate/merge及纯检索Mean/P50/P95/P99/max；阶段占比
+用各阶段累计时间/纯检索累计时间，不相减P95。对照prefix时长、decoded长度、postings、
+实际发音候选数及候选音素长度；保留同2秒累计时长桶、分数据组、每语种最慢5步。
+全部前缀与每条音频最后一步分开汇总，不把6000个样本和累计前缀查询混用。相关性与
+分桶只是描述，语言仍和来源/序列/候选内容/CPU负载混杂，不自动宣布因果或调整阈值。
+
+分支codex/g2p-coverage-scan，初始HEAD为7b6fea695ff933973e419e0f3c60d2fc352c9cb9；
+并行文档交付后起点为df9e0ba4f94b0eb5133abbd30e74f5830e07f4fc，完整保留0.183。
+本轮仅四个上述诊断/测试/交接文件；原7份测试修改及未跟踪资料保留。推送SHA见回复。
+工区在原Qwen运行环境执行，不用GPU，不切到aligner、不安装依赖：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/diagnose_joint_retrieval_latency.py
+```
+
+默认源outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step，固定资产源
+outputs/reviewed_joint_4000_retrieval_480h_v1；若同一评测另存目录，只改
+--run outputs/实际已完成目录，不能指向下游ASR报告或其他格式。默认自动生成
+outputs/joint_retrieval_latency_<随机后缀>。--output-dir只允许新且与源分离的目录，
+不提供resume；预检/统计失败不生成输出目录，重试仍新目录，不删除任何旧结果。
+每1000个文件显示实际完成数，另有10秒活动提示。当前环境的Python/编辑距离后端
+仅标inspection_environment_only，不反推历史运行依赖或GC状态。
+
+成功仅返回新目录return_bundle.zip（report.json、summary.json、sha256.txt）及终端
+summary即可，不回传旧prefix全量、音频、模型或缓存。不需要重跑6800条推理。
+核验新摘要：
+
+```bash
+python -m json.tool outputs/实际诊断目录/summary.json
+(cd outputs/实际诊断目录 && sha256sum --quiet -c sha256.txt)
+```
+
+本地独立诊断测试12 passed；新增三份Python文件Ruff、两份实现严格Mypy、CLI help、
+Python3.10语法及git diff --check通过。没有改运行链路，不重复全仓训练/推理测试。
+这些检查只证明诊断逻辑，不是H200耗时结论，真实归因仍待上面的小包。
+
 ## 0.183 2026-10-23 需求收敛：交付三类现有西语差异，不继续根因实验
 
 用户因时间限制中断进一步历史归因，改为简版分类说明＋各类完整标签明细，交同事处理。
