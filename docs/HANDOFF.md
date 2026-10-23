@@ -1,5 +1,31 @@
 # 工作交接记录
 
+## 0.183 2026-10-23 需求收敛：交付三类现有西语差异，不继续根因实验
+
+用户因时间限制中断进一步历史归因，改为简版分类说明＋各类完整标签明细，交同事处理。
+新增[MMService_G2P_DIFFERENCES_DELIVERY_2026-10-23.md](MMService_G2P_DIFFERENCES_DELIVERY_2026-10-23.md)。
+以原成功运行outputs/mmservice_g2p_training_393ce786a9为唯一数据源，仅读固定report/
+words并用jq导出三类原记录：补ES清洗后已一致（预期46291条）、生成失败9条、补清洗
+后仍不同4603条。后两类词频为11/60507，来源×词与去重单词分母不混用。
+原词/来源/词频、原IPA/ID、C++native与补清洗IPA/ID全部保留，另有可选TSV命令。
+本地小回传包不含完整words，故完整明细需在工区导出，不声称已在本地生成全量文件。
+
+刚才中断的新归因脚本、两份模块及配置共4份未提交草稿已移至本地临时归档，保留字节
+及SHA清单，未提交/推送，不作为可运行交付。原7份测试修改、其他用户文件及全部
+outputs均保留。此次只交付文档和只读导出命令，不继续G2P控制实验，不需要GPU。
+
+本地/实际远端起点7b6fea695ff933973e419e0f3c60d2fc352c9cb9，分支
+codex/g2p-coverage-scan。拉取后按新简版文档先核验两项源SHA，再导出；不重跑0.181。
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+每次mktemp新建outputs/spanish_g2p_handoff_XXXXXXXX，无resume，不覆盖旧文件。
+三个命名阶段有开始提示，结束用wc核验46291/9/4603；JSONL可转TSV，整目录交同事。
+只需返回行数，无需回传完整明细或大包。此处为导出方案交付，实际全量导出尚待工区。
+
 ## 0.182 2026-10-23 实际三语480h标签审计回传核验，西语9词历史代理已确认
 
 用户要求评估后生成交接Markdown。本次新增完整交接文档
