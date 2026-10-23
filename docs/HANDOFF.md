@@ -1,5 +1,59 @@
 # 工作交接记录
 
+## 0.182 2026-10-23 实际三语480h标签审计回传核验，西语9词历史代理已确认
+
+用户要求评估后生成交接Markdown。本次新增完整交接文档
+[MMService_G2P_EVALUATION_HANDOFF_2026-10-23.md](MMService_G2P_EVALUATION_HANDOFF_2026-10-23.md)，
+汇总比较层次、固定资产、全训练域结果、9词代理证据、既有4k边界和后续未完成项。
+这是0.181待工区任务的结果归档，不修改C++、生产标签、90类、检索或任何旧outputs。
+
+成功源outputs/mmservice_g2p_training_393ce786a9。实际返回ZIP 9830字节，SHA
+43330274a48be115122fa75aa0b7299967d130c8f4815cff7371a64176e46808；
+TXT 13265字节，SHA644cf59f74b7d93ef64f202fc4ecbe0785e7ed93d3b83d898537ca4a2d2cfceb，
+由其Base64还原相同ZIP，全部成员SHA通过。report SHA
+29d1c2f990500e317cdac75bbf9af3f1cb80d23666ab4717c93b1d557ad5b109。
+小包为report、39项ES差异示例、source_evidence、sha清单；全words/samples未回传，
+只记录SHA与大小，不冒称本地独立重放全量。
+
+- 原词典逐句重建与固定训练ID全部相等：881749句，EN263609/ES296399/PT321741；
+  每语种约480h，原清单SHA仍10fdbdbbdb8ef352cd7a143b742fd962627b40a98a44d0b54701311f0b94fbfe。
+  EN12844、ES92715、PT101940个语言内唯一词；来源×词分别12844/144499/161686。
+- EN/PT native词标签、按词频及整句均全一致，仅限该规范单词训练域。不能覆盖掉4k
+  已发现的EN外语字符、PT连字符词等失败，也不证明原始整句前处理完全等价。
+- ES native来源×词差50903/144499=35.2272%，按词频835476/3517234=23.7538%；
+  补现有ES音素清洗后为4612/144499=3.1917%、60518/3517234=1.7206%。
+  后者分解为4603个可用但不同的来源×词（60507次）和9个失败词（11次），无剩余OOV。
+  整句native278403/296399=93.9285%，适配后54052/296399=18.2362%，其中54041不同、
+  11不可用；这些不是PER、检索召回或WER。official_g2p_rerun与replacement_verified均false。
+- 9词全部来自ES辅助CV：budućnost、andrić、ibrahimović、kościuszko、mihailović、
+  modrić、radić、stepanović、toruń；全部原标签可用。用户再返回历史repair_plan，
+  resolution全为mfa_proxy、rules全为strip_acute，代理依次为buducnost/andric/
+  ibrahimovic/kosciuszko/mihailovic/modric/radic/stepanovic/torun。
+  这确认历史输入已改变，不能说官方直接输入原词成功而C++同输入失败。9项旧IPA及
+  计划目前据用户终端转贴，尚无计划文件SHA独立回传；本地调用现有代理函数复核映射。
+  生成失败位于逐词生成阶段，不是90类映射失败；尚未逐项验证FST内部失败路径，
+  更未运行9个代理的C++对照，不能宣称已修复。附带匹配的普通word行不是第10个失败词。
+
+下一步仅需对9组原词/代理词固定同模型做小对照，再按来源和实际词频归类其余4603项。
+已有día/río同输入官方控制结果与C++一致，说明部分旧标签政策可造成差异，不能扩推全体；
+不为追平旧标签盲目替换i/j、u/w或去掉所有外语符号。既有全量无需重跑，后续探针尚未交付。
+
+归档前本地/远端HEAD均b326a6f5fbc27494bbbf567d6eac8727b4317b3d，分支
+codex/g2p-coverage-scan；原7份测试修改及未跟踪资料保留。本次仅两份Markdown变更，
+文档提交SHA见本轮回复。工区无需计算任务，拉取及核验文档：
+
+```bash
+git status --short
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+git log -1 -- docs/MMService_G2P_EVALUATION_HANDOFF_2026-10-23.md
+```
+
+本次没有新输出目录、resume或GPU任务，无需再次回传已有包。保留成功/失败旧目录。
+原复现入口、可执行只读查询及小文件回传政策均写入交接文档；归档核验只读现有证据，
+重算计数/比例和39项示例，并检查文档链接/表格及git diff --check。代码未改，不重复
+运行已通过的全仓训练/推理测试。
+
 ## 0.181 2026-10-22 联合4k差异分片已核验，扩到实际三语480h训练词汇（待工区）
 
 用户明确本轮“全量”指训练用到的语料。此次是G2P/训练标签差异审计，不是音频热词
