@@ -1,0 +1,19 @@
+{
+  "name": "mmservice_g2p_cpp_2026_10_26_v2",
+  "source_archive_sha256": "2408faf751ac07e4ff83f3d2081a5eabe1a354a36944b968132e523dfb583ff1",
+  "args_by_language": {
+    "en": ["--lang", "en"],
+    "es": ["--lang", "es"],
+    "pt": ["--lang", "pt"]
+  },
+  "source_sha256": {
+    "Makefile": "b685da084f3718a92440117ba3d6c9e154fc0eede4edd4342283cf6cfb979b84",
+    "g2p_postprocess.cpp": "87d1a8e5461cc8bd146fde3beef6e96ab92f312f9de6c7498167b5b36744e8b7",
+    "g2p_postprocess.h": "2346da87a46ef6f1dead3d690dadefbfe2fe97f44d9953d4c97ae55f28562fb0",
+    "g2p_preprocess.cpp": "536f519183927355da8cf9bd67255037fd8d4b53be453aa7c0d60d676b3b49d6",
+    "g2p_preprocess.h": "d9a5bc146decbac6abaca8c30935705b41a5dd66167817dc3d9fc008692a5397",
+    "mmservice_g2p_main.cpp": "8fe78c909e8746dd3ce88349b04a36013e3f50f8ff73cd9072d189da52fa7ced",
+    "unicode_util.h": "d44f9d133bb0534dcb2a62b777254914e06f06b9b6c65e7202f62ff75f1f440a",
+    "README.md": "7c86a09fd501d42e8eff4a43fa71c5b8d8be405e8b9fd21d46fdc5e76fcea1d7"
+  }
+}

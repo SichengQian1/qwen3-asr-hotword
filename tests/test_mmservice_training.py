@@ -314,3 +314,105 @@ def test_relative_source_aliases_cannot_silently_override_a_build(audit):
     with pytest.raises(ValueError, match="duplicate source TSV"):
         execute(audit)
     assert not audit.output.exists() and not audit.calls
+
+
+def reviewed_release(audit):
+    profile = audit.root / "configs/release.json"
+    source = audit.binary.parent / "source.cpp"
+    save(
+        profile,
+        {
+            "name": "fixture_v2_not_a_native_build",
+            "source_sha256": {source.name: _sha(source)},
+            "args_by_language": {lang: ["--lang", lang] for lang in ("en", "es", "pt")},
+        },
+    )
+    return profile
+
+
+def test_reviewed_release_passes_language_flags_exports_complete_native_differences(audit):
+    profile = reviewed_release(audit)
+    commands = []
+
+    def runner(command, stdout, stderr, **kwargs):
+        lang = stdout.parent.name
+        assert command[4:] == ["--lang", lang]
+        commands.append(command)
+        result = audit.runner(command[:4], stdout, stderr, **kwargs)
+        if lang == "es":
+            # Model-independent fixture emulates a release adding native ES cleanup.
+            row = json.loads(stdout.read_text())
+            row["ipa"] = "m a ɲ a n a"
+            stdout.write_text(json.dumps(row, ensure_ascii=False) + "\n")
+        return result
+
+    before = {path: _sha(path) for path in audit.root.rglob("*") if path.is_file()}
+    result = training.run(
+        audit.root,
+        audit.config,
+        audit.output,
+        runner=runner,
+        inspector=audit.inspector,
+        release_config=profile,
+        binary=audit.binary,
+    )
+    assert result["status"] == "completed" and len(commands) == 3
+    assert result["binary_sha256"] == _sha(audit.binary)
+    assert result["cpp_release"] == "fixture_v2_not_a_native_build"
+    assert result["delivery"]["source_word_pairs"] == {"en": 2, "es": 0, "pt": 0}
+    delivery = audit.output / "delivery"
+    differences = [
+        json.loads(line) for line in (delivery / "en_differences.jsonl").read_text().splitlines()
+    ]
+    assert {row["word"] for row in differences} == {"cat", "fire"}
+    assert (
+        next(row for row in differences if row["word"] == "fire")["cpp"]["native"]["raw_ipa"]
+        is None
+    )
+    assert len((delivery / "en_differences.tsv").read_text().splitlines()) == 3
+    for lang in ("es", "pt"):
+        assert (delivery / f"{lang}_differences.jsonl").read_text() == ""
+        assert len((delivery / f"{lang}_differences.tsv").read_text().splitlines()) == 1
+    report = json.loads((audit.output / "report.json").read_text())
+    assert report["cpp_args_by_language"]["es"] == ["--lang", "es"]
+    with zipfile.ZipFile(result["return_file"]) as bundle:
+        assert not any(name.startswith("delivery/") for name in bundle.namelist())
+        assert "fixture_v2" in bundle.read("report.json").decode()
+    assert all(_sha(path) == digest for path, digest in before.items())
+
+
+@pytest.mark.parametrize("kind", ["missing_lang", "wrong_lang", "source_changed", "source_escape"])
+def test_reviewed_release_rejects_bad_language_or_unreviewed_source(audit, kind):
+    profile = reviewed_release(audit)
+    cfg = json.loads(profile.read_text())
+    if kind == "missing_lang":
+        del cfg["args_by_language"]["es"]
+    elif kind == "wrong_lang":
+        cfg["args_by_language"]["es"] = ["--lang", "pt"]
+    elif kind == "source_changed":
+        (audit.binary.parent / "source.cpp").write_text("unreviewed update")
+    else:
+        cfg["source_sha256"] = {"../outside.cpp": "0" * 64}
+    save(profile, cfg)
+    with pytest.raises(ValueError):
+        training.run(
+            audit.root,
+            audit.config,
+            audit.output,
+            release_config=profile,
+            binary=audit.binary,
+        )
+    assert not audit.output.exists() and not audit.calls
+
+
+@pytest.mark.parametrize("which", ["binary", "release"])
+def test_binary_override_requires_matching_release_config(audit, which):
+    with pytest.raises(ValueError, match="supplied together"):
+        training.run(
+            audit.root,
+            audit.config,
+            audit.output,
+            release_config=reviewed_release(audit) if which == "release" else None,
+            binary=audit.binary if which == "binary" else None,
+        )
+    assert not audit.output.exists()

@@ -1,5 +1,56 @@
 # 工作交接记录
 
+## 0.185 2026-10-26 新版MMService G2P源码审阅及三语实际训练域复测入口（待工区）
+
+用户提供mmservice_g2p_cpp(1).zip，包SHA
+2408faf751ac07e4ff83f3d2081a5eabe1a354a36944b968132e523dfb583ff1，含8个源码/头文件/
+Makefile/README，没有二进制。只解到临时审阅目录，未覆盖本地mm或旧构建/模型/outputs。
+新版--lang es会对所有词做ñ→ni、gü→gw及StripAcute，再推理；ñ代理调用ɲ j合并，
+NormalizeIpa仅es删除U+0303，en/pt保留。--no-postprocess仍保留输入代理及ñ滑音合并，
+不能当成未处理模型raw。旧项目仅缺词才代理，不能先宣称新版全面复现历史标签。
+
+完整操作见[MMService_G2P_V2_RETEST_2026-10-26.md](MMService_G2P_V2_RETEST_2026-10-26.md)。
+新增configs/mmservice_g2p_v2.workzone.json封存8个文件SHA和三语语言参数；沿用
+compare_mmservice_g2p_training.py，新增成对--release-config/--binary，旧命令仍固定旧版。
+新版动态二进制SHA记录到report，并校验快照源码、x86_64/可执行；明确--lang en/es/pt，
+模型/固定训练清单/10份来源词典的原审核与逐句ID重建不变。不是重新跑官方MFA，不读音频。
+沿用实际三语各480h共881749句、207499个语言×唯一词输入、319029个来源×词标签对。
+
+新增mmservice_training_delivery.py，在新版成功运行后从全部words导出三语native所有不同/
+失败/OOV的JSONL和TSV，保留来源、词频、原标签、native及额外清洗IPA/ID。行数和词频
+复核对应report；无差异时空JSONL/仅表头TSV。delivery全文件SHA/大小写入report，不塞进
+小回传ZIP。额外ES清洗仍单列，native是本轮主要比较；不沿用旧9/4603当作新结果。
+
+本地/实际远端起点120bf68c6e5dd9cac424909d5f627465ec0feba8，保留0.184时延旁线及
+原7份测试修改、未跟踪资料。分支codex/g2p-coverage-scan，推送SHA见本轮回复。
+用户把新版8个文件直接放入工区mm/后，在仓库根目录执行：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+B=$(mktemp -d outputs/mm_g2p_v2_x86_XXXXXXXX)
+cp mm/*.cpp mm/*.h mm/Makefile mm/README.md "$B/"
+conda run --no-capture-output -n aligner bash -c 'make -C "$1" OPENFST="$CONDA_PREFIX" CXX=g++ CXXFLAGS="-std=c++17 -O2" -j2' _ "$B"
+conda run --no-capture-output -n aligner python -B scripts/compare_mmservice_g2p_training.py \
+  --release-config configs/mmservice_g2p_v2.workzone.json \
+  --binary "$B/mmservice_g2p"
+```
+
+新版复制到全新构建目录，不覆盖outputs/mm_g2p_x86_2LrhDuRR及旧报告。默认新建
+outputs/mmservice_g2p_training_<随机后缀>，无resume，拒绝已有/嵌套输出，失败留证据。
+命名阶段、真实计数及10秒活动提示；--timeout默认7200秒/语种。旧PT全量约39.6分钟
+只是历史值，不据此保证新耗时。无需GPU/Qwen/Encoder/训练或修改90类。
+
+返回新目录return_summary.zip或全部<=32KiB编号TXT（二选一）及终端摘要即可；不回传
+完整words/samples/delivery。delivery可直接交同事；核验其SHA对应report.delivery.files。
+待返回新报告后再给三语新旧结果表，不能把源码审阅/本地探针当实测结果。
+
+本地新增7项版本回归，相关G2P60项通过；覆盖语言参数实际传递、旧命令保留、源码身份
+变化/错语种/缺配置拒绝、完整差异及失败空标签、空差异文件、源输入不改及小包不含大交付。
+新增/改动Python Ruff、严格Mypy、CLI help通过。附件8份SHA复核通过，另实际编译纯
+C++字符串模块探针（无OpenFST模型）验证ES去鼻化、EN/PT鼻化保留及滑音合并。
+全仓863 passed（133.69秒），Python3.10语法、CLI help及git diff --check通过。
+
 ## 0.184 2026-10-23 最新联合4k带噪三语时延差异：只读逐前缀归因入口（待工区）
 
 用户观察英语约15ms、西葡约40–50ms，并明确指英语三国6000条、西葡wave1–4各400条

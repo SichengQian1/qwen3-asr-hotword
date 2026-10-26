@@ -23,13 +23,22 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--timeout", type=float, default=7200)
+    parser.add_argument("--release-config", type=Path)
+    parser.add_argument("--binary", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
     output = root / (
         args.output_dir or Path("outputs") / ("mmservice_g2p_training_" + uuid.uuid4().hex[:10])
     )
     try:
-        result = run(root, root / args.config, output, timeout=args.timeout)
+        result = run(
+            root,
+            root / args.config,
+            output,
+            timeout=args.timeout,
+            release_config=args.release_config,
+            binary=args.binary,
+        )
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, ImportError) as error:
         result = {"status": "failed", "error": str(error)}
     print(json.dumps(result, ensure_ascii=False, indent=2))

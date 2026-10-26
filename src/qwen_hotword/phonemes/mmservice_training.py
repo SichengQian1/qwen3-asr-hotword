@@ -15,6 +15,7 @@ from qwen_hotword.phonemes.mmservice_compact import _parts
 from qwen_hotword.phonemes.mmservice_full import _checked
 from qwen_hotword.phonemes.mmservice_process import execute
 from qwen_hotword.phonemes.mmservice_smoke import _cpp_rows, _save, _sha, inspect_model
+from qwen_hotword.phonemes.mmservice_training_delivery import export_differences
 from qwen_hotword.phonemes.mmservice_training_labels import (
     LANGUAGES,
     candidates,
@@ -38,6 +39,8 @@ def run(
     output: Path,
     *,
     timeout: float = 7200,
+    release_config: Path | None = None,
+    binary: Path | None = None,
     runner: Callable[..., dict[str, Any]] | None = None,
     inspector: Callable[[Path, Path], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -46,8 +49,12 @@ def run(
         raise FileExistsError("choose a NEW training G2P diagnostic output directory")
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be positive")
+    if (release_config is None) != (binary is None):
+        raise ValueError("--release-config and --binary must be supplied together")
     identities: dict[str, Any] = {}
     sources = {}
+    release: dict[str, Any] = {"name": "legacy_v1"}
+    arguments: dict[str, list[str]] = {}
     with stage_progress("Verify frozen training manifest, original dictionaries and reviewed C++"):
         cfg = _read(_checked(config, identities))
         full = _read(_checked(root / cfg["full_comparison_config"], identities))
@@ -58,14 +65,38 @@ def run(
         manifest = _checked(root / cfg["manifest"], identities, cfg["manifest_sha256"])
         vocab_path = _checked(root / cpp["vocab"], identities, cpp["vocab_sha256"])
         vocab = load_phoneme_vocab(vocab_path)
-        binary = _checked(root / full["binary"], identities, full["binary_sha256"])
+        if release_config is not None:
+            release = _read(_checked(root / release_config, identities))
+            arguments = release["args_by_language"]
+            if arguments != {lang: ["--lang", lang] for lang in LANGUAGES}:
+                raise ValueError("reviewed release requires explicit --lang en/es/pt")
+            pins = release["source_sha256"]
+            if not isinstance(release.get("name"), str) or not release["name"]:
+                raise ValueError("reviewed release requires a name")
+            if (
+                not isinstance(pins, dict)
+                or not pins
+                or any(
+                    not isinstance(name, str)
+                    or Path(name).name != name
+                    or name in {".", ".."}
+                    or not isinstance(digest, str)
+                    for name, digest in pins.items()
+                )
+            ):
+                raise ValueError("reviewed source names must be plain file names")
+            assert binary is not None
+            binary = _checked(root / binary, identities)
+        else:
+            pins = cpp["source_sha256"]
+            binary = _checked(root / full["binary"], identities, full["binary_sha256"])
         with binary.open("rb") as handle:
             header = handle.read(20)
         if header[:6] != b"\x7fELF\x02\x01" or int.from_bytes(header[18:20], "little") != 62:
             raise ValueError("reviewed x86-64 binary required")
         if not os.access(binary, os.X_OK):
             raise ValueError("reviewed binary must be executable")
-        for name, digest in cpp["source_sha256"].items():
+        for name, digest in pins.items():
             _checked(binary.parent / name, identities, digest)
         models = {
             lang: _checked(root / item["path"], identities, item["sha256"])
@@ -97,6 +128,7 @@ def run(
         for path in (
             Path(__file__),
             Path(__file__).with_name("mmservice_training_labels.py"),
+            Path(__file__).with_name("mmservice_training_delivery.py"),
             Path(__file__).with_name("mmservice_process.py"),
             Path(__file__).with_name("mmservice_smoke.py"),
             Path(__file__).with_name("mmservice_full.py"),
@@ -121,6 +153,9 @@ def run(
         "inputs": identities,
         "by_language": {},
         "processes": [],
+        "cpp_release": release,
+        "cpp_args_by_language": arguments,
+        "binary_sha256": _sha(binary),
         "audio_read": False,
         "gpu_used": False,
         "test_set_used": False,
@@ -183,6 +218,7 @@ def run(
                     str(word_path),
                     str(directory / "model/model.fst"),
                     str(directory / "model/phones.sym"),
+                    *arguments.get(lang, []),
                 ],
                 directory / "cpp.jsonl",
                 directory / "cpp.stderr.log",
@@ -211,6 +247,8 @@ def run(
         )
         for lang in LANGUAGES:
             report["by_language"][lang]["sentence_label_comparison"] = sentences[lang]
+        if release_config is not None:
+            report["delivery"] = export_differences(output, report["by_language"])
         with stage_progress("Recheck recorded input identities after CPU-only comparison"):
             for name, item in identities.items():
                 if _sha(Path(name)) != item["sha256"]:
@@ -257,6 +295,9 @@ def run(
         },
         "official_g2p_rerun": False,
         "replacement_verified": False,
+        "cpp_release": release["name"],
+        "binary_sha256": report["binary_sha256"],
+        "delivery": report.get("delivery", {}),
         "return_file": str(archive),
         "zip_bytes": archive.stat().st_size,
         "text_parts": parts,
