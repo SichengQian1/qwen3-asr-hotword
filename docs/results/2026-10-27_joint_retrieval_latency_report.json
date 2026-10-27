@@ -1,0 +1,2215 @@
+{
+  "status": "completed",
+  "scope": "saved_joint_prefix_latency_no_inference",
+  "model_loaded": false,
+  "audio_opened": false,
+  "retrieval_replayed": false,
+  "table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "surfaces": 4000,
+  "indexed_pronunciations": 4012,
+  "checkpoint_declared": {
+    "best_validation_by_group": {
+      "en": {
+        "phoneme_error_rate": 0.0541221472313662,
+        "phoneme_errors": 2943,
+        "reference_phonemes": 54377,
+        "sample_count": 2199
+      },
+      "es": {
+        "phoneme_error_rate": 0.037234615799116286,
+        "phoneme_errors": 4837,
+        "reference_phonemes": 129906,
+        "sample_count": 2631
+      },
+      "pt": {
+        "phoneme_error_rate": 0.08780093556366486,
+        "phoneme_errors": 14340,
+        "reference_phonemes": 163324,
+        "sample_count": 2662
+      }
+    },
+    "best_validation_macro_phoneme_error_rate": 0.05971923286471578,
+    "checkpoint_selection_metric": "validation_macro_per",
+    "epoch_metrics": {
+      "epoch": 27,
+      "loss": 0.2587039482526708,
+      "phoneme_error_rate": 0.06363508214736757,
+      "phoneme_errors": 22120,
+      "reference_phonemes": 347607
+    },
+    "head_config": {
+      "dropout": 0.1,
+      "head_type": "temporal_upsample",
+      "hidden_dimension": 512,
+      "input_dimension": 1024,
+      "kernel_size": 5,
+      "num_classes": 90,
+      "time_upsampling_factor": 2
+    },
+    "sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+    "training_plan_sha256": "dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83",
+    "training_report_sha256": "57c44ca7d3cebea5696de607efd2af2bb3b26df231e951afde11b9ee84e90398"
+  },
+  "source_code_sha256_declared": {
+    "evaluation/joint_fillers.py": "670e35a2d4ddea88915b412f1e39d295c057b5129c7c03dd8d88e2bd5a164a77",
+    "evaluation/multilingual_stream_assets.py": "0bf9e57e1863bfed36283dfd625afb449d86d964587a4e72a8d520dbd1cf16e1",
+    "evaluation/reviewed_targets.py": "33ac505ae763b52e56fd195ec095a3de738f3226b582c18f64bd5e07eb72d48d",
+    "evaluation/stream_context_assets.py": "5116e1c25695d57368259473e2b27ac8a773e58385728c1296fccd46e67742ba",
+    "evaluation/stream_retrieval_metrics.py": "58d4121157d312375736f486b1433a2f632ad86df7f27b361299ad05c4cc95bd",
+    "evaluation/target_review.py": "cbc94a2565b4724dc6df5b683acf7fc42a067cb59396858b5cfe283553d15d6f",
+    "hotwords/anchor_index.py": "7b278fb0e3d8d4fbeadddbae1a00254bac72de25ae0b12f183055fbfb9381135",
+    "hotwords/scoring.py": "abfcc59f05872072a59ef42e1e1a8b3c320657fce2a257356b538277e3589356",
+    "inference/english_best_noise.py": "c680081c60d8170c2740dde37c96d2ce54dea5514bed9f7537f5a3a01cd45df1",
+    "inference/english_head_preview.py": "6a5b39fd316b846720e30484d24a08604409710fdbd05c805f4f08e450b451cc",
+    "inference/external_keyword_retrieval.py": "d71cd71bf02290acfdc59e98e1dbda5ed423b7b6c35dd9c988f666f5d3c793ef",
+    "inference/external_keyword_topk_replay.py": "07e2945a00f1b6cc1769ed5d60c990f63ba9b646397efdb846b319691d8249a0",
+    "inference/hotword_prompt.py": "b78e18fc93fb96eb35313c80cedcc1337ff567b9b9559c8208fe0d61feb1f82d",
+    "inference/multilingual_stream_run.py": "59f3dae8d5ac04134144b845db4628095ed7c321c9f2d28df23111a49dbf4e98",
+    "inference/reviewed_joint.py": "c0a3dc9ecff8cd2fc02ae1bb3f83355c44e868fa100f0a5f5052c9481735fd7d",
+    "inference/reviewed_retrieval.py": "1a4406660d9365efadab0de224e99b30649ac703707830588cd25af0c7e62206",
+    "inference/stream_context_contract.py": "31e44075200a0248f8bb5c301d3f64944f2fc5229fd55ca6946ccc2e579574cc",
+    "inference/stream_context_run.py": "67d4574ba36626c560269664c606cbf3ee3400dd1dffa1a4cea27645431e2174",
+    "inference/streaming_backends.py": "0d124e8f8c0d666d048810a8a8022a4bf38eef9f53e1cce76b0b3b0c22bb5656",
+    "inference/wave_retrieval.py": "0143be9c5cff46ee0d46a7c01c5b0c528377b54f6bf743f4b6a1b4f358bd1a4a",
+    "modeling/audio_encoder.py": "40a9227b6a6c5a52ca99fa2fd8ce534bd9327f9ed3c82ce84db4c5991e490808",
+    "modeling/ctc_head.py": "2efc10484a2df7d3ced37eeffbe4d5b4c0f95b289a2c5b0aea41772248bdf35c",
+    "modeling/qwen_backbone.py": "81614e4f64ccac555086660dfe30a80bb10e775b69f288935101629c7adf6705",
+    "phonemes/coverage.py": "c92133f5a94009187b81cb8128cb2cf676339021c5d0d77d0f3c3a44fb41c60c",
+    "training/edit_distance.py": "fb1989f167d883489cc105b322f4745add64cc0f45ce98d31fd74f87840741cc",
+    "training/feature_cache.py": "b4c3e05b75736f4225a15a5f5c3028036326e705a4971b9954bc132bb19f3576",
+    "training/stage_progress.py": "c07bef94237d16c5fb510e24a35f63632519ebfd45e3f3a75a23a15784df15ad"
+  },
+  "source_git_commit_declared": "fd2a460933e024af422dca55d15512ceb80147de",
+  "source_backend_and_gc_policy": "not inferred from timings or current environment",
+  "inspection_environment_only": {
+    "python": "3.12.12",
+    "edit_distance_backend": "rapidfuzz"
+  },
+  "evidence": {
+    "run": {
+      "root": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step",
+      "files_read": 26356,
+      "source_manifest_sha256": "03ad9ad20771e0cbc54fbd133b9b81bca67e078e2688d31a13d7e7add592ca0e",
+      "consumed_file_manifest_sha256": "c8faa2389bde27b54115075666bbf3cc71c9f9878c1b613471c7bb22982c1d41"
+    },
+    "assets": {
+      "root": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/reviewed_joint_4000_retrieval_480h_v1",
+      "files_read": 2,
+      "source_manifest_sha256": "613cff83517ecd08d0bf275cc2233175edca89ed1416aa855abc0edf79534a2b",
+      "consumed_file_manifest_sha256": "e5a53c5e54f873a3cd8e4ee62ac29c839fe9c507553ed8b65d232dbf55a9edca"
+    }
+  },
+  "percentile_method": "median P50; nearest-rank P95/P99; units milliseconds",
+  "interpretation_limits": [
+    "Repeated prefixes are correlated; query count is not independent utterance count.",
+    "Language is confounded with source, phone sequence, candidate mix and runtime load.",
+    "Bucket and correlation comparisons are descriptive, not causal proof.",
+    "Historical timings are reused; no local timing is presented as H200 measurement."
+  ],
+  "by_language": {
+    "en": {
+      "queries": 22786,
+      "utterances": 6000,
+      "timing_ms": {
+        "decode_ms": {
+          "count": 22786,
+          "mean": 0.4474935869904647,
+          "p50": 0.40306150913238525,
+          "p95": 0.8589919889345765,
+          "p99": 2.4927709018811584,
+          "max": 13.580953003838658
+        },
+        "anchor_ms": {
+          "count": 22786,
+          "mean": 1.8271983735552153,
+          "p50": 1.615799032151699,
+          "p95": 4.047138965688646,
+          "p99": 5.591336986981332,
+          "max": 287.2357269516215
+        },
+        "rerank_ms": {
+          "count": 22786,
+          "mean": 2.047365425822997,
+          "p50": 2.394845534581691,
+          "p95": 3.35855595767498,
+          "p99": 3.9809088921174407,
+          "max": 8.042435045354068
+        },
+        "sort_ms": {
+          "count": 22786,
+          "mean": 0.015449951614399465,
+          "p50": 0.01752050593495369,
+          "p95": 0.02377992495894432,
+          "p99": 0.0262049725279212,
+          "max": 0.04408508539199829
+        },
+        "gate_ms": {
+          "count": 22786,
+          "mean": 0.00571291431553945,
+          "p50": 0.006023910827934742,
+          "p95": 0.008297967724502087,
+          "p99": 0.009380048140883446,
+          "max": 0.028676004149019718
+        },
+        "merge_ms": {
+          "count": 22786,
+          "mean": 0.2969374332982364,
+          "p50": 0.29651052318513393,
+          "p95": 0.4005660302937031,
+          "p99": 0.41586800944060087,
+          "max": 0.9298929944634438
+        },
+        "unattributed_ms": {
+          "count": 22786,
+          "mean": 0.03612409863559034,
+          "p50": 0.03750884206965566,
+          "p95": 0.05013193003833294,
+          "p99": 0.05628413055092096,
+          "max": 0.10028516408056021
+        },
+        "pure_ms": {
+          "count": 22786,
+          "mean": 4.676281784232443,
+          "p50": 4.802616022061557,
+          "p95": 8.165478007867932,
+          "p99": 10.002827970311046,
+          "max": 293.70037897024304
+        }
+      },
+      "workload": {
+        "audio_seconds": {
+          "count": 22786,
+          "mean": 4.799134103725972,
+          "p50": 4.0,
+          "p95": 8.8746875,
+          "p99": 12.0,
+          "max": 22.869375
+        },
+        "decoded_phones": {
+          "count": 22786,
+          "mean": 18.30676731326253,
+          "p50": 18.0,
+          "p95": 42,
+          "p99": 58,
+          "max": 90
+        },
+        "postings": {
+          "count": 22786,
+          "mean": 395.0956288949355,
+          "p50": 320.0,
+          "p95": 1095.0,
+          "p99": 1694.0,
+          "max": 3183.0
+        },
+        "variant_candidates": {
+          "count": 22786,
+          "mean": 53.29469849907838,
+          "p50": 64.0,
+          "p95": 64,
+          "p99": 64,
+          "max": 64
+        },
+        "surface_candidates": {
+          "count": 22786,
+          "mean": 53.289432107434386,
+          "p50": 64.0,
+          "p95": 64.0,
+          "p99": 64.0,
+          "max": 64.0
+        },
+        "candidate_phone_mean": {
+          "count": 22786,
+          "mean": 4.679919415675176,
+          "p50": 5.03125,
+          "p95": 6.882352941176471,
+          "p99": 8.4,
+          "max": 23
+        },
+        "candidate_phone_max": {
+          "count": 22786,
+          "mean": 9.63315193539893,
+          "p50": 10.0,
+          "p95": 14,
+          "p99": 19,
+          "max": 38
+        },
+        "candidate_phone_sum": {
+          "count": 22786,
+          "mean": 280.11327130694286,
+          "p50": 317.0,
+          "p95": 400,
+          "p99": 446,
+          "max": 590
+        },
+        "candidate_phone_square_sum": {
+          "count": 22786,
+          "mean": 1680.9467655577987,
+          "p50": 1785.0,
+          "p95": 2859,
+          "p99": 3549,
+          "max": 7637
+        }
+      },
+      "time_share_of_sum": {
+        "decode_ms": 0.09569431604813258,
+        "anchor_ms": 0.3907374400995659,
+        "rerank_ms": 0.4378190879613659,
+        "sort_ms": 0.0033038966271223954,
+        "gate_ms": 0.0012216787993406088,
+        "merge_ms": 0.06349861856046711,
+        "unattributed_ms": 0.0077249619040054675
+      },
+      "over_50ms": 6,
+      "correlations_descriptive_only": {
+        "audio_seconds__pure_ms": 0.3248348327972086,
+        "decoded_phones__anchor_ms": 0.25346516313571477,
+        "postings__anchor_ms": 0.27720434908032177,
+        "variant_candidates__rerank_ms": 0.8554610841990556,
+        "candidate_phone_sum__rerank_ms": 0.7835750311758757,
+        "candidate_phone_square_sum__rerank_ms": 0.6358139657181043
+      },
+      "candidate_language_occurrences": {
+        "en": 1110828,
+        "es": 41213,
+        "pt-BR": 62332
+      }
+    },
+    "es": {
+      "queries": 1706,
+      "utterances": 400,
+      "timing_ms": {
+        "decode_ms": {
+          "count": 1706,
+          "mean": 0.5505205490866595,
+          "p50": 0.4647340392693877,
+          "p95": 1.791850896552205,
+          "p99": 2.592156990431249,
+          "max": 2.768725040368736
+        },
+        "anchor_ms": {
+          "count": 1706,
+          "mean": 14.103603963647366,
+          "p50": 11.196213483344764,
+          "p95": 24.991097045131028,
+          "p99": 39.400083012878895,
+          "max": 305.93597691040486
+        },
+        "rerank_ms": {
+          "count": 1706,
+          "mean": 4.703533454800346,
+          "p50": 4.43530548363924,
+          "p95": 6.783467018976808,
+          "p99": 8.231790037825704,
+          "max": 11.117291054688394
+        },
+        "sort_ms": {
+          "count": 1706,
+          "mean": 0.020010603328671085,
+          "p50": 0.01807598164305091,
+          "p95": 0.02506398595869541,
+          "p99": 0.028774025849997997,
+          "max": 0.04180101677775383
+        },
+        "gate_ms": {
+          "count": 1706,
+          "mean": 0.007555755835183725,
+          "p50": 0.006866001058369875,
+          "p95": 0.009843963198363781,
+          "p99": 0.011035008355975151,
+          "max": 0.02868811134248972
+        },
+        "merge_ms": {
+          "count": 1706,
+          "mean": 0.34504547363893945,
+          "p50": 0.3110140678472817,
+          "p95": 0.4242539871484041,
+          "p99": 0.4342799074947834,
+          "max": 1.542020938359201
+        },
+        "unattributed_ms": {
+          "count": 1706,
+          "mean": 0.05945646219612793,
+          "p50": 0.05775998579338193,
+          "p95": 0.08402485400438309,
+          "p99": 0.1000979682430625,
+          "max": 0.1671438803896308
+        },
+        "pure_ms": {
+          "count": 1706,
+          "mean": 19.789726262533293,
+          "p50": 17.019713995978236,
+          "p95": 32.43796399328858,
+          "p99": 51.5514399157837,
+          "max": 315.13000500854105
+        }
+      },
+      "workload": {
+        "audio_seconds": {
+          "count": 1706,
+          "mean": 5.6488470105509965,
+          "p50": 4.94378125,
+          "p95": 12.0,
+          "p99": 15.07,
+          "max": 18.2
+        },
+        "decoded_phones": {
+          "count": 1706,
+          "mean": 60.792497069167645,
+          "p50": 51.0,
+          "p95": 136,
+          "p99": 175,
+          "max": 198
+        },
+        "postings": {
+          "count": 1706,
+          "mean": 4588.688745603751,
+          "p50": 3671.5,
+          "p95": 10940.0,
+          "p99": 14027.0,
+          "max": 16209.0
+        },
+        "variant_candidates": {
+          "count": 1706,
+          "mean": 63.88745603751465,
+          "p50": 64.0,
+          "p95": 64,
+          "p99": 64,
+          "max": 64
+        },
+        "surface_candidates": {
+          "count": 1706,
+          "mean": 63.79835873388042,
+          "p50": 64.0,
+          "p95": 64.0,
+          "p99": 64.0,
+          "max": 64.0
+        },
+        "candidate_phone_mean": {
+          "count": 1706,
+          "mean": 7.680694973622509,
+          "p50": 7.59375,
+          "p95": 9.25,
+          "p99": 10.140625,
+          "max": 11.234375
+        },
+        "candidate_phone_max": {
+          "count": 1706,
+          "mean": 19.88276670574443,
+          "p50": 16.0,
+          "p95": 40,
+          "p99": 40,
+          "max": 60
+        },
+        "candidate_phone_sum": {
+          "count": 1706,
+          "mean": 491.56447831184056,
+          "p50": 486.0,
+          "p95": 592,
+          "p99": 649,
+          "max": 719
+        },
+        "candidate_phone_square_sum": {
+          "count": 1706,
+          "mean": 4546.271395076202,
+          "p50": 4193.0,
+          "p95": 7601,
+          "p99": 9047,
+          "max": 11669
+        }
+      },
+      "time_share_of_sum": {
+        "decode_ms": 0.02781850247867891,
+        "anchor_ms": 0.712673019148773,
+        "rerank_ms": 0.2376755187213107,
+        "sort_ms": 0.0010111611986546758,
+        "gate_ms": 0.0003818019377806446,
+        "merge_ms": 0.017435585973323616,
+        "unattributed_ms": 0.0030044105414784488
+      },
+      "over_50ms": 18,
+      "correlations_descriptive_only": {
+        "audio_seconds__pure_ms": 0.3709390088221189,
+        "decoded_phones__anchor_ms": 0.36907439509970075,
+        "postings__anchor_ms": 0.378068200097045,
+        "variant_candidates__rerank_ms": 0.15897834920516316,
+        "candidate_phone_sum__rerank_ms": 0.5341457012884095,
+        "candidate_phone_square_sum__rerank_ms": 0.48395260460368
+      },
+      "candidate_language_occurrences": {
+        "es": 93245,
+        "pt-BR": 14303,
+        "en": 1444
+      }
+    },
+    "pt": {
+      "queries": 1862,
+      "utterances": 400,
+      "timing_ms": {
+        "decode_ms": {
+          "count": 1862,
+          "mean": 0.5025530990366208,
+          "p50": 0.44439599150791764,
+          "p95": 1.0364250047132373,
+          "p99": 2.5362110463902354,
+          "max": 2.6413060259073973
+        },
+        "anchor_ms": {
+          "count": 1862,
+          "mean": 8.758383863965683,
+          "p50": 7.044276455417275,
+          "p95": 16.15434803534299,
+          "p99": 20.25063894689083,
+          "max": 285.41426290757954
+        },
+        "rerank_ms": {
+          "count": 1862,
+          "mean": 3.6129382911996535,
+          "p50": 3.76365048578009,
+          "p95": 4.477559006772935,
+          "p99": 6.760734017007053,
+          "max": 7.647107006050646
+        },
+        "sort_ms": {
+          "count": 1862,
+          "mean": 0.01770822614157286,
+          "p50": 0.017908052541315556,
+          "p95": 0.019591068848967552,
+          "p99": 0.021555926650762558,
+          "max": 0.02483197022229433
+        },
+        "gate_ms": {
+          "count": 1862,
+          "mean": 0.006379771146875287,
+          "p50": 0.006441026926040649,
+          "p95": 0.006953021511435509,
+          "p99": 0.00793894287198782,
+          "max": 0.02543698064982891
+        },
+        "merge_ms": {
+          "count": 1862,
+          "mean": 0.3047064777011518,
+          "p50": 0.3058310248889029,
+          "p95": 0.31866307836025953,
+          "p99": 0.3264020197093487,
+          "max": 0.360880047082901
+        },
+        "unattributed_ms": {
+          "count": 1862,
+          "mean": 0.0512710497734586,
+          "p50": 0.050956965424120426,
+          "p95": 0.06971193943172693,
+          "p99": 0.07617694791406393,
+          "max": 0.08951290510594845
+        },
+        "pure_ms": {
+          "count": 1862,
+          "mean": 13.253940778965017,
+          "p50": 11.909059074241668,
+          "p95": 21.528334938921034,
+          "p99": 25.56370000820607,
+          "max": 288.9128929236904
+        }
+      },
+      "workload": {
+        "audio_seconds": {
+          "count": 1862,
+          "mean": 6.180089084317938,
+          "p50": 6.0,
+          "p95": 14.0,
+          "p99": 16.72,
+          "max": 20.58
+        },
+        "decoded_phones": {
+          "count": 1862,
+          "mean": 54.50053705692803,
+          "p50": 48.0,
+          "p95": 126,
+          "p99": 147,
+          "max": 174
+        },
+        "postings": {
+          "count": 1862,
+          "mean": 2664.519871106337,
+          "p50": 2230.0,
+          "p95": 6601.0,
+          "p99": 8223.0,
+          "max": 10681.0
+        },
+        "variant_candidates": {
+          "count": 1862,
+          "mean": 62.97314715359828,
+          "p50": 64.0,
+          "p95": 64,
+          "p99": 64,
+          "max": 64
+        },
+        "surface_candidates": {
+          "count": 1862,
+          "mean": 62.90171858216971,
+          "p50": 64.0,
+          "p95": 64.0,
+          "p99": 64.0,
+          "max": 64.0
+        },
+        "candidate_phone_mean": {
+          "count": 1862,
+          "mean": 7.006787158882493,
+          "p50": 7.0,
+          "p95": 8.15625,
+          "p99": 10.59375,
+          "max": 11.34375
+        },
+        "candidate_phone_max": {
+          "count": 1862,
+          "mean": 17.41299677765843,
+          "p50": 15.0,
+          "p95": 30,
+          "p99": 34,
+          "max": 40
+        },
+        "candidate_phone_sum": {
+          "count": 1862,
+          "mean": 446.16809881847473,
+          "p50": 447.0,
+          "p95": 520,
+          "p99": 678,
+          "max": 726
+        },
+        "candidate_phone_square_sum": {
+          "count": 1862,
+          "mean": 3788.9328678839956,
+          "p50": 3554.0,
+          "p95": 4919,
+          "p99": 12118,
+          "max": 12860
+        }
+      },
+      "time_share_of_sum": {
+        "decode_ms": 0.0379172585284378,
+        "anchor_ms": 0.660813565567298,
+        "rerank_ms": 0.2725935139934874,
+        "sort_ms": 0.001336072526420001,
+        "gate_ms": 0.0004813490005176766,
+        "merge_ms": 0.022989877711295004,
+        "unattributed_ms": 0.00386836267254412
+      },
+      "over_50ms": 8,
+      "correlations_descriptive_only": {
+        "audio_seconds__pure_ms": 0.323598816690196,
+        "decoded_phones__anchor_ms": 0.2956557049011633,
+        "postings__anchor_ms": 0.29321752912198007,
+        "variant_candidates__rerank_ms": 0.4769161597074424,
+        "candidate_phone_sum__rerank_ms": 0.7811762163374268,
+        "candidate_phone_square_sum__rerank_ms": 0.7280235569698198
+      },
+      "candidate_language_occurrences": {
+        "en": 6523,
+        "es": 28819,
+        "pt-BR": 81914
+      }
+    }
+  },
+  "last_prefix_by_language": {
+    "en": {
+      "queries": 6000,
+      "utterances": 6000,
+      "timing_ms": {
+        "decode_ms": {
+          "count": 6000,
+          "mean": 0.46203022374538705,
+          "p50": 0.4199845134280622,
+          "p95": 0.863392953760922,
+          "p99": 2.5000040186569095,
+          "max": 2.5806609774008393
+        },
+        "anchor_ms": {
+          "count": 6000,
+          "mean": 2.3249104415105344,
+          "p50": 2.051151474006474,
+          "p95": 4.352005897089839,
+          "p99": 5.8842700673267245,
+          "max": 273.64395605400205
+        },
+        "rerank_ms": {
+          "count": 6000,
+          "mean": 2.6242935900615216,
+          "p50": 2.5373059906996787,
+          "p95": 3.5293319961056113,
+          "p99": 4.095819080248475,
+          "max": 7.837508921511471
+        },
+        "sort_ms": {
+          "count": 6000,
+          "mean": 0.018218951086358477,
+          "p50": 0.017700542230159044,
+          "p95": 0.024157925508916378,
+          "p99": 0.026086927391588688,
+          "max": 0.04369695670902729
+        },
+        "gate_ms": {
+          "count": 6000,
+          "mean": 0.006403474564043184,
+          "p50": 0.006241025403141975,
+          "p95": 0.008745002560317516,
+          "p99": 0.009628012776374817,
+          "max": 0.016467995010316372
+        },
+        "merge_ms": {
+          "count": 6000,
+          "mean": 0.30514641100307927,
+          "p50": 0.2965859603136778,
+          "p95": 0.4041859647259116,
+          "p99": 0.41436206083744764,
+          "max": 0.5865679122507572
+        },
+        "unattributed_ms": {
+          "count": 6000,
+          "mean": 0.0402180851281931,
+          "p50": 0.038602971471846104,
+          "p95": 0.05116884130984545,
+          "p99": 0.05712732672691345,
+          "max": 0.10028516408056021
+        },
+        "pure_ms": {
+          "count": 6000,
+          "mean": 5.781221177099117,
+          "p50": 5.402585491538048,
+          "p95": 8.621172048151493,
+          "p99": 10.406310088001192,
+          "max": 276.6802308615297
+        }
+      },
+      "workload": {
+        "audio_seconds": {
+          "count": 6000,
+          "mean": 6.58017828125,
+          "p50": 6.3146875,
+          "p95": 10.069375,
+          "p99": 12.629375,
+          "max": 22.869375
+        },
+        "decoded_phones": {
+          "count": 6000,
+          "mean": 24.502833333333335,
+          "p50": 22.0,
+          "p95": 47,
+          "p99": 62,
+          "max": 90
+        },
+        "postings": {
+          "count": 6000,
+          "mean": 530.69,
+          "p50": 451.0,
+          "p95": 1211.0,
+          "p99": 1811.0,
+          "max": 3183.0
+        },
+        "variant_candidates": {
+          "count": 6000,
+          "mean": 63.7385,
+          "p50": 64.0,
+          "p95": 64,
+          "p99": 64,
+          "max": 64
+        },
+        "surface_candidates": {
+          "count": 6000,
+          "mean": 63.736666666666665,
+          "p50": 64.0,
+          "p95": 64.0,
+          "p99": 64.0,
+          "max": 64.0
+        },
+        "candidate_phone_mean": {
+          "count": 6000,
+          "mean": 5.110704068962668,
+          "p50": 5.03125,
+          "p95": 6.09375,
+          "p99": 6.796875,
+          "max": 9.456521739130435
+        },
+        "candidate_phone_max": {
+          "count": 6000,
+          "mean": 10.819666666666667,
+          "p50": 11.0,
+          "p95": 14,
+          "p99": 19,
+          "max": 31
+        },
+        "candidate_phone_sum": {
+          "count": 6000,
+          "mean": 325.4531666666667,
+          "p50": 321.0,
+          "p95": 386,
+          "p99": 423,
+          "max": 523
+        },
+        "candidate_phone_square_sum": {
+          "count": 6000,
+          "mean": 1894.5921666666666,
+          "p50": 1831.0,
+          "p95": 2662,
+          "p99": 3241,
+          "max": 6281
+        }
+      },
+      "time_share_of_sum": {
+        "decode_ms": 0.07991913984810094,
+        "anchor_ms": 0.4021486759095283,
+        "rerank_ms": 0.4539341273530606,
+        "sort_ms": 0.0031514018454316126,
+        "gate_ms": 0.0011076335548982229,
+        "merge_ms": 0.0527823450539899,
+        "unattributed_ms": 0.006956676434990436
+      },
+      "over_50ms": 2,
+      "correlations_descriptive_only": {
+        "audio_seconds__pure_ms": 0.11872745716988582,
+        "decoded_phones__anchor_ms": 0.18546613589219385,
+        "postings__anchor_ms": 0.20977823932606948,
+        "variant_candidates__rerank_ms": 0.2576303179992739,
+        "candidate_phone_sum__rerank_ms": 0.44526887449853064,
+        "candidate_phone_square_sum__rerank_ms": 0.40689061635682505
+      },
+      "candidate_language_occurrences": {
+        "en": 364927,
+        "es": 5403,
+        "pt-BR": 12101
+      }
+    },
+    "es": {
+      "queries": 400,
+      "utterances": 400,
+      "timing_ms": {
+        "decode_ms": {
+          "count": 400,
+          "mean": 0.5772155395243317,
+          "p50": 0.49340701662003994,
+          "p95": 1.777549972757697,
+          "p99": 2.6355040026828647,
+          "max": 2.768725040368736
+        },
+        "anchor_ms": {
+          "count": 400,
+          "mean": 17.549104882054962,
+          "p50": 13.56060104444623,
+          "p95": 27.382042026147246,
+          "p99": 63.35345399565995,
+          "max": 288.0747599992901
+        },
+        "rerank_ms": {
+          "count": 400,
+          "mean": 5.080409913498443,
+          "p50": 4.90222149528563,
+          "p95": 7.090889965184033,
+          "p99": 8.366180001758039,
+          "max": 9.745153947733343
+        },
+        "sort_ms": {
+          "count": 400,
+          "mean": 0.020055903296452016,
+          "p50": 0.018011487554758787,
+          "p95": 0.02484302967786789,
+          "p99": 0.028479029424488544,
+          "max": 0.03603799268603325
+        },
+        "gate_ms": {
+          "count": 400,
+          "mean": 0.007843805360607803,
+          "p50": 0.007039983756840229,
+          "p95": 0.009953044354915619,
+          "p99": 0.010723015293478966,
+          "max": 0.01707195769995451
+        },
+        "merge_ms": {
+          "count": 400,
+          "mean": 0.3475708677433431,
+          "p50": 0.3107505035586655,
+          "p95": 0.42333395686000586,
+          "p99": 0.4312789533287287,
+          "max": 0.6637939950451255
+        },
+        "unattributed_ms": {
+          "count": 400,
+          "mean": 0.06476456706877798,
+          "p50": 0.06501487223431468,
+          "p95": 0.0897698337212205,
+          "p99": 0.10091601870954037,
+          "max": 0.1144439447671175
+        },
+        "pure_ms": {
+          "count": 400,
+          "mean": 23.646965478546917,
+          "p50": 20.069796533789486,
+          "p95": 34.34814198408276,
+          "p99": 68.9351549372077,
+          "max": 295.5706170760095
+        }
+      },
+      "workload": {
+        "audio_seconds": {
+          "count": 400,
+          "mean": 7.5323325,
+          "p50": 6.7630625,
+          "p95": 13.52,
+          "p99": 16.74,
+          "max": 18.2
+        },
+        "decoded_phones": {
+          "count": 400,
+          "mean": 77.5225,
+          "p50": 65.5,
+          "p95": 152,
+          "p99": 182,
+          "max": 198
+        },
+        "postings": {
+          "count": 400,
+          "mean": 5766.595,
+          "p50": 4607.5,
+          "p95": 12449.0,
+          "p99": 14900.0,
+          "max": 16209.0
+        },
+        "variant_candidates": {
+          "count": 400,
+          "mean": 64,
+          "p50": 64.0,
+          "p95": 64,
+          "p99": 64,
+          "max": 64
+        },
+        "surface_candidates": {
+          "count": 400,
+          "mean": 63.935,
+          "p50": 64.0,
+          "p95": 64.0,
+          "p99": 64.0,
+          "max": 64.0
+        },
+        "candidate_phone_mean": {
+          "count": 400,
+          "mean": 7.71703125,
+          "p50": 7.625,
+          "p95": 9.5,
+          "p99": 10.265625,
+          "max": 10.75
+        },
+        "candidate_phone_max": {
+          "count": 400,
+          "mean": 20.6525,
+          "p50": 19.5,
+          "p95": 39,
+          "p99": 40,
+          "max": 60
+        },
+        "candidate_phone_sum": {
+          "count": 400,
+          "mean": 493.89,
+          "p50": 488.0,
+          "p95": 608,
+          "p99": 657,
+          "max": 688
+        },
+        "candidate_phone_square_sum": {
+          "count": 400,
+          "mean": 4654.49,
+          "p50": 4237.5,
+          "p95": 7915,
+          "p99": 9355,
+          "max": 11060
+        }
+      },
+      "time_share_of_sum": {
+        "decode_ms": 0.02440970872342987,
+        "anchor_ms": 0.742129255357349,
+        "rerank_ms": 0.21484405337790635,
+        "sort_ms": 0.000848138561992117,
+        "gate_ms": 0.00033170452114559423,
+        "merge_ms": 0.014698328547003951,
+        "unattributed_ms": 0.002738810911173102
+      },
+      "over_50ms": 6,
+      "correlations_descriptive_only": {
+        "audio_seconds__pure_ms": 0.25056490341165877,
+        "decoded_phones__anchor_ms": 0.24545090304895767,
+        "postings__anchor_ms": 0.25751109010702505,
+        "variant_candidates__rerank_ms": null,
+        "candidate_phone_sum__rerank_ms": 0.5698387885648342,
+        "candidate_phone_square_sum__rerank_ms": 0.552743666116759
+      },
+      "candidate_language_occurrences": {
+        "es": 22224,
+        "pt-BR": 3046,
+        "en": 330
+      }
+    },
+    "pt": {
+      "queries": 400,
+      "utterances": 400,
+      "timing_ms": {
+        "decode_ms": {
+          "count": 400,
+          "mean": 0.527008390345145,
+          "p50": 0.465128046926111,
+          "p95": 0.9863739833235741,
+          "p99": 2.5709510082378983,
+          "max": 2.640355029143393
+        },
+        "anchor_ms": {
+          "count": 400,
+          "mean": 10.346272773458622,
+          "p50": 8.81838850909844,
+          "p95": 17.40362506825477,
+          "p99": 20.88159997947514,
+          "max": 254.35085804201663
+        },
+        "rerank_ms": {
+          "count": 400,
+          "mean": 4.035302686388604,
+          "p50": 3.9243645151145756,
+          "p95": 4.669302958063781,
+          "p99": 7.31957599055022,
+          "max": 7.647107006050646
+        },
+        "sort_ms": {
+          "count": 400,
+          "mean": 0.01773338910425082,
+          "p50": 0.017748039681464434,
+          "p95": 0.018954044207930565,
+          "p99": 0.021180021576583385,
+          "max": 0.02325093373656273
+        },
+        "gate_ms": {
+          "count": 400,
+          "mean": 0.006588881660718471,
+          "p50": 0.006558489985764027,
+          "p95": 0.006984919309616089,
+          "p99": 0.007541966624557972,
+          "max": 0.010480987839400768
+        },
+        "merge_ms": {
+          "count": 400,
+          "mean": 0.3042055878904648,
+          "p50": 0.3047534846700728,
+          "p95": 0.31508796382695436,
+          "p99": 0.3198619233444333,
+          "max": 0.3232520539313555
+        },
+        "unattributed_ms": {
+          "count": 400,
+          "mean": 0.05614190245978534,
+          "p50": 0.05406059790402651,
+          "p95": 0.0719709787517786,
+          "p99": 0.07676100358366966,
+          "max": 0.08148408960551023
+        },
+        "pure_ms": {
+          "count": 400,
+          "mean": 15.293253611307591,
+          "p50": 13.805243477690965,
+          "p95": 22.69905200228095,
+          "p99": 25.606010109186172,
+          "max": 259.3250119825825
+        }
+      },
+      "workload": {
+        "audio_seconds": {
+          "count": 400,
+          "mean": 8.3033146875,
+          "p50": 7.118125,
+          "p95": 15.59,
+          "p99": 18.33,
+          "max": 20.58
+        },
+        "decoded_phones": {
+          "count": 400,
+          "mean": 72.3075,
+          "p50": 61.0,
+          "p95": 140,
+          "p99": 157,
+          "max": 173
+        },
+        "postings": {
+          "count": 400,
+          "mean": 3527.0725,
+          "p50": 2977.5,
+          "p95": 7105.0,
+          "p99": 9073.0,
+          "max": 10681.0
+        },
+        "variant_candidates": {
+          "count": 400,
+          "mean": 64,
+          "p50": 64.0,
+          "p95": 64,
+          "p99": 64,
+          "max": 64
+        },
+        "surface_candidates": {
+          "count": 400,
+          "mean": 63.935,
+          "p50": 64.0,
+          "p95": 64.0,
+          "p99": 64.0,
+          "max": 64.0
+        },
+        "candidate_phone_mean": {
+          "count": 400,
+          "mean": 7.2073046875,
+          "p50": 7.078125,
+          "p95": 8.078125,
+          "p99": 10.953125,
+          "max": 11.3125
+        },
+        "candidate_phone_max": {
+          "count": 400,
+          "mean": 18.3575,
+          "p50": 15.0,
+          "p95": 32,
+          "p99": 34,
+          "max": 40
+        },
+        "candidate_phone_sum": {
+          "count": 400,
+          "mean": 461.2675,
+          "p50": 453.0,
+          "p95": 517,
+          "p99": 701,
+          "max": 724
+        },
+        "candidate_phone_square_sum": {
+          "count": 400,
+          "mean": 4056.0825,
+          "p50": 3667.5,
+          "p95": 5574,
+          "p99": 12606,
+          "max": 12809
+        }
+      },
+      "time_share_of_sum": {
+        "decode_ms": 0.03446018772326402,
+        "anchor_ms": 0.6765252860129614,
+        "rerank_ms": 0.2638616208786968,
+        "sort_ms": 0.0011595563347709757,
+        "gate_ms": 0.000430835833118386,
+        "merge_ms": 0.019891489124690902,
+        "unattributed_ms": 0.003671024092497551
+      },
+      "over_50ms": 1,
+      "correlations_descriptive_only": {
+        "audio_seconds__pure_ms": 0.3781252639495026,
+        "decoded_phones__anchor_ms": 0.3743767196681929,
+        "postings__anchor_ms": 0.34263464396326493,
+        "variant_candidates__rerank_ms": null,
+        "candidate_phone_sum__rerank_ms": 0.9414597406336198,
+        "candidate_phone_square_sum__rerank_ms": 0.9501629119471598
+      },
+      "candidate_language_occurrences": {
+        "en": 1398,
+        "pt-BR": 18387,
+        "es": 5815
+      }
+    }
+  },
+  "by_prefix_duration": {
+    "en": {
+      "(0,2]s": {
+        "queries": 6000,
+        "pure_ms": {
+          "count": 6000,
+          "mean": 1.8038552709428284,
+          "p50": 1.1092870263382792,
+          "p95": 4.5342500088736415,
+          "p99": 6.080307997763157,
+          "max": 18.137956969439983
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.42773815370552865,
+          "anchor_ms": 0.5336158070907308,
+          "rerank_ms": 0.5339794529330296,
+          "sort_ms": 0.007922371364353845,
+          "gate_ms": 0.003954111443211635,
+          "merge_ms": 0.27185296137273934
+        },
+        "mean_decoded_phones": 3.4778333333333333,
+        "mean_postings": 64.34016666666666,
+        "mean_candidate_phone_sum": 152.07483333333334
+      },
+      "(10,12]s": {
+        "queries": 314,
+        "pure_ms": {
+          "count": 314,
+          "mean": 7.422001488880509,
+          "p50": 7.33129697619006,
+          "p95": 10.547203128226101,
+          "p99": 12.22090795636177,
+          "max": 17.182655981741846
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.4923246792743018,
+          "anchor_ms": 3.750527265354113,
+          "rerank_ms": 2.812998442744516,
+          "sort_ms": 0.017331688439437918,
+          "gate_ms": 0.0064975206123273465,
+          "merge_ms": 0.2971574527680115
+        },
+        "mean_decoded_phones": 44.15605095541401,
+        "mean_postings": 1068.0445859872611,
+        "mean_candidate_phone_sum": 323.04777070063693
+      },
+      "(12,inf)s": {
+        "queries": 144,
+        "pure_ms": {
+          "count": 144,
+          "mean": 7.937000905965558,
+          "p50": 8.126715023536235,
+          "p95": 11.163969989866018,
+          "p99": 12.288795900531113,
+          "max": 12.326516094617546
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.4978072837628942,
+          "anchor_ms": 4.225637905215586,
+          "rerank_ms": 2.8446581377971194,
+          "sort_ms": 0.017410651101575542,
+          "gate_ms": 0.006517661353831904,
+          "merge_ms": 0.2976278362136024
+        },
+        "mean_decoded_phones": 49.65277777777778,
+        "mean_postings": 1228.8819444444443,
+        "mean_candidate_phone_sum": 323.88194444444446
+      },
+      "(2,4]s": {
+        "queries": 6000,
+        "pure_ms": {
+          "count": 6000,
+          "mean": 5.063136373471934,
+          "p50": 4.851726582273841,
+          "p95": 7.3394590290263295,
+          "p99": 9.138799039646983,
+          "max": 293.70037897024304
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.4433412683041145,
+          "anchor_ms": 1.7883440294923882,
+          "rerank_ms": 2.4632612348456555,
+          "sort_ms": 0.018259317575333018,
+          "gate_ms": 0.006215918168891221,
+          "merge_ms": 0.3049710482591763
+        },
+        "mean_decoded_phones": 17.613166666666668,
+        "mean_postings": 365.30383333333333,
+        "mean_candidate_phone_sum": 327.34066666666666
+      },
+      "(4,6]s": {
+        "queries": 5717,
+        "pure_ms": {
+          "count": 5717,
+          "mean": 5.7609053796167995,
+          "p50": 5.364454002119601,
+          "p95": 8.193859830498695,
+          "p99": 9.825888904742897,
+          "max": 276.6802308615297
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.4597779705736689,
+          "anchor_ms": 2.3083507916977237,
+          "rerank_ms": 2.6194776479604114,
+          "sort_ms": 0.01825081710360758,
+          "gate_ms": 0.006378588218776907,
+          "merge_ms": 0.30853825946137614
+        },
+        "mean_decoded_phones": 23.180164421899597,
+        "mean_postings": 498.62707713835925,
+        "mean_candidate_phone_sum": 325.69232114745495
+      },
+      "(6,8]s": {
+        "queries": 3451,
+        "pure_ms": {
+          "count": 3451,
+          "mean": 6.079833728083988,
+          "p50": 5.761405918747187,
+          "p95": 8.790236082859337,
+          "p99": 10.406310088001192,
+          "max": 284.46112701203674
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.454997077100659,
+          "anchor_ms": 2.579853778758435,
+          "rerank_ms": 2.6735192366776666,
+          "sort_ms": 0.01801906475515011,
+          "gate_ms": 0.006436361643582608,
+          "merge_ms": 0.3059792421880696
+        },
+        "mean_decoded_phones": 27.74239350912779,
+        "mean_postings": 613.9513184584179,
+        "mean_candidate_phone_sum": 324.94059692842654
+      },
+      "(8,10]s": {
+        "queries": 1160,
+        "pure_ms": {
+          "count": 1160,
+          "mean": 6.863593120842466,
+          "p50": 6.382016988936812,
+          "p95": 9.803929133340716,
+          "p99": 11.284204898402095,
+          "max": 262.06454110797495
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.4699073897490021,
+          "anchor_ms": 3.2902662362301207,
+          "rerank_ms": 2.7353824000877873,
+          "sort_ms": 0.01765471212726472,
+          "gate_ms": 0.006463146840768127,
+          "merge_ms": 0.3009128057124928
+        },
+        "mean_decoded_phones": 35.61810344827586,
+        "mean_postings": 812.9853448275862,
+        "mean_candidate_phone_sum": 323.0508620689655
+      }
+    },
+    "es": {
+      "(0,2]s": {
+        "queries": 400,
+        "pure_ms": {
+          "count": 400,
+          "mean": 9.711801779340021,
+          "p50": 9.663690987508744,
+          "p95": 15.066329040564597,
+          "p99": 15.845739981159568,
+          "max": 17.965049017220736
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.4869175111525692,
+          "anchor_ms": 4.929837303352542,
+          "rerank_ms": 3.868492049514316,
+          "sort_ms": 0.02067309891572222,
+          "gate_ms": 0.0071184473927132785,
+          "merge_ms": 0.3515142865944654
+        },
+        "mean_decoded_phones": 19.3325,
+        "mean_postings": 1304.99,
+        "mean_candidate_phone_sum": 482.37
+      },
+      "(10,12]s": {
+        "queries": 88,
+        "pure_ms": {
+          "count": 88,
+          "mean": 34.61009332254021,
+          "p50": 26.901176490355283,
+          "p95": 43.96152892149985,
+          "p99": 286.6430269787088,
+          "max": 286.6430269787088
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.7333357260160317,
+          "anchor_ms": 28.352032009438105,
+          "rerank_ms": 5.08676836034283,
+          "sort_ms": 0.018985160171392967,
+          "gate_ms": 0.007719578041525727,
+          "merge_ms": 0.3340017534686591
+        },
+        "mean_decoded_phones": 129.10227272727272,
+        "mean_postings": 10206.647727272728,
+        "mean_candidate_phone_sum": 495.1363636363636
+      },
+      "(12,inf)s": {
+        "queries": 68,
+        "pure_ms": {
+          "count": 68,
+          "mean": 40.85514942519641,
+          "p50": 31.12259297631681,
+          "p95": 68.9351549372077,
+          "p99": 280.22885601967573,
+          "max": 280.22885601967573
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.7887621793676826,
+          "anchor_ms": 34.52141965424423,
+          "rerank_ms": 5.105735371163225,
+          "sort_ms": 0.01899206408244722,
+          "gate_ms": 0.007694335448939134,
+          "merge_ms": 0.32853243721868186
+        },
+        "mean_decoded_phones": 158.39705882352942,
+        "mean_postings": 12716.04411764706,
+        "mean_candidate_phone_sum": 495.8235294117647
+      },
+      "(2,4]s": {
+        "queries": 400,
+        "pure_ms": {
+          "count": 400,
+          "mean": 15.805200682079885,
+          "p50": 14.369209471624345,
+          "p95": 21.417619078420103,
+          "p99": 23.896772996522486,
+          "max": 248.3641660073772
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.53072363283718,
+          "anchor_ms": 10.1290249984595,
+          "rerank_ms": 4.719140142842662,
+          "sort_ms": 0.02027504291618243,
+          "gate_ms": 0.007603018020745367,
+          "merge_ms": 0.3429706592578441
+        },
+        "mean_decoded_phones": 42.7625,
+        "mean_postings": 3082.4825,
+        "mean_candidate_phone_sum": 487.32
+      },
+      "(4,6]s": {
+        "queries": 366,
+        "pure_ms": {
+          "count": 366,
+          "mean": 19.069155396020825,
+          "p50": 17.72047154372558,
+          "p95": 26.756330975331366,
+          "p99": 29.077711049467325,
+          "max": 293.3768209768459
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.5165681658348302,
+          "anchor_ms": 13.093626441858973,
+          "rerank_ms": 5.021285985805135,
+          "sort_ms": 0.020043274942439435,
+          "gate_ms": 0.007757060789589674,
+          "merge_ms": 0.3499705980587852
+        },
+        "mean_decoded_phones": 59.704918032786885,
+        "mean_postings": 4398.071038251366,
+        "mean_candidate_phone_sum": 495.6803278688525
+      },
+      "(6,8]s": {
+        "queries": 241,
+        "pure_ms": {
+          "count": 241,
+          "mean": 26.042329291890365,
+          "p50": 21.260861889459193,
+          "p95": 31.724452041089535,
+          "p99": 260.1947420043871,
+          "max": 315.13000500854105
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.5673365662631837,
+          "anchor_ms": 19.945829956989378,
+          "rerank_ms": 5.092650344228194,
+          "sort_ms": 0.01957166758346607,
+          "gate_ms": 0.007727271316889905,
+          "merge_ms": 0.34405767707022766
+        },
+        "mean_decoded_phones": 81.2448132780083,
+        "mean_postings": 6197.348547717842,
+        "mean_candidate_phone_sum": 498.78008298755185
+      },
+      "(8,10]s": {
+        "queries": 143,
+        "pure_ms": {
+          "count": 143,
+          "mean": 31.294555326767423,
+          "p50": 24.800256942398846,
+          "p95": 37.279126001521945,
+          "p99": 295.5706170760095,
+          "max": 310.4449789971113
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.6165745866751963,
+          "anchor_ms": 25.143746787297925,
+          "rerank_ms": 5.0995116939416505,
+          "sort_ms": 0.019189283753243778,
+          "gate_ms": 0.007675797027255689,
+          "merge_ms": 0.3364622418710089
+        },
+        "mean_decoded_phones": 107.06293706293707,
+        "mean_postings": 8441.839160839161,
+        "mean_candidate_phone_sum": 502.23776223776224
+      }
+    },
+    "pt": {
+      "(0,2]s": {
+        "queries": 400,
+        "pure_ms": {
+          "count": 400,
+          "mean": 6.261890123132616,
+          "p50": 5.726754083298147,
+          "p95": 8.804797078482807,
+          "p99": 9.833763004280627,
+          "max": 288.9128929236904
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.47802110901102424,
+          "anchor_ms": 3.0823007598519325,
+          "rerank_ms": 2.3355622158851475,
+          "sort_ms": 0.017326806264463812,
+          "gate_ms": 0.005747324030380696,
+          "merge_ms": 0.30514533689711243
+        },
+        "mean_decoded_phones": 13.765,
+        "mean_postings": 580.195,
+        "mean_candidate_phone_sum": 397.63
+      },
+      "(10,12]s": {
+        "queries": 118,
+        "pure_ms": {
+          "count": 118,
+          "mean": 18.712034809079526,
+          "p50": 18.156792444642633,
+          "p95": 23.06883386336267,
+          "p99": 23.95784400869161,
+          "max": 24.10176699049771
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.52429129412966,
+          "anchor_ms": 13.658912458764863,
+          "rerank_ms": 4.133714154812555,
+          "sort_ms": 0.017743985863181495,
+          "gate_ms": 0.006589970464612973,
+          "merge_ms": 0.3059823421161559
+        },
+        "mean_decoded_phones": 105.54237288135593,
+        "mean_postings": 5339.483050847458,
+        "mean_candidate_phone_sum": 454.02542372881356
+      },
+      "(12,inf)s": {
+        "queries": 131,
+        "pure_ms": {
+          "count": 131,
+          "mean": 27.20051598539647,
+          "p50": 21.37673506513238,
+          "p95": 27.920812950469553,
+          "p99": 267.10169401485473,
+          "max": 280.9264570241794
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.6273921698203865,
+          "anchor_ms": 21.958658527689522,
+          "rerank_ms": 4.2147365548000995,
+          "sort_ms": 0.017756163426994823,
+          "gate_ms": 0.006725936985880364,
+          "merge_ms": 0.30471209369116387
+        },
+        "mean_decoded_phones": 129.48091603053436,
+        "mean_postings": 6735.251908396946,
+        "mean_candidate_phone_sum": 456.59541984732823
+      },
+      "(2,4]s": {
+        "queries": 400,
+        "pure_ms": {
+          "count": 400,
+          "mean": 10.787027289916296,
+          "p50": 10.192536981776357,
+          "p95": 12.800322961993515,
+          "p99": 14.125418965704739,
+          "max": 253.1042699702084
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.457066505914554,
+          "anchor_ms": 6.195465670607518,
+          "rerank_ms": 3.766069816192612,
+          "sort_ms": 0.017935346986632794,
+          "gate_ms": 0.006410092173609883,
+          "merge_ms": 0.29667995462659746
+        },
+        "mean_decoded_phones": 36.3825,
+        "mean_postings": 1669.5975,
+        "mean_candidate_phone_sum": 463.935
+      },
+      "(4,6]s": {
+        "queries": 388,
+        "pure_ms": {
+          "count": 388,
+          "mean": 12.994741964857239,
+          "p50": 12.308579520322382,
+          "p95": 15.415218891575933,
+          "p99": 18.08350591454655,
+          "max": 287.6904340228066
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.5050170467566392,
+          "anchor_ms": 8.173029437437942,
+          "rerank_ms": 3.9314617266033576,
+          "sort_ms": 0.017841131133555444,
+          "gate_ms": 0.0065374647185552056,
+          "merge_ms": 0.3093755773998336
+        },
+        "mean_decoded_phones": 50.847938144329895,
+        "mean_postings": 2424.9819587628867,
+        "mean_candidate_phone_sum": 461.0438144329897
+      },
+      "(6,8]s": {
+        "queries": 258,
+        "pure_ms": {
+          "count": 258,
+          "mean": 14.456649864987694,
+          "p50": 14.31426650378853,
+          "p95": 18.63052893895656,
+          "p99": 21.21555502526462,
+          "max": 21.69662492815405
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.5283873079727267,
+          "anchor_ms": 9.50192124131605,
+          "rerank_ms": 4.03944098809373,
+          "sort_ms": 0.017693223857660163,
+          "gate_ms": 0.0066651787623301035,
+          "merge_ms": 0.30689323077324865
+        },
+        "mean_decoded_phones": 67.74418604651163,
+        "mean_postings": 3337.124031007752,
+        "mean_candidate_phone_sum": 458.67054263565893
+      },
+      "(8,10]s": {
+        "queries": 167,
+        "pure_ms": {
+          "count": 167,
+          "mean": 19.857530036667907,
+          "p50": 16.556433052755892,
+          "p95": 21.401523961685598,
+          "p99": 263.18171608727425,
+          "max": 272.8932889876887
+        },
+        "stage_mean_ms": {
+          "decode_ms": 0.5113385502014778,
+          "anchor_ms": 14.886449959720235,
+          "rerank_ms": 4.066746117279469,
+          "sort_ms": 0.01772932574420632,
+          "gate_ms": 0.006594614984612622,
+          "merge_ms": 0.3077483033304086
+        },
+        "mean_decoded_phones": 88.61077844311377,
+        "mean_postings": 4474.077844311377,
+        "mean_candidate_phone_sum": 452.2634730538922
+      }
+    }
+  },
+  "by_dataset": {
+    "en_chile": {
+      "queries": 7787,
+      "pure_ms": {
+        "count": 7787,
+        "mean": 4.620839037834504,
+        "p50": 4.740872071124613,
+        "p95": 7.911439170129597,
+        "p99": 9.481103043071926,
+        "max": 284.46112701203674
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.44656513101302053,
+        "anchor_ms": 1.8261173778959026,
+        "rerank_ms": 2.0008952238112476,
+        "sort_ms": 0.01534183095055615,
+        "gate_ms": 0.005598221975495302,
+        "merge_ms": 0.2904690685966048
+      }
+    },
+    "en_colombia": {
+      "queries": 7684,
+      "pure_ms": {
+        "count": 7684,
+        "mean": 4.436255070496131,
+        "p50": 4.6868675271980464,
+        "p95": 7.673629908822477,
+        "p99": 9.316532057709992,
+        "max": 269.06648906879127
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.44111332654982577,
+        "anchor_ms": 1.7271532739018358,
+        "rerank_ms": 1.927599894148426,
+        "sort_ms": 0.014453424729977942,
+        "gate_ms": 0.005414708660995972,
+        "merge_ms": 0.28595088772077687
+      }
+    },
+    "en_mexico": {
+      "queries": 7315,
+      "pure_ms": {
+        "count": 7315,
+        "mean": 4.987436662503198,
+        "p50": 5.061990930698812,
+        "p95": 8.839627960696816,
+        "p99": 10.827025049366057,
+        "max": 293.70037897024304
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.4551840597071054,
+        "anchor_ms": 1.9334409243324726,
+        "rerank_ms": 2.222641134428997,
+        "sort_ms": 0.016611844736647296,
+        "gate_ms": 0.006148255600766498,
+        "merge_ms": 0.31536392299732113
+      }
+    },
+    "wave1_es": {
+      "queries": 498,
+      "pure_ms": {
+        "count": 498,
+        "mean": 20.188330900135362,
+        "p50": 17.27970247156918,
+        "p95": 29.87397206015885,
+        "p99": 253.96006600931287,
+        "max": 279.10762396641076
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.4631203852208653,
+        "anchor_ms": 15.114890443522064,
+        "rerank_ms": 4.224274893306256,
+        "sort_ms": 0.017760712821709823,
+        "gate_ms": 0.00671182556197526,
+        "merge_ms": 0.3052620040944751
+      }
+    },
+    "wave1_pt": {
+      "queries": 616,
+      "pure_ms": {
+        "count": 616,
+        "mean": 15.001747777606905,
+        "p50": 13.340040983166546,
+        "p95": 22.221487015485764,
+        "p99": 27.348593110218644,
+        "max": 280.9264570241794
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.5269171653070499,
+        "anchor_ms": 10.402275541723197,
+        "rerank_ms": 3.686167084870485,
+        "sort_ms": 0.018281327498556633,
+        "gate_ms": 0.006505308216195795,
+        "merge_ms": 0.3070788553994536
+      }
+    },
+    "wave2_es": {
+      "queries": 527,
+      "pure_ms": {
+        "count": 527,
+        "mean": 22.45052503218673,
+        "p50": 18.95953284110874,
+        "p95": 37.82241512089968,
+        "p99": 77.34067994169891,
+        "max": 315.13000500854105
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.6719690803226359,
+        "anchor_ms": 16.642513069274713,
+        "rerank_ms": 4.694443076550324,
+        "sort_ms": 0.020067064370783275,
+        "gate_ms": 0.007630513620472724,
+        "merge_ms": 0.35108318746768546
+      }
+    },
+    "wave2_pt": {
+      "queries": 533,
+      "pure_ms": {
+        "count": 533,
+        "mean": 14.591313317578852,
+        "p50": 13.384015066549182,
+        "p95": 22.529996000230312,
+        "p99": 27.62156492099166,
+        "max": 288.9128929236904
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.4914779153584344,
+        "anchor_ms": 10.187484346038364,
+        "rerank_ms": 3.529893545613853,
+        "sort_ms": 0.017483236869241463,
+        "gate_ms": 0.006343762907522816,
+        "merge_ms": 0.3052441620374514
+      }
+    },
+    "wave3_es": {
+      "queries": 340,
+      "pure_ms": {
+        "count": 340,
+        "mean": 20.07472797687275,
+        "p50": 18.132406403310597,
+        "p95": 28.321435092948377,
+        "p99": 32.7782939421013,
+        "max": 295.5706170760095
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.5719136628185344,
+        "anchor_ms": 13.177289919215529,
+        "rerank_ms": 5.812426896848003,
+        "sort_ms": 0.024202668368268537,
+        "gate_ms": 0.00927672817317002,
+        "merge_ms": 0.4139893195208381
+      }
+    },
+    "wave3_pt": {
+      "queries": 313,
+      "pure_ms": {
+        "count": 313,
+        "mean": 11.209993082405136,
+        "p50": 11.254695942625403,
+        "p95": 15.758495894260705,
+        "p99": 21.649297908879817,
+        "max": 24.0941479569301
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.4626608810003716,
+        "anchor_ms": 6.390652461974218,
+        "rerank_ms": 3.9800926656149826,
+        "sort_ms": 0.01815524727356034,
+        "gate_ms": 0.006454909732118963,
+        "merge_ms": 0.3031518082684888
+      }
+    },
+    "wave4_es": {
+      "queries": 341,
+      "pure_ms": {
+        "count": 341,
+        "mean": 14.811290356349692,
+        "p50": 13.881302089430392,
+        "p95": 21.74730703700334,
+        "p99": 27.280064066872,
+        "max": 248.3641660073772
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.4691371091305554,
+        "anchor_ms": 9.62653947527086,
+        "rerank_ms": 4.311854928893056,
+        "sort_ms": 0.01902933760964014,
+        "gate_ms": 0.0069567802583367245,
+        "merge_ms": 0.3250729957666478
+      }
+    },
+    "wave4_pt": {
+      "queries": 400,
+      "pure_ms": {
+        "count": 400,
+        "mean": 10.379658165911678,
+        "p50": 10.629528434947133,
+        "p95": 15.711817075498402,
+        "p99": 20.245315972715616,
+        "max": 287.6904340228066
+      },
+      "stage_mean_ms": {
+        "decode_ms": 0.5110057798447087,
+        "anchor_ms": 6.175264109915588,
+        "rerank_ms": 3.3235247744596563,
+        "sort_ms": 0.016775654221419245,
+        "gate_ms": 0.006175629096105695,
+        "merge_ms": 0.30155308049870655
+      }
+    }
+  },
+  "slowest_5_per_language": {
+    "en": [
+      {
+        "group": "en_mexico",
+        "sample_id": "210085_quite_0207",
+        "step": 1,
+        "audio_seconds": 4.0,
+        "decoded_phones": 24,
+        "postings": 543.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 4.96875,
+        "candidate_phone_max": 12,
+        "candidate_phone_sum": 318,
+        "candidate_phone_square_sum": 1868,
+        "candidate_languages": {
+          "en": 59,
+          "pt-BR": 4,
+          "es": 1
+        },
+        "decode_ms": 2.530663041397929,
+        "anchor_ms": 287.2357269516215,
+        "rerank_ms": 3.3834100468084216,
+        "sort_ms": 0.03053806722164154,
+        "gate_ms": 0.012443051673471928,
+        "merge_ms": 0.4289420321583748,
+        "unattributed_ms": 0.07865577936172485,
+        "pure_ms": 293.70037897024304,
+        "evidence_file": "prefix_shards/en_mexico/53109f5e9e9496060f29/000001.json"
+      },
+      {
+        "group": "en_chile",
+        "sample_id": "200649_quite_591031",
+        "step": 3,
+        "audio_seconds": 8.0,
+        "decoded_phones": 42,
+        "postings": 1383.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 5.9375,
+        "candidate_phone_max": 12,
+        "candidate_phone_sum": 380,
+        "candidate_phone_square_sum": 2542,
+        "candidate_languages": {
+          "en": 63,
+          "pt-BR": 1
+        },
+        "decode_ms": 0.718201044946909,
+        "anchor_ms": 279.97063694056123,
+        "rerank_ms": 3.367146011441946,
+        "sort_ms": 0.0224399846047163,
+        "gate_ms": 0.007285969331860542,
+        "merge_ms": 0.3231070004403591,
+        "unattributed_ms": 0.05231006070971489,
+        "pure_ms": 284.46112701203674,
+        "evidence_file": "prefix_shards/en_chile/9a355e2fc60212b3497d/000003.json"
+      },
+      {
+        "group": "en_chile",
+        "sample_id": "200112_quite_0138",
+        "step": 2,
+        "audio_seconds": 4.89,
+        "decoded_phones": 19,
+        "postings": 385.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 4.96875,
+        "candidate_phone_max": 12,
+        "candidate_phone_sum": 318,
+        "candidate_phone_square_sum": 1814,
+        "candidate_languages": {
+          "en": 62,
+          "pt-BR": 2
+        },
+        "decode_ms": 0.15081895980983973,
+        "anchor_ms": 273.64395605400205,
+        "rerank_ms": 2.458736998960376,
+        "sort_ms": 0.024611945264041424,
+        "gate_ms": 0.01082499511539936,
+        "merge_ms": 0.33176993019878864,
+        "unattributed_ms": 0.059511978179216385,
+        "pure_ms": 276.6802308615297,
+        "evidence_file": "prefix_shards/en_chile/d0e1284997567a9c6fe4/000002.json"
+      },
+      {
+        "group": "en_colombia",
+        "sample_id": "170658_quite_226373",
+        "step": 2,
+        "audio_seconds": 6.0,
+        "decoded_phones": 43,
+        "postings": 990.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 5.15625,
+        "candidate_phone_max": 12,
+        "candidate_phone_sum": 330,
+        "candidate_phone_square_sum": 1958,
+        "candidate_languages": {
+          "en": 64
+        },
+        "decode_ms": 0.37680601235479116,
+        "anchor_ms": 265.39494399912655,
+        "rerank_ms": 2.882512053474784,
+        "sort_ms": 0.02356991171836853,
+        "gate_ms": 0.006877933628857136,
+        "merge_ms": 0.32807106617838144,
+        "unattributed_ms": 0.05370809230953455,
+        "pure_ms": 269.06648906879127,
+        "evidence_file": "prefix_shards/en_colombia/0edb93ca9fcca0fc6da1/000002.json"
+      },
+      {
+        "group": "en_mexico",
+        "sample_id": "210951_quite_669498",
+        "step": 2,
+        "audio_seconds": 6.0,
+        "decoded_phones": 18,
+        "postings": 536.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 4.484375,
+        "candidate_phone_max": 10,
+        "candidate_phone_sum": 287,
+        "candidate_phone_square_sum": 1477,
+        "candidate_languages": {
+          "en": 64
+        },
+        "decode_ms": 0.4771249368786812,
+        "anchor_ms": 263.317943084985,
+        "rerank_ms": 2.3850240977481008,
+        "sort_ms": 0.022743013687431812,
+        "gate_ms": 0.006967107765376568,
+        "merge_ms": 0.32944593112915754,
+        "unattributed_ms": 0.0451777596026659,
+        "pure_ms": 266.58442593179643,
+        "evidence_file": "prefix_shards/en_mexico/0b77f6f67dc733797c6a/000002.json"
+      }
+    ],
+    "es": [
+      {
+        "group": "wave2_es",
+        "sample_id": "es001_audit_0071",
+        "step": 3,
+        "audio_seconds": 8.0,
+        "decoded_phones": 95,
+        "postings": 8640.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.375,
+        "candidate_phone_max": 13,
+        "candidate_phone_sum": 472,
+        "candidate_phone_square_sum": 3818,
+        "candidate_languages": {
+          "pt-BR": 7,
+          "es": 57
+        },
+        "decode_ms": 2.5896409060806036,
+        "anchor_ms": 305.93597691040486,
+        "rerank_ms": 6.032785982824862,
+        "sort_ms": 0.028943992219865322,
+        "gate_ms": 0.010607996955513954,
+        "merge_ms": 0.43670693412423134,
+        "unattributed_ms": 0.09534228593111038,
+        "pure_ms": 315.13000500854105,
+        "evidence_file": "prefix_shards/wave2_es/dc5a33f122125ef43f3e/000003.json"
+      },
+      {
+        "group": "wave2_es",
+        "sample_id": "es001_audit_0087",
+        "step": 4,
+        "audio_seconds": 10.0,
+        "decoded_phones": 121,
+        "postings": 10209.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.46875,
+        "candidate_phone_max": 23,
+        "candidate_phone_sum": 478,
+        "candidate_phone_square_sum": 4236,
+        "candidate_languages": {
+          "es": 55,
+          "pt-BR": 9
+        },
+        "decode_ms": 0.24795799981802702,
+        "anchor_ms": 305.464823031798,
+        "rerank_ms": 4.262994043529034,
+        "sort_ms": 0.022500054910779,
+        "gate_ms": 0.007989001460373402,
+        "merge_ms": 0.35369000397622585,
+        "unattributed_ms": 0.08502486161887646,
+        "pure_ms": 310.4449789971113,
+        "evidence_file": "prefix_shards/wave2_es/5b86904a43efadb9de37/000004.json"
+      },
+      {
+        "group": "wave3_es",
+        "sample_id": "ES-AG_U0002__034",
+        "step": 4,
+        "audio_seconds": 8.2864375,
+        "decoded_phones": 75,
+        "postings": 5510.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.65625,
+        "candidate_phone_max": 21,
+        "candidate_phone_sum": 490,
+        "candidate_phone_square_sum": 4582,
+        "candidate_languages": {
+          "es": 55,
+          "pt-BR": 8,
+          "en": 1
+        },
+        "decode_ms": 0.593964010477066,
+        "anchor_ms": 288.0747599992901,
+        "rerank_ms": 6.352946977131069,
+        "sort_ms": 0.028479029424488544,
+        "gate_ms": 0.010419054888188839,
+        "merge_ms": 0.4276990657672286,
+        "unattributed_ms": 0.08234893903136253,
+        "pure_ms": 295.5706170760095,
+        "evidence_file": "prefix_shards/wave3_es/ae21143c0b648ef435fd/000004.json"
+      },
+      {
+        "group": "wave3_es",
+        "sample_id": "ES-AG_U0001__027",
+        "step": 2,
+        "audio_seconds": 5.06125,
+        "decoded_phones": 58,
+        "postings": 4499.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.09375,
+        "candidate_phone_max": 13,
+        "candidate_phone_sum": 454,
+        "candidate_phone_square_sum": 3534,
+        "candidate_languages": {
+          "es": 58,
+          "pt-BR": 5,
+          "en": 1
+        },
+        "decode_ms": 0.6268629804253578,
+        "anchor_ms": 286.66046005673707,
+        "rerank_ms": 5.5544410133734345,
+        "sort_ms": 0.02842303365468979,
+        "gate_ms": 0.010472023859620094,
+        "merge_ms": 0.4208809696137905,
+        "unattributed_ms": 0.07528089918196201,
+        "pure_ms": 293.3768209768459,
+        "evidence_file": "prefix_shards/wave3_es/2b66cf79750619daa9de/000002.json"
+      },
+      {
+        "group": "wave2_es",
+        "sample_id": "es001_audit_0051",
+        "step": 5,
+        "audio_seconds": 12.0,
+        "decoded_phones": 134,
+        "postings": 11491.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.078125,
+        "candidate_phone_max": 12,
+        "candidate_phone_sum": 453,
+        "candidate_phone_square_sum": 3531,
+        "candidate_languages": {
+          "pt-BR": 7,
+          "es": 57
+        },
+        "decode_ms": 2.5830280501395464,
+        "anchor_ms": 279.49331200215966,
+        "rerank_ms": 4.102827049791813,
+        "sort_ms": 0.022562919184565544,
+        "gate_ms": 0.008090981282293797,
+        "merge_ms": 0.3464169567450881,
+        "unattributed_ms": 0.08678901940584183,
+        "pure_ms": 286.6430269787088,
+        "evidence_file": "prefix_shards/wave2_es/5a60805abd5ec7f0e38a/000005.json"
+      }
+    ],
+    "pt": [
+      {
+        "group": "wave2_pt",
+        "sample_id": "pt004_audit_0095",
+        "step": 0,
+        "audio_seconds": 2.0,
+        "decoded_phones": 19,
+        "postings": 560.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 5.703125,
+        "candidate_phone_max": 13,
+        "candidate_phone_sum": 365,
+        "candidate_phone_square_sum": 2375,
+        "candidate_languages": {
+          "en": 10,
+          "pt-BR": 33,
+          "es": 21
+        },
+        "decode_ms": 0.47349603846669197,
+        "anchor_ms": 285.41426290757954,
+        "rerank_ms": 2.6026780251413584,
+        "sort_ms": 0.02475001383572817,
+        "gate_ms": 0.007178052328526974,
+        "merge_ms": 0.3395789535716176,
+        "unattributed_ms": 0.05094893276691437,
+        "pure_ms": 288.9128929236904,
+        "evidence_file": "prefix_shards/wave2_pt/a8e84ca1c30ef9fa0657/000000.json"
+      },
+      {
+        "group": "wave4_pt",
+        "sample_id": "PT001_audit_0001",
+        "step": 2,
+        "audio_seconds": 6.0,
+        "decoded_phones": 49,
+        "postings": 2474.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.59375,
+        "candidate_phone_max": 15,
+        "candidate_phone_sum": 486,
+        "candidate_phone_square_sum": 4122,
+        "candidate_languages": {
+          "pt-BR": 46,
+          "es": 15,
+          "en": 3
+        },
+        "decode_ms": 0.17693801783025265,
+        "anchor_ms": 282.82093291636556,
+        "rerank_ms": 4.237356944940984,
+        "sort_ms": 0.024190056137740612,
+        "gate_ms": 0.00758306123316288,
+        "merge_ms": 0.35759003367275,
+        "unattributed_ms": 0.06584299262613058,
+        "pure_ms": 287.6904340228066,
+        "evidence_file": "prefix_shards/wave4_pt/18f47a5589eca7b00d9b/000002.json"
+      },
+      {
+        "group": "wave1_pt",
+        "sample_id": "pt_audit_0004",
+        "step": 8,
+        "audio_seconds": 18.0,
+        "decoded_phones": 123,
+        "postings": 7654.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 6.8125,
+        "candidate_phone_max": 12,
+        "candidate_phone_sum": 436,
+        "candidate_phone_square_sum": 3198,
+        "candidate_languages": {
+          "en": 3,
+          "pt-BR": 40,
+          "es": 21
+        },
+        "decode_ms": 0.5885730497539043,
+        "anchor_ms": 276.0135040152818,
+        "rerank_ms": 3.875461989082396,
+        "sort_ms": 0.02229108940809965,
+        "gate_ms": 0.006982940249145031,
+        "merge_ms": 0.33013103529810905,
+        "unattributed_ms": 0.08951290510594845,
+        "pure_ms": 280.9264570241794,
+        "evidence_file": "prefix_shards/wave1_pt/582fca3e68b4d55dd9ee/000008.json"
+      },
+      {
+        "group": "wave2_pt",
+        "sample_id": "pt004_audit_0025",
+        "step": 4,
+        "audio_seconds": 10.0,
+        "decoded_phones": 104,
+        "postings": 5024.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 10.890625,
+        "candidate_phone_max": 34,
+        "candidate_phone_sum": 697,
+        "candidate_phone_square_sum": 12563,
+        "candidate_languages": {
+          "es": 14,
+          "pt-BR": 46,
+          "en": 4
+        },
+        "decode_ms": 0.687708961777389,
+        "anchor_ms": 264.2206309828907,
+        "rerank_ms": 7.5539480894804,
+        "sort_ms": 0.022946973331272602,
+        "gate_ms": 0.0073249684646725655,
+        "merge_ms": 0.326526933349669,
+        "unattributed_ms": 0.07420207839459181,
+        "pure_ms": 272.8932889876887,
+        "evidence_file": "prefix_shards/wave2_pt/bc7368889b0849a40a19/000004.json"
+      },
+      {
+        "group": "wave1_pt",
+        "sample_id": "pt_audit_0040",
+        "step": 7,
+        "audio_seconds": 16.0,
+        "decoded_phones": 130,
+        "postings": 6664.0,
+        "variant_candidates": 64,
+        "surface_candidates": 64.0,
+        "candidate_phone_mean": 7.53125,
+        "candidate_phone_max": 20,
+        "candidate_phone_sum": 482,
+        "candidate_phone_square_sum": 4184,
+        "candidate_languages": {
+          "es": 22,
+          "en": 4,
+          "pt-BR": 38
+        },
+        "decode_ms": 0.5929080070927739,
+        "anchor_ms": 261.6642960347235,
+        "rerank_ms": 4.414636990986764,
+        "sort_ms": 0.02223299816250801,
+        "gate_ms": 0.007633003406226635,
+        "merge_ms": 0.32155297230929136,
+        "unattributed_ms": 0.07843400817364454,
+        "pure_ms": 267.10169401485473,
+        "evidence_file": "prefix_shards/wave1_pt/d0a8901b359a3d8c00dc/000007.json"
+      }
+    ]
+  }
+}
