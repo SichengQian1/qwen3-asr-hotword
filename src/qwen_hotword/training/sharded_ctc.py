@@ -44,6 +44,8 @@ class FeatureShardDescriptor:
     feature_sha256: str
     sample_ids: tuple[str, ...]
     ctc_time_upsampling_factor: int
+    replacement: FeatureShardDescriptor | None = None
+    replacement_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -459,6 +461,31 @@ def load_feature_shard(
                 token_ids=token_ids,
             )
         )
+    if descriptor.replacement is not None:
+        if descriptor.replacement.replacement is not None:
+            raise ValueError("nested feature replacements are not supported")
+        selected = set(descriptor.replacement_ids)
+        if not selected or not selected <= set(descriptor.sample_ids):
+            raise ValueError("feature replacement IDs must be a nonempty subset of the base shard")
+        replacements = {
+            sample.sample_id: sample
+            for sample in load_feature_shard(
+                descriptor.replacement, num_classes=num_classes, blank_id=blank_id
+            )
+        }
+        if not selected <= replacements.keys():
+            raise ValueError("noise cache is missing selected feature replacements")
+        for index, sample in enumerate(samples):
+            if sample.sample_id in selected:
+                replacement = replacements[sample.sample_id]
+                if (
+                    replacement.token_ids != sample.token_ids
+                    or replacement.hidden_states.shape != sample.hidden_states.shape
+                ):
+                    raise ValueError("noise replacement changes labels or Encoder frame lengths")
+                samples[index] = replacement
+    elif descriptor.replacement_ids:
+        raise ValueError("replacement IDs require a noise feature shard")
     return samples
 
 
@@ -493,6 +520,7 @@ def train_sharded_ctc_head(
     head_kernel_size: int = 5,
     head_dropout: float = 0.1,
     head_time_upsampling_factor: int = 2,
+    initial_head_checkpoint: str | Path | None = None,
 ) -> ShardedCtcReport:
     import torch
 
@@ -553,6 +581,16 @@ def train_sharded_ctc_head(
         time_upsampling_factor=head_time_upsampling_factor,
     ).to(device=device, dtype=torch.float32)
     head_configuration = ctc_head_config(head)
+    initial_identity = None
+    if initial_head_checkpoint is not None:
+        from qwen_hotword.training.ctc_overfit import _load_head_checkpoint
+
+        initial_path = Path(initial_head_checkpoint).expanduser()
+        initial_identity = {
+            "path": str(initial_path.resolve()),
+            "sha256": _sha256_file(initial_path),
+        }
+        _load_head_checkpoint(initial_path, head, vocab)
     required_time_factor = max(
         train_cache.ctc_time_upsampling_factor,
         validation_cache.ctc_time_upsampling_factor,
@@ -591,6 +629,14 @@ def train_sharded_ctc_head(
         "early_stopping_metric": early_stopping_metric,
         "seed": seed,
     }
+    if initial_identity is not None:
+        fingerprint_hyperparameters["initial_head_checkpoint"] = initial_identity
+        initial_file = destination / "initial_head.json"
+        if initial_file.exists():
+            if _read_object(initial_file) != initial_identity:
+                raise ValueError("initial Head identity differs from the existing run")
+        else:
+            _write_json(initial_file, initial_identity)
     # Preserve the fingerprint of existing linear-Head runs so their training
     # state remains resumable after this feature was added.
     if head_configuration["head_type"] != "linear":
@@ -633,6 +679,10 @@ def train_sharded_ctc_head(
         head.load_state_dict(state["head_state_dict"], strict=True)
         optimizer.load_state_dict(state["optimizer_state_dict"])
         scheduler.load_state_dict(state["scheduler_state_dict"])
+        if "torch_rng_state" in state:
+            torch.set_rng_state(state["torch_rng_state"].cpu())
+            if torch.cuda.is_available() and state.get("cuda_rng_states"):
+                torch.cuda.set_rng_state_all([value.cpu() for value in state["cuda_rng_states"]])
         raw_history = state.get("history")
         if not isinstance(raw_history, list):
             raise ValueError("training state history must be a list")
@@ -678,7 +728,11 @@ def train_sharded_ctc_head(
             path.exists() for path in (training_state_path, metrics_path, best_checkpoint_path)
         ):
             raise ValueError("training output already exists; use --resume or a new output dir")
-        print("evaluating fresh random CTC head on validation cache", flush=True)
+        print(
+            "evaluating initial CTC head on validation cache "
+            + ("(warm start; fresh optimizer)" if initial_identity else "(random initialization)"),
+            flush=True,
+        )
         initial_validation_result = _evaluate_cache(
             head,
             validation_cache,
@@ -986,7 +1040,8 @@ def _train_cache_epoch(
                 target_lengths,
                 blank_id=blank_id,
             )
-            computation.loss.backward()  # type: ignore[no-untyped-call]
+            backward: Any = computation.loss.backward
+            backward()
             torch.nn.utils.clip_grad_norm_(head.parameters(), max_gradient_norm)
             optimizer.step()
             errors, references = _batch_error_counts(
@@ -1434,6 +1489,8 @@ def _save_training_state(
             },
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
+            "torch_rng_state": torch.get_rng_state(),
+            "cuda_rng_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
             "initial_validation": initial_validation.overall.to_dict(),
             "initial_validation_by_group": _validation_group_report(initial_validation),
             "best_epoch": best_epoch,

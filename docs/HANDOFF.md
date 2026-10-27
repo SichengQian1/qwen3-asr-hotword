@@ -1,5 +1,115 @@
 # 工作交接记录
 
+## 0.187 2026-10-27 三语全量480h/语种、MUSAN 10dB两比例增训入口（待工区）
+
+用户终止0.186的继续时延取证，明确批准执行简化流程：全量数据准备与自动检查 →
+30%/50%各增训一次 → 1.0/30%/50%统一评测。本轮不升级葡语G2P，不改90类或旧标签，
+不训练完整Qwen、不自动替换生产Head。以下为本地代码交付，不是H200质量结果。
+
+### 固定输入和实验条件
+
+- 分支 `codex/g2p-coverage-scan`；起点 `c855086142ed6b83afa644a4e40f32f1fddf37f6`。
+- 源run：`outputs/english_countries_refresh_newval_v1`，1.0 best27 Head SHA
+  `872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466`。
+  source plan/report SHA分别固定为`dbf8e6…fee83`、`57c44c…90398`，完整值在新配置中。
+- 原训练881749条：EN263609/ES296399/PT321741，各约480h；原验证7492条。
+  复用`outputs/english_countries_refresh_fast_v1/training/cache/train`与新验证缓存，
+  不重提原版Encoder特征，不改旧outputs。
+- 噪声 `/data/h00911716/data_noise/musan/noise`。用户ls含Free Sound843、Sound Bible87，
+  合930个WAV；本地只读了ls，实际文件/时长/许可元数据由工区prepare核验。
+- 原有业务带噪集是否来自同一MUSAN不明，用户批准先按非同源假设推进；报告保留
+  `business_noise_assumed_external_not_verified`，不伪称已证实独立。
+- 两组从同一1.0 Head加载权重，重建AdamW/训练计划；不是随机初始化Head，也不是
+  恢复1.0的旧optimizer。检查完整词表ID顺序、Head结构、源身份和缓存SHA。
+- 每语种30%组约144h加噪+336h原版，50%组约240h加噪+240h原版。按语言/来源/时长
+  分层、稳定哈希排序选择最接近目标时长的前缀，30%为50%的子集。报告记录实际小时，
+  不宣称整条录音选择能实现数学上精确的比例。每轮所有基础样本恰好使用一次。
+- 默认各10轮、batch256、LR3e-5、weight decay1e-4、clip5、seed20261027；这些是
+  增训起始配置，非已验证最优超参。为控制预算，两组固定同轮数、固定学习率，不按
+  各自早停缩短。best按六组（语言×原版/10dB）Macro PER、worst PER、loss选择。
+  epoch0也可保留为best；`completed`不等于增强成功。
+
+### 实现和正确性边界
+
+入口`configs/noise_finetune.workzone.json`、`scripts/run_noise_finetune.py`，实现拆在
+`training/noise_{audio,prepare,cache,run,evaluation}.py`。通用训练器增加可选warm start
+与按ID替换特征分片；不传新参数仍为原随机Head路径。新状态保存CPU/CUDA RNG，
+使本轮恢复保留dropout随机状态；旧无RNG状态仍可读取，但不据此承诺旧运行逐值重现。
+
+prepare自动解码噪声、记录原字节/标准化PCM SHA、排除不可用噪声并报告原因；完全相同
+PCM只保留一份，再按来源保留约10%原始噪声录音用于验证。未执行声学近重复检测，
+不把文件级检查称为近重复/说话人独立证明。保留原冻结语料既有的path-only去重边界，
+不重新扫描全语音库做内容去重，不读取sealed test标签。若源plan记录了本次有意修改的
+`sharded_ctc.py`/`ctc_overfit.py`旧代码SHA，仅保留为历史溯源；新实验锁定当前实现。
+其他源文件SHA仍必须一致；不会改写旧plan以绕过校验。
+
+噪声按固定文件/片段计划直接在波形上混入，再送冻结Encoder，未生成大批新WAV。
+采用原录音20ms帧能量高于最大帧能量-20dB的区间估计有效语音（不是人工VAD），在
+这些区间按功率定义10dB；原录音已有底噪时，仅声称“原录音相对新增噪声10dB”。
+短噪声可循环并记录；抽到静音片段时确定性地将噪声峰值对齐有效语音帧并记录实际
+offset；不丢语音行、不静默换标签。需要防削波时对混合物施加共同增益，保持SNR。
+逐条检查有限值、长度、SNR和峰值；mix audit保留本次读取的原语音SHA。
+
+只提取50%共享噪声池与验证噪声特征，30%引用其中子集；保持原分片、样本顺序和
+batch边界，避免比例变化额外改变采样预算。按片流式读取，内存不载入全语料特征。
+新特征约65GiB量级，建议额外预留100GiB；实际以prepare小时数和cache空间检查为准。
+一张已分配H200即可，物理卡号显式暴露为逻辑cuda:0；不自动抢占/选择空闲卡。
+
+验证使用同一原版验证集及整套固定10dB副本，训练噪声与验证噪声原文件隔离。最后
+重跑三个Head的业务原版/原有带噪音频，EN6000/ES400/PT400，全音频Top5/7联合4k。
+复用已冻结目标、4012发音及原门限，不按语言缩小检索表、不调门限；不是重跑2s
+累积前缀或最终LLM转写。返回分语种召回、参考外候选、真正无参考热词音频的误报率、
+纯检索时延和按音频配对bootstrap差异区间；若没有负样本，误报率为null，不补造负例。
+没有0%继续训练对照，不能把全部提升仅归因于噪声；自动标签PER不等于人工发音正确率，
+检索召回不等于最终WER，参考条件化热词表及原数据独立性限制均保留。
+
+### 拉取与执行（容器内）
+
+推送SHA以本轮最终回复为准，先对照`git rev-parse HEAD`。以下GPU4仅为示例，换成
+实际已分配的物理卡号。在同一Qwen环境运行，无需下载完整模型或重新运行MFA：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_noise_finetune.py prepare
+python -B scripts/run_noise_finetune.py train --gpu 4
+python -B scripts/run_noise_finetune.py evaluate --gpu 4
+```
+
+也可单条执行完整流程：`python -B scripts/run_noise_finetune.py all --gpu 4`。
+prepare为CPU/存储工作；train自动先提取共享噪声缓存，再顺序完成两个全量Head。
+只运行一组可加`train --ratio 30`或`train --ratio 50`；统一evaluate需要两组均完成。
+`cache --gpu 4`可单独提取缓存。全部阶段有真实计数/阶段/耗时及无进度时活动提示。
+
+默认新目录`outputs/multilingual_noise10db_finetune_v1`。首次prepare拒绝已有目录；
+换实验必须用新的`--output-dir`，后续命令保持同一目录。不要覆盖或删除历史outputs。
+中断后在相同命令添加`--resume`；完整准备恢复须已有prepared/plan标记，未完成prepare
+保留现场另选新目录；完整缓存分片按SHA复用，未完成分片重算；Head恢复该新实验的
+optimizer/scheduler/RNG。代码/配置/输入漂移拒绝恢复。已完成Head不追加epoch，已完成
+评测逐样本复用并验证；完成后all --resume不重训/重推理，但仍读取输入及校验文件。
+
+### 返回文件与核验
+
+```bash
+cat outputs/multilingual_noise10db_finetune_v1/prepared.json
+cat outputs/multilingual_noise10db_finetune_v1/head_30/completed.json
+cat outputs/multilingual_noise10db_finetune_v1/head_50/completed.json
+```
+
+每阶段生成/刷新该新实验自己的`return_bundle.zip`，内有SHA清单。返回此小包即可：
+`outputs/multilingual_noise10db_finetune_v1/return_bundle.zip`。包含准备/噪声清单、混音
+汇总、两Head报告/曲线/初始化身份，以及完成后的配对检索报告；不传权重/特征/音频。
+可在新空目录解包后运行`sha256sum -c sha256.txt`。全部完成后再决定是否采用新Head。
+
+本地验证使用合成WAV/小缓存和CPU真实Head训练，仅以替代Encoder隔离Qwen边界；覆盖
+实际SNR/防削波、静音噪声对齐、内容重复隔离、按时长嵌套配额、共享特征/顺序/标签、
+新optimizer、同权重初始化、RNG恢复、三Head原版/噪声配对评测及产物损坏拒绝。
+本地没有运行上述工区音频/完整Qwen，未获得新召回/PER/WER/H200时延或实际耗时。
+最终本地全量pytest为873 passed，其中新流程10项；修改范围Ruff、strict Mypy
+（8个源码/入口文件，本地依赖按Python3.12）、CLI help及git diff --check通过。
+保留原7份测试修改和未跟踪资料，不混入提交。
+
 ## 0.186 2026-10-27 联合4k带噪三语时延归因已核验，下一步先查英语解码序列偏短
 
 用户明确本轮关注“英语为什么快几倍”，不将语种差异自动认定为缺陷，也不以是否

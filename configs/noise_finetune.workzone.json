@@ -1,0 +1,14 @@
+{
+  "source_run": "outputs/english_countries_refresh_newval_v1",
+  "source_plan_sha256": "dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83",
+  "source_report_sha256": "57c44ca7d3cebea5696de607efd2af2bb3b26df231e951afde11b9ee84e90398",
+  "initial_head_sha256": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "noise_root": "/data/h00911716/data_noise/musan/noise",
+  "output": "outputs/multilingual_noise10db_finetune_v1",
+  "train_counts": {"en": 263609, "es": 296399, "pt": 321741},
+  "seed": 20261027,
+  "training": {"epochs": 10, "batch_size": 256, "learning_rate": 0.00003},
+  "evaluation_config": "configs/multilingual_stream_contexts.workzone.json"
+}

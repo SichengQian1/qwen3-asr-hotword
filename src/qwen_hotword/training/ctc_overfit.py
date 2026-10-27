@@ -137,10 +137,7 @@ def load_experiment_records(
                 raise ValueError(f"invalid JSON at {path}:{line_number}") from error
             if not isinstance(raw, dict):
                 raise ValueError(f"manifest row {line_number} must be a JSON object")
-            if (
-                raw.get("experiment") != expected_experiment
-                or raw.get("split") != expected_split
-            ):
+            if raw.get("experiment") != expected_experiment or raw.get("split") != expected_split:
                 raise ValueError(
                     f"manifest row {line_number} is not Experiment "
                     f"{expected_experiment} {expected_split} data"
@@ -268,6 +265,7 @@ def extract_frozen_features(
     encoder_batch_size: int,
     progress_every_batches: int = 8,
     progress_label: str = "encoder features",
+    waveform_loader: Callable[[ExperimentRecord], Any] | None = None,
 ) -> tuple[list[CachedSample], int, float]:
     import torch
 
@@ -276,7 +274,7 @@ def extract_frozen_features(
     if encoder_batch_size <= 0 or progress_every_batches <= 0:
         raise ValueError("encoder batch size and progress interval must be positive")
     try:
-        import librosa  # type: ignore[import-not-found]
+        import librosa
     except ImportError as error:
         raise RuntimeError("librosa is required to load training audio") from error
 
@@ -287,7 +285,11 @@ def extract_frozen_features(
     for start in range(0, len(records), encoder_batch_size):
         batch_records = records[start : start + encoder_batch_size]
         waveforms = [
-            librosa.load(str(record.audio_path), sr=16_000, mono=True)[0]
+            (
+                waveform_loader(record)
+                if waveform_loader is not None
+                else librosa.load(str(record.audio_path), sr=16_000, mono=True)[0]
+            )
             for record in batch_records
         ]
         prompts = [
@@ -427,7 +429,8 @@ def train_cached_ctc_head(
                 target_lengths,
                 blank_id=blank_id,
             )
-            computation.loss.backward()
+            backward: Any = computation.loss.backward
+            backward()
             torch.nn.utils.clip_grad_norm_(head.parameters(), max_gradient_norm)
             optimizer.step()
 
@@ -627,9 +630,7 @@ def save_ctc_head_checkpoint(
             "vocab_tokens": list(vocab.tokens),
             "epoch_metrics": metrics.to_dict(),
             "seed": seed,
-            "state_dict": {
-                key: value.detach().cpu() for key, value in head.state_dict().items()
-            },
+            "state_dict": {key: value.detach().cpu() for key, value in head.state_dict().items()},
         },
         path,
     )
