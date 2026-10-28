@@ -1,5 +1,68 @@
 # 工作交接记录
 
+## 0.191 2026-10-28 查找并导出50条“最终转写恢复热词”原WAV案例（待工区）
+
+用户要最新联合4k词表下，无热词转写未命中、加热词转写命中的50条真实案例，复制
+原WAV到同一文件夹并附MD记录恢复的词；三语均可。本地只存在研究输出，没有业务
+WAV或最新逐条ASR对照。0.174已核验的是RAG检索、未运行LLM；0.155/0.164英语60条
+最终转写使用旧英语3k表，不能冒充最新联合4k。用户不知道同事结果目录，故新增
+自动查找/导出入口，不要求用户猜目录，不用检索命中或Oracle结果代替实际转写恢复。
+
+新增`evaluation/recovered_audio_export.py`、`scripts/export_recovered_hotword_audio.py`
+及测试。本轮不修改任何训练/恢复/检索旧源码，不改变0.190代码锁定身份，不启动
+Encoder/CTC/LLM/G2P，不消耗GPU，不覆盖旧outputs。运行可与原增训分开进行。
+
+默认只扫描工区本仓库outputs，寻找已保存的baseline_predictions.jsonl与
+retrieved_predictions.jsonl，或sample_results/predictions/asr_results/results.jsonl
+中的已知C/D（流式无提示/检索提示）或A/B（离线）组。只识别已知schema；不猜测
+任意JSON、Oracle或他人格式的含义。结果目录若有多份不同聚合格式不能消歧会报告。
+以该目录run_config/report/runtime/config中明确的table/hotword输入SHA校验使用了
+固定`6bfc2949…b477b`表；旧表、身份缺失或有冲突的实验只列入inventory，不当成功例。
+这不是扫描整台工区所有同事目录；外部路径可用重复--scan-root显式补充。
+
+逐条按case_id+sample_id配对，要求参考相同、最终prediction为字符串、baseline没有
+记录注入候选或实际context；恢复词必须同时在当前4k表、参考、记录的实际注入列表、
+加提示转写中，并在无提示转写中缺失。使用项目既有NFKC/casefold/标点分词后的连续
+整词短语匹配，大小写/标点变化不算恢复；不删除西葡重音，不用子串制造命中。
+Oracle、已失败/标记截断请求、两侧音频/语言不同、缺原WAV或音频SHA变化均排除。
+没有audio_path时只从有SHA记录的关联validation/boundary manifest查ID，禁止按文件名
+在其他数据集猜音频。若原结果没有保存音频字节SHA，报告显式标注历史身份未记录，
+仅能确认当前两侧路径一致；未人工听审，不把参考正确性包装成已审核声学事实。
+
+按原WAV字节SHA去重；按语言轮转选最多50条，无足够某语种时由其他语种补足，不强造
+配额。复制实际ASR输入的WAV原字节（带噪输入保留带噪文件），不裁剪/重采样/重命名
+其他格式为WAV。每例含源路径、语言、case、源结果目录、恢复词、参考和两版转写。
+本案例集不用于估计总体质量提升，也不保证每个恢复例子的整句WER均改善。
+
+分支codex/g2p-coverage-scan，起点406dc90c3e277b5c9ba86015adf49f4c7d8c1ed8，最终
+推送SHA见回复。在容器同一Python环境运行，无GPU参数：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/export_recovered_hotword_audio.py
+```
+
+默认新建`outputs/hotword_recovered_cases_<随机ID>/`，内含audio/（最多50个原WAV）、
+案例说明.md、cases.jsonl、report.json（含扫描目录/文件SHA、模型身份、拒绝原因）、
+sha256.txt及可直接下载的return_bundle.zip。每次运行新建目录，无resume，拒绝已有
+输出，不改源文件。可用--scan-root ABS_DIR补充已知结果目录，--table只允许相同固定
+SHA的表副本；不支持改成旧表凑数。--output-dir必须为新目录。
+
+status=completed且exported_cases=50才表示找到50条；否则
+status=insufficient_verified_cases、退出码2，包中仅有真实找到的案例（可能0条）及
+shortfall/run_inventory/rejected_pair_reasons。该状态不等于已证明工区完全没有新ASR
+结果，可能在未扫描目录或未知格式。返回终端摘要；不足时再返回小包里的report.json，
+先确认缺结果还是缺adapter，再决定补测，不自动启动大规模ASR。若满50，直接下载
+末行return_bundle路径，已含音频与说明，不必再手工复制。
+
+本地12项合成测试全部通过，覆盖三语54个模拟配对中准确打包50份不同原WAV、校验
+复制字节/ZIP清单、旧表拒绝、真实注入/参考/整词条件、Oracle拒绝、路径/音频SHA/
+语言变化、重复音频、原结果校验损坏、C/D关联manifest及无结果不冒充成功。Ruff、
+strict Mypy（Python3.12）、CLI help及git diff --check通过。这不是工区50例实测结果。
+保留7份既有未知测试修改和未跟踪资料，不纳入提交。
+
 ## 0.190 2026-10-28 已有噪声缓存的一帧边界审计与恢复入口（待工区）
 
 承接0.189已核验结果。CTC本身接受每条样本各自的真实输入长度，原噪声替换分支却
