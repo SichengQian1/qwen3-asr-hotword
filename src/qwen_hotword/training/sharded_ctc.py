@@ -46,6 +46,9 @@ class FeatureShardDescriptor:
     ctc_time_upsampling_factor: int
     replacement: FeatureShardDescriptor | None = None
     replacement_ids: tuple[str, ...] = ()
+    # Explicit, externally audited (sample ID, original frames, noise frames).
+    # The default remains strict; this is not a global one-frame tolerance.
+    replacement_frame_pairs: tuple[tuple[str, int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -467,6 +470,18 @@ def load_feature_shard(
         selected = set(descriptor.replacement_ids)
         if not selected or not selected <= set(descriptor.sample_ids):
             raise ValueError("feature replacement IDs must be a nonempty subset of the base shard")
+        allowed = {item[0]: item[1:] for item in descriptor.replacement_frame_pairs}
+        if (
+            len(allowed) != len(descriptor.replacement_frame_pairs)
+            or not allowed.keys() <= selected
+            or any(
+                type(a) is not int or type(b) is not int or min(a, b) <= 0 or abs(a - b) != 1
+                for a, b in allowed.values()
+            )
+            or descriptor.replacement.ctc_time_upsampling_factor
+            != descriptor.ctc_time_upsampling_factor
+        ):
+            raise ValueError("invalid audited feature replacement frame pairs or CTC time factor")
         replacements = {
             sample.sample_id: sample
             for sample in load_feature_shard(
@@ -478,13 +493,16 @@ def load_feature_shard(
         for index, sample in enumerate(samples):
             if sample.sample_id in selected:
                 replacement = replacements[sample.sample_id]
-                if (
-                    replacement.token_ids != sample.token_ids
-                    or replacement.hidden_states.shape != sample.hidden_states.shape
-                ):
+                if replacement.token_ids != sample.token_ids:
+                    raise ValueError("noise replacement changes labels or Encoder frame lengths")
+                pair = (int(sample.hidden_states.shape[0]), int(replacement.hidden_states.shape[0]))
+                if sample.sample_id in allowed:
+                    if pair != allowed[sample.sample_id]:
+                        raise ValueError("noise frame lengths differ from the audited pair")
+                elif replacement.hidden_states.shape != sample.hidden_states.shape:
                     raise ValueError("noise replacement changes labels or Encoder frame lengths")
                 samples[index] = replacement
-    elif descriptor.replacement_ids:
+    elif descriptor.replacement_ids or descriptor.replacement_frame_pairs:
         raise ValueError("replacement IDs require a noise feature shard")
     return samples
 

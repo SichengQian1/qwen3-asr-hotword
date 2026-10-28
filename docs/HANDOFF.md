@@ -1,5 +1,74 @@
 # 工作交接记录
 
+## 0.190 2026-10-28 已有噪声缓存的一帧边界审计与恢复入口（待工区）
+
+承接0.189已核验结果。CTC本身接受每条样本各自的真实输入长度，原噪声替换分支却
+要求原/噪声帧数完全相同，未容纳改变提取batch后的末尾取整。本轮保留严格默认，
+仅给全量审计通过的具体ID及原/噪声帧数对增加显式许可；不裁剪/补帧、不修改标签、
+不丢样本、不重新提Encoder特征、不改原plan或prepared、MUSAN划分、比例或训练超参。
+这是一项明确限定的同实验恢复兼容，不是忽略源码SHA或允许任意长度差。
+
+新增`training/noise_recovery.py`和`scripts/recover_noise_finetune.py`。仅修改原锁定代码
+`sharded_ctc.py`（默认空的逐ID frame-pair字段）与`noise_run.py`（可传已审计cache view）。
+恢复入口只允许这两文件的已知旧SHA：`00003bb6…fa2dee`、`45a2ada5…34e55`；其他
+原输入/源码漂移仍拒绝。新旧代码SHA、运行库版本、原plan及cache marker身份记录在
+新建`recovery_boundary_v1/contract.json`，不改写原锁定身份。普通旧入口仍会因源码
+漂移拒绝恢复，必须使用本节恢复入口；不要编辑plan中的SHA来绕过校验。
+
+首次恢复依次执行：
+
+1. 校验原plan/config/输入、全部噪声manifest及混音/缓存元数据SHA，确认缓存已完成。
+   对相同transformers4.57.6/qwen-asr0.0.6运行CPU真实预处理边界probe，不读完整模型。
+2. CPU mmap遍历全部1738份配对缓存：50%训练池441004条（含30%子集）及7492条噪声
+   验证。比较原/噪声/manifest标签，检查2倍CTC时间下的物理可行性；按每part实际
+   Encoder batch与audit采样点数，逐条重算预期噪声mel/Encoder帧数。原帧数必须落在
+   同长度波形floor/ceil包络；帧数不同时必须恰好差1。对所有差帧样本重新验证原音频
+   SHA与混音时记录一致，并用原librosa及新soundfile路径分别确认16k采样点数一致。
+   不读取完整隐藏值；该步不把metadata检查宣称为完整大张量SHA检查。
+3. 全检通过才写`recovery_boundary_v1/audit.json`及contract，再做既有完整缓存SHA
+   校验、构造同一30/50 view，将审计许可挂在具体分片/ID/精确帧数对上。标签漂移、
+   不能由取整解释的长度、非法CTC长度、实际音频变化等均停止，不自动重算或丢行。
+4. 30%从已保存epoch0恢复原Head/optimizer/RNG，50%从相同1.0权重开始新optimizer，
+   各完成原定10轮后选best，再做既定三Head/两条件的全音频Top5/7评测。原数据指纹
+   保持不变：实际引用的张量、ID、标签、顺序及预算都未改变，只修正受限加载检查。
+
+历史原版缓存未记录每条原音频字节身份及完整原batch成员，因此仍不能追溯证明原
+提取时音频从未变化；保留原实验path-only边界。检查可以证实新增噪声时的文件与
+现在一致、两加载器长度一致、原帧数符合理论包络、噪声帧数符合实际batch。这一
+证据边界写入audit，不把允许的一帧差异称为丢了整段音频或通用音质修复。
+
+分支`codex/g2p-coverage-scan`；起点5b69865，结果单独归档于87d3347；最终推送SHA
+见回复。容器内运行（GPU4换为实际已分配卡号）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/recover_noise_finetune.py all --gpu 4
+```
+
+命令自动先检查、后训练/评测，不需要另加--resume；重复原命令会验证并复用已完成
+audit/Head/评测，未完成Head从最近完整epoch保存点恢复，轮内未保存更新重跑。原
+`outputs/multilingual_noise10db_finetune_v1`身份保留，只新增恢复审计文件及按已有
+恢复策略推进Head/评测，明确可再生成的return_bundle.zip刷新；不删旧缓存/历史输出。
+审计部分不占GPU做模型运算；训练前完整哈希会有磁盘读取，不是重新提特征。只检查
+可用`python -B scripts/recover_noise_finetune.py check`（无GPU参数）；只训练某组用
+`train --ratio 30 --gpu 4`，仅评测用`evaluate --gpu 4`，默认run路径不变。
+
+核验`recovery_boundary_v1/audit.json`的status/counts/parts_checked，以及两个
+`head_30/completed.json`、`head_50/completed.json`。小结果包仍为：
+`outputs/multilingual_noise10db_finetune_v1/return_bundle.zip`，现含恢复audit/contract、
+已完成Head报告和评测；不含完整权重、特征或波形。审计通过即先打包，单组完成再次
+打包，避免后续中断时没有已完成阶段的返回记录。若审计拒绝，返回终端具体异常，
+保持现场，不重跑旧all、不改plan、不手动裁帧。
+
+本地真实预处理器合成复现、完整小缓存CPU两组Head训练/epoch0恢复、完成状态复用、
+打包SHA、默认严格检查及标签/帧数/波形长度/原音频字节/CTC异常拒绝测试通过。
+全量pytest为888 passed；随后补充编排复用用例，恢复模块11项单独再次全部通过。
+修改范围Ruff、strict Mypy（Python3.12）、CLI help及git diff --check通过；保留既有
+7份未知测试修改及未跟踪资料，不混入提交。
+未在本地加载完整Qwen，工区全量审计及增训收益仍待回传；本地检查不代表H200质量。
+
 ## 0.189 2026-10-28 工区噪声缓存完成、Head停在epoch0：回传结果已核验
 
 附件`return_bundle(6).zip`（工区诊断`outputs/noise_finetune_status_aa54ab89f2`）

@@ -12,13 +12,23 @@ from qwen_hotword.training.english_newval import pin
 from qwen_hotword.training.feature_cache import exclusive_feature_cache_run
 from qwen_hotword.training.noise_cache import build_noise_cache, compose_views, publish
 from qwen_hotword.training.noise_prepare import prepare, verify_plan
-from qwen_hotword.training.sharded_ctc import exclusive_training_run, train_sharded_ctc_head
+from qwen_hotword.training.sharded_ctc import (
+    DiskFeatureCache,
+    exclusive_training_run,
+    train_sharded_ctc_head,
+)
 from qwen_hotword.training.spanish_capacity import _sha
 from qwen_hotword.training.stage_progress import stage_progress
 
 
 def train(
-    output: Path, plan: dict[str, Any], ratio: int, *, resume: bool, device: str = "cuda:0"
+    output: Path,
+    plan: dict[str, Any],
+    ratio: int,
+    *,
+    resume: bool,
+    device: str = "cuda:0",
+    audited_views: tuple[DiskFeatureCache, DiskFeatureCache, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     folder = output / f"head_{ratio}"
     marker = folder / "completed.json"
@@ -38,7 +48,9 @@ def train(
         and any(p.name != ".ctc_training.lock" for p in folder.iterdir())
     ):
         raise ValueError("partial Head output has no resumable state; preserve and inspect")
-    train_cache, validation_cache, groups = compose_views(output, plan, ratio)
+    train_cache, validation_cache, groups = (
+        audited_views if audited_views is not None else compose_views(output, plan, ratio)
+    )
     options = plan["configuration"]["training"]
     head_config = plan["head_config"]
     with exclusive_training_run(folder):
