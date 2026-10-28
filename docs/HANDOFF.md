@@ -1,5 +1,56 @@
 # 工作交接记录
 
+## 0.188 2026-10-28 噪声增训失败后的只读进度/替换诊断入口（待回传）
+
+用户昨晚执行`python -B scripts/run_noise_finetune.py all --gpu 4`，今晨返回终端片段：
+共享噪声parts1738/1738已验证，随后打印initial Head validation，30%阶段elapsed282.5s
+报`noise replacement changes labels or Encoder frame lengths`退出。本地尚未收到工区
+plan/cache/state，不冒称已核验实际小时、帧数、PER、训练epoch或运行Git身份。
+282.5s是该编排阶段耗时，不是完整训练耗时；`verified validation feature shards:1/1`
+是某个缓存part的身份检查，不是模型验证完成或验证集只有一片。
+
+按c2789c1实现，这个guard只在训练的特征替换分支触发，原版及噪声验证descriptor没有
+replacement。不能因上一条日志是initial validation就断言验证失败；可能已完成初始
+验证、刚进入首轮训练。若`training_state_latest.pt`持久化epoch0，即可证实初始验证
+已完成，但不能证明第1轮没有发生未保存的optimizer更新。串行all在30%失败后不会
+继续50%及最终评测；是否已有其他调用的产物，仍以实际状态文件为准。
+
+本轮新增`training/noise_status.py`、`scripts/inspect_noise_finetune.py`及测试，仅诊断，
+不修改原训练/缓存/混音脚本，因此不改变原plan锁定的源码身份，不绕过guard、不删
+缓存、不裁剪/补齐特征或标签，也不启动训练/Encoder/完整Qwen加载。
+
+默认读取prepared/plan、每part摘要和文件大小、两个Head状态/报告、评测报告，明确
+区分文件存在、保存的epoch与真实运行状态；不把锁文件存在称为进程仍活着。可选
+`--check-replacements`按seed+下一epoch的真实训练分片顺序，CPU mmap读取原/噪声的
+offset和token数组，分别比较标签与shape。默认最多16片、遇到首个异常片即停，显示
+范围/计数，不外推其余片；详细样本含ID、语言、路径、原/噪声帧数、三套标签与混音
+audit（原音频SHA、采样点数等）。不读取整批波形或完整特征值，不重新哈希大张量。
+`--max-shards 0`取消数量上限，仍遇首个异常片停；仅需汇总时省略check参数。
+
+容器内在原Qwen环境执行（CPU，无需GPU卡号）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/inspect_noise_finetune.py --check-replacements
+```
+
+分支仍为`codex/g2p-coverage-scan`，本轮起点为
+`c2789c16a370b824544ee09b87a8d17d5f42d929`；推送SHA见本轮回复。默认审计原
+`outputs/multilingual_noise10db_finetune_v1`，自定义原run使用`--run-dir ABS_PATH`。
+诊断输出自动创建新的`outputs/noise_finetune_status_<随机ID>/`，拒绝已有目录及原
+run内部目录；不需要--resume。终端仅打印精简摘要，完整report和SHA清单打入该新
+目录的return_bundle.zip，返回末行路径对应的小包；不传权重/特征/音频。
+重复检查会生成新目录，不覆盖昨日outputs。原实验暂不重跑，先根据真实异常分支
+决定修复/复用范围。检查命令不需要也不提供模型训练恢复策略。
+
+本地合成缓存测试覆盖标签差异与帧数差异分开定位、初始epoch0状态、未启动50%/
+评测、有限扫描不冒称全检、输入plan损坏拒绝、缺缓存/源码漂移提示，以及全部原
+输入文件SHA保持不变。使用CPU mmap，无Qwen/H200质量结果。新诊断5项+原噪声
+流程10项共15 passed；修改范围Ruff、strict Mypy、CLI help及git diff --check通过。
+保留原7份测试修改与未跟踪资料。
+
 ## 0.187 2026-10-27 三语全量480h/语种、MUSAN 10dB两比例增训入口（待工区）
 
 用户终止0.186的继续时延取证，明确批准执行简化流程：全量数据准备与自动检查 →
