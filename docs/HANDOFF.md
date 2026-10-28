@@ -1,5 +1,99 @@
 # 工作交接记录
 
+## 0.193 2026-10-28 最新联合4k缺最终ASR对照：GPU5补跑真实恢复案例并打包（待工区）
+
+用户两次运行历史结果扫描均导出0条，对反复诊断而未交付音频提出异议；本轮不再让
+用户重复旧扫描入口。用户明确授权另一张已分配的物理GPU5，GPU4噪声增训保留。
+回传return_bundle(8).zip SHA256为
+`41f39e55868589b24a288c6efba6da98b34db59ed24bf35307c20e03c7f7e224`，包内sha256.txt
+逐项核验通过。31目录中22个记录不同词表身份、9个缺可识别身份，正式筛选对照0组；
+已有1200组支持格式的转写对照，含重复音频/实验模式，不等于1200个独立成功例。
+三语formal100 streaming表SHA分别为EN f1a3b2ea…a510a、ES 19d23505…8553、
+PT ac8f50fa…5d4d3，均为旧单语表，不是最新联合6bfc2949…b477b。
+offline三语各100组缺本工具可识别的身份；未知schema不能宣称没有恢复案例。
+0.174最新6800条仅运行RAG，qwen_decoder_used=false；没有可直接导出的已核验新版
+最终ASR对照。前两次入口只是CPU扫描，不是模型跑失败或实际测试证明没有收益。
+
+新增`evaluation/recovered_case_assets.py`、`evaluation/recovered_case_run.py`、
+`inference/recovered_case_runtime.py`、`scripts/find_recovered_hotword_cases.py`及测试。
+不改任何现有训练/恢复/检索/历史推理源码，不改表、Head、标签、门限或旧outputs。
+使用本地完整Qwen3-ASR-1.7B，仅在工区推理，不下载/本地加载模型、不重训、不重算CTC。
+
+新入口直接完成以下流程，不需要再跑一次审计命令：
+
+1. 校验已完成源`outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step`
+   的run_config、report及delivery三文件SHA，固定返回过的run_config身份
+   `47134f2d4489a260ea2bdeb8a7d120b0b4e0658ff687335952846ebe20224743`、联合表
+   `6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b`、原best27 Head
+   `872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466`。
+   不要求当前检索源码等于历史运行源码，因为只消费已保存候选，不重放检索。
+2. 从源baseline_run的封存run_config按group/sample_id关联参考，实际音频始终取
+   新源manifest的带噪路径和字节SHA。核对Top5/7契约、样本清单、时长、表内词面及
+   模型config/index身份；另记录preprocessor SHA，不扫描大权重SHA，保留该身份边界。
+3. 选末次Top7中至少一词在参考出现的候选音频，按WAV SHA去重，同音频冲突参考/语言
+   排除；语言内固定hash顺序，再EN/ES/PT轮转。参考只用于筛选/评分。提示必须保留
+   完整实际Top7及其顺序，包括错误候选；不以金标过滤提示，不注入全4k，不用Oracle。
+4. GPU5加载工区原模型；每条先无提示整段ASR，如已命中全部潜在目标则省略加提示
+   请求；其余用实际Top7补一次整段ASR。强制语言分别English/Spanish/Portuguese，
+   两侧同音频/seed、greedy、beam1、max_new_tokens1024、bf16/eager、batch1，无跨请求
+   decoder cache。沿用官方0.0.6加载器，并在新多语运行器审计实际system context、
+   语言后缀、模型输入token完整性及实际generate参数。输出截断不算恢复。
+5. 只有参考及注入列表存在、无提示缺失、提示后命中的整词/短语才计成功；不删除
+   西葡重音、大小写/标点变化不算恢复。两侧规范化音频SHA必须一致。每次ASR成功
+   即原子保存带plan/request/result校验的cell；满50条立即停止。有限候选池耗尽不足
+   50时如实打包实际数量，status=insufficient_verified_cases，退出码2，不伪造补齐。
+6. 原样复制实际ASR输入WAV，不裁剪/重采样或换成干净对应物；新package/audio下
+   同一文件夹保存，MD逐条列恢复热词、原路径、参考、无热词及加热词转写。
+   cases.jsonl/report/sha256.txt/return_bundle.zip自动生成，并核对ZIP与原文件。
+
+这是新跑的“整段音频+末次候选”成功案例筛选，不是原流式解码指标、总体WER提升率
+或无偏测试集。参考未逐条人工听审；仅确认所列热词文字恢复，不能保证整句更好。
+按字节去重不等于说话人/近重复独立。语言由清单强制，返回语言也不是新的自动LID评测。
+不保证当前候选池一定能找到50条。
+
+分支`codex/g2p-coverage-scan`，起点96f5ffdf07af95dac6e4ce5914060aad3a177d88；最终
+推送SHA见交付回复。用户已确认GPU5可用，在容器执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/find_recovered_hotword_cases.py --gpu 5
+```
+
+默认唯一新实验目录`outputs/recovered_hotword_cases_latest_v1/`，与历史扫描及噪声
+增训完全分开。同一命令自动校验一致plan/源码/运行库/物理GPU/输入后续跑；已保存
+的baseline/retrieved cell不重复推理，未保存的中断请求重做。修改count/来源/提示/
+源码/运行库需新`--output-dir`，不能覆盖已有身份。完成后重复命令只验包，不加载模型。
+锁只针对该新任务。progress.json为可更新观察文件；run_config/cells/package及旧
+输出不原地覆盖。打包用临时目录完成后整体改名；异常保留cells便于恢复。
+
+进度查看：
+
+```bash
+cat outputs/recovered_hotword_cases_latest_v1/progress.json
+cat outputs/recovered_hotword_cases_latest_v1/package/report.json
+```
+
+第二个文件仅最终打包后出现；前者含checked_audio/pool_audio、recovered_cases、
+本次new/reused ASR calls、排除统计和异常。终端会显示模型加载、逐条baseline/retrieved、
+实际已找到数量，不虚报ETA。成功或不足都会打印最终return_bundle绝对路径：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/recovered_hotword_cases_latest_v1/package/return_bundle.zip
+```
+
+用户下载这个ZIP即含原WAV与案例说明.md；需要分析结果时返回终端摘要或其中小型
+report.json/cases.jsonl。异常时返回末段日志和progress.json，无需权重/特征缓存。
+
+本地52项相关测试通过（新资产/执行/多语运行器，加既有历史运行器及导出回归），
+覆盖三语模拟50份原WAV/MD/ZIP、满额停止、完整错误候选仍注入、模型请求不含参考、
+中断后不重做已保存baseline、完成后不加载模型、版本/原音频/元数据漂移拒绝、损坏
+cell/ZIP拒绝、截断不算成功、0收益诚实交付、字节重复与冲突参考排除。Ruff、strict
+Mypy（Python3.12）、CLI help及git diff --check通过；另本机只读核验qwen-asr0.0.6
+官方源码SHA与审计清单相符。以上不是H200真实50例结果。保留原7份未知测试修改及
+全部未跟踪资料，不纳入本次提交。
+
 ## 0.192 2026-10-28 原音频案例导出0条：全部停在词表身份门，补完整诊断证据
 
 用户执行0.191入口后返回31个候选目录、exported_cases0/shortfall50，几乎立即结束。
