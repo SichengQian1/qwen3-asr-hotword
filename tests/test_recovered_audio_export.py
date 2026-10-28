@@ -85,6 +85,8 @@ def test_exports_original_wav_and_complete_evidence_without_changing_sources(
     original = {str(p): sha(p) for p in source_files}
     result = export(tmp_path, table, count=1)
     assert result["status"] == "completed" and result["exported_cases"] == 1
+    assert result["export_pairs_checked"] == 1
+    assert result["runs_with_verified_latest_table"] == 1
     output = tmp_path / "export"
     cases = [json.loads(s) for s in (output / "cases.jsonl").read_text().splitlines()]
     assert cases[0]["recovered_hotwords"] == ["DHL", "São Paulo"]
@@ -139,8 +141,19 @@ def test_old_table_results_are_not_relabelled_as_latest(tmp_path: Path) -> None:
     result = export(tmp_path, table)
     assert result["status"] == "insufficient_verified_cases"
     assert result["exported_cases"] == 0 and result["shortfall"] == 50
+    assert result["export_pairs_checked"] == 0 and result["saved_asr_pairs_seen"] == 1
     report = json.loads((tmp_path / "export/report.json").read_text())
-    assert "latest table use unverified" in report["run_inventory"][0]["reason"]
+    item = report["run_inventory"][0]
+    assert item["reason"] == "different_recorded_table_identity"
+    assert item["recorded_table_digests"][0]["sha256"] == "0" * 64
+    assert item["metadata_files"][0]["path"].endswith("run_config.json")
+    assert item["transcript_inspection"]["paired_rows_seen"] == 1
+    assert item["transcript_inspection"]["text_gain_pairs_before_identity_and_audio_checks"] == 1
+    assert item["transcript_inspection"]["diagnostic_only"] is True
+    assert item["transcript_inspection"]["examples"][0]["text_recovered_words"] == [
+        "DHL",
+        "São Paulo",
+    ]
 
 
 @pytest.mark.parametrize("change", ["audio_path", "audio_hash", "language", "header"])
@@ -269,3 +282,44 @@ def test_packages_exactly_fifty_distinct_original_wavs_across_three_languages(
     assert result["by_language"] == {"en": 17, "es": 17, "pt": 16}
     with zipfile.ZipFile(result["return_bundle"]) as archive:
         assert len([name for name in archive.namelist() if name.endswith(".wav")]) == 50
+
+
+@pytest.mark.parametrize("state", ["missing", "conflicting"])
+def test_table_gate_failure_preserves_exact_metadata_and_transcript_evidence(
+    tmp_path: Path, state: str
+) -> None:
+    source, table, _, _ = fixture(tmp_path)
+    config = {"language": "pt", "inputs": {}}
+    if state == "conflicting":
+        config["inputs"] = {
+            "hotwords": {"path": str(table), "sha256": sha(table)},
+            "hotword_families": {"sha256": "f" * 64},
+        }
+    write_json(source / "run_config.json", config)
+    result = export(tmp_path, table)
+    assert result["exported_cases"] == 0 and result["saved_asr_pairs_seen"] == 1
+    report = json.loads((tmp_path / "export/report.json").read_text())
+    item = report["run_inventory"][0]
+    expected = (
+        "missing_recorded_table_identity"
+        if state == "missing"
+        else "conflicting_recorded_table_identities"
+    )
+    assert item["reason"] == expected
+    assert report["table_identity_status_counts"] == {expected: 1}
+    assert item["metadata_evidence"]["inputs"] == config["inputs"]
+    assert item["transcript_inspection"]["examples"]
+    assert not list((tmp_path / "export/audio").iterdir())
+
+
+def test_old_table_and_unsupported_prediction_schema_are_both_reported(tmp_path: Path) -> None:
+    source, table, _, _ = fixture(tmp_path)
+    write_json(source / "run_config.json", {"inputs": {"hotwords": {"sha256": "f" * 64}}})
+    (source / "baseline_predictions.jsonl").unlink()
+    (source / "retrieved_predictions.jsonl").unlink()
+    write_rows(source / "predictions.jsonl", [{"unknown_schema": "text"}])
+    result = export(tmp_path, table)
+    assert result["exported_cases"] == 0
+    item = json.loads((tmp_path / "export/report.json").read_text())["run_inventory"][0]
+    assert item["reason"] == "different_recorded_table_identity"
+    assert "schema needs explicit adapter" in item["transcript_inspection_error"]

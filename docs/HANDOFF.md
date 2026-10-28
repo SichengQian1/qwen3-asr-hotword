@@ -1,5 +1,57 @@
 # 工作交接记录
 
+## 0.192 2026-10-28 原音频案例导出0条：全部停在词表身份门，补完整诊断证据
+
+用户执行0.191入口后返回31个候选目录、exported_cases0/shortfall50，几乎立即结束。
+附件return_bundle(7).zip SHA为
+`cf8a17964463dc1e03b27411ed0acb09794b0c19b58b82884d9006173694e1ab`，包内cases.jsonl、
+report.json、案例说明.md与sha256.txt一致；cases为空，无WAV。工区输出为
+`outputs/hotword_recovered_cases_0efecf09fd`。表SHA为固定6bfc2949…b477b；源码SHA
+`8eac87a15c532b64de21268fcff8aa8f295dce02c295fa69730762bb72d3ac27`与c8c6d69一致。
+
+31个目录全部reason=`latest table use unverified, old table, or ambiguous table identities`，
+且rejected_pair_reasons为空。按对应源码，这31个目录在读配置后就被词表身份门拒绝，
+还没有读取并比较转写，也没有复制音频。不是跑完模型后发现0收益，不是等待GPU、
+程序半路崩溃或后台继续运行。目录包括三语formal100六个offline/streaming、旧英语
+prompt_order和多套Noah历史ASR实验；路径含4k并不能证明使用相同联合词表。
+旧报告把“不同SHA”“没记录SHA”“多个身份冲突”合并，且未返回实际观察到的SHA/配置，
+因此本地尚不能区分这三者，更不能断言最新ASR结果绝对不存在或系统没有成功案例。
+
+本轮只修正案例工具的可观测性，不放宽最新词表要求、不改变训练恢复源码或模型。
+即使词表身份不通过，仍保留配置文件路径/当前SHA、相关inputs/model/language字段、
+实际发现的词表字段路径和SHA，分为missing_recorded_table_identity、
+different_recorded_table_identity、conflicting_recorded_table_identities、verified_latest_table。
+逐条转写检查与版本门独立进行：记录支持格式的配对数量、规范化文字变化数量、
+仅文本条件满足的词恢复数量和最多3个对照片段；均标diagnostic_only，尚未经过版本/
+音频及完整导出检查的文本候选不复制WAV、不算当前实验成功例。未知格式/损坏校验
+另存transcript_inspection_error，不再被版本错误遮掉。
+
+终端新增table_identity_status_counts、saved_asr_pairs_seen、
+runs_with_verified_latest_table、export_pairs_checked及中文blocker_summary，区分
+“没有开始正式筛选”与“正式筛选后不足”。MD也记录阻断说明。找到符合原条件的50条
+仍可直接打包；否则只产生真实可用例子及诊断包，不能把历史其他词表结果改称最新。
+
+分支codex/g2p-coverage-scan；起点c8c6d696336056b96720fb547150abdf6885526d。
+最终推送SHA见回复。在容器执行同一CPU入口，自动新建目录，不覆盖0efecf09fd：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/export_recovered_hotword_audio.py
+```
+
+无GPU参数，不需要resume，不重跑ASR、不新增训练或改已有波形/结果。先返回新终端
+摘要及末行return_bundle.zip（不足时主要需要其中report.json）。根据实际表SHA及
+文字对照再判断是schema/身份解析遗漏、外部结果路径缺失，还是确需补最新ASR对照。
+当前不能保证仅改报告就会产出50条，工区尚未执行修订版。
+
+本地15项测试通过，新增/补充检查覆盖旧表仍显示实际SHA和对照、缺SHA/冲突分别
+计数、未知转写schema不被版本门掩盖、历史文字有恢复但不导出、正式筛选计数，以及
+原50条三语模拟WAV导出/去重/SHA/拒绝错误条件回归。Ruff、strict Mypy（Python3.12）、
+CLI help和git diff --check通过；无真实Qwen推理或新的工区成功案例。保留既有7份未知
+测试修改与未跟踪资料。
+
 ## 0.191 2026-10-28 查找并导出50条“最终转写恢复热词”原WAV案例（待工区）
 
 用户要最新联合4k词表下，无热词转写未命中、加热词转写命中的50条真实案例，复制

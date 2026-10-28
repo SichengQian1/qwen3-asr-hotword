@@ -97,6 +97,135 @@ def metadata(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return merged, identities
 
 
+def metadata_evidence(config: dict[str, Any]) -> dict[str, Any]:
+    """Keep relevant provenance even when a run fails the table gate."""
+    selected: dict[str, Any] = {
+        key: config[key]
+        for key in (
+            "evaluation",
+            "scope",
+            "language",
+            "groups",
+            "mode",
+            "git_commit",
+            "model_path",
+            "model",
+            "checkpoint_sha256",
+            "table_path",
+            "hotword_table",
+            "table_sha256",
+            "hotword_table_sha256",
+            "keyword_table_sha256",
+        )
+        if key in config
+    }
+    inputs = config.get("inputs", {})
+    if isinstance(inputs, dict):
+        selected["inputs"] = {
+            key: value
+            for key, value in inputs.items()
+            if any(
+                word in key.lower()
+                for word in (
+                    "table",
+                    "hotword",
+                    "keyword",
+                    "checkpoint",
+                    "validation",
+                    "vocab",
+                    "case",
+                )
+            )
+        }
+    return selected
+
+
+def table_status(digests: list[tuple[str, str]], expected: str) -> str:
+    values = {value for _, value in digests}
+    if not values:
+        return "missing_recorded_table_identity"
+    if values == {expected}:
+        return "verified_latest_table"
+    if expected in values:
+        return "conflicting_recorded_table_identities"
+    return "different_recorded_table_identity"
+
+
+def text_recoveries(
+    reference: str,
+    before: str,
+    after: str,
+    injected: list[str],
+    table: dict[tuple[str, ...], str],
+) -> list[str]:
+    return sorted(
+        {
+            table[key]
+            for word in injected
+            if (key := normalize_match_words(word)) in table
+            and strict_phrase_match(reference, table[key])
+            and not strict_phrase_match(before, table[key])
+            and strict_phrase_match(after, table[key])
+        }
+    )
+
+
+def comparison_evidence(
+    pairs: list[tuple[dict[str, Any], dict[str, Any], str]],
+    table: dict[tuple[str, ...], str],
+) -> dict[str, Any]:
+    changed = recovered = 0
+    examples: list[dict[str, Any]] = []
+    for base, hot, label in pairs:
+        reference, before, after = (
+            base.get("reference_text"),
+            base.get("prediction"),
+            hot.get("prediction"),
+        )
+        injected = hot.get("injected_hotwords")
+        if (
+            not isinstance(reference, str)
+            or not isinstance(before, str)
+            or not isinstance(after, str)
+            or reference != hot.get("reference_text")
+            or not isinstance(injected, list)
+            or any(not isinstance(w, str) for w in injected)
+            or base.get("injected_hotwords")
+            or base.get("actual_context")
+        ):
+            continue
+        changed += int(normalize_match_words(before) != normalize_match_words(after))
+        words = text_recoveries(reference, before, after, injected, table)
+        recovered += int(bool(words))
+        if words and len(examples) < 3:
+            examples.append(
+                {
+                    "case_id": base["case_id"],
+                    "sample_id": base["sample_id"],
+                    "comparison": label,
+                    "reference_text": reference,
+                    "without_hotwords": before,
+                    "with_hotwords": after,
+                    "text_recovered_words": words,
+                    "audio_path": base.get("audio_path", hot.get("audio_path")),
+                    "baseline_fields": sorted(base),
+                    "hotword_fields": sorted(hot),
+                    "baseline_table_digests": table_digests(base),
+                    "hotword_table_digests": table_digests(hot),
+                }
+            )
+    return {
+        "paired_rows_seen": len(pairs),
+        "normalized_text_changed_pairs": changed,
+        "text_gain_pairs_before_identity_and_audio_checks": recovered,
+        "examples": examples,
+        "diagnostic_only": True,
+        "scope": (
+            "text comparison only; table version, audio identity and export eligibility unverified"
+        ),
+    }
+
+
 def verify_saved_hashes(directory: Path, paths: list[Path]) -> str:
     manifest = directory / "sha256.txt"
     if not manifest.exists():
@@ -223,16 +352,7 @@ def candidate(
     injected = hot.get("injected_hotwords")
     if not isinstance(injected, list) or any(not isinstance(w, str) for w in injected):
         raise ValueError("recorded injected-hotword strings are missing")
-    gained = sorted(
-        {
-            table[key]
-            for word in injected
-            if (key := normalize_match_words(word)) in table
-            and strict_phrase_match(reference, table[key])
-            and not strict_phrase_match(before, table[key])
-            and strict_phrase_match(after, table[key])
-        }
-    )
+    gained = text_recoveries(reference, before, after, injected, table)
     if not gained:
         return None
     source = support.get(str(base["case_id"]), support.get(str(base["sample_id"]), {}))
@@ -319,6 +439,8 @@ def write_package(output: Path, selected: list[dict[str, Any]], report: dict[str
         "",
         f"状态：`{report['status']}`；不足时不补造案例。",
         "",
+        report.get("blocker_summary", ""),
+        "",
         "筛选条件：该热词在参考文本及实际注入候选中，无热词转写未命中，加热词转写命中；"
         "采用规范化后的整词／连续短语匹配。大小写和标点变化不单独算恢复。",
         "",
@@ -397,6 +519,7 @@ def export_saved_cases(
     inventory = []
     cases = []
     rejected: Counter[str] = Counter()
+    export_pairs_checked = 0
     directories = discover(scan_roots)
     with stage_progress(
         "Read saved paired ASR transcripts (CPU; no inference)", total=len(directories)
@@ -406,15 +529,30 @@ def export_saved_cases(
             try:
                 config, identities = metadata(directory)
                 digests = table_digests(config)
-                if not digests or {digest for _, digest in digests} != {actual_table_sha}:
-                    raise ValueError(
-                        "latest table use unverified, old table, or ambiguous table identities"
+                item["metadata_files"] = identities
+                item["metadata_evidence"] = metadata_evidence(config)
+                item["recorded_table_digests"] = [
+                    {"field": field, "sha256": digest} for field, digest in digests
+                ]
+                item["table_identity_status"] = table_status(digests, actual_table_sha)
+                # Inspect saved transcripts independently of the version gate.
+                # Historical text gains are diagnostic only, never exported as
+                # cases from the current table without all original checks.
+                pairs: list[tuple[dict[str, Any], dict[str, Any], str]] = []
+                files: list[Path] = []
+                try:
+                    pairs, files = paired_rows(directory)
+                    item["transcript_inspection"] = comparison_evidence(pairs, table)
+                    item["source_checksum_check"] = verify_saved_hashes(
+                        directory, [*files, *(Path(i["path"]) for i in identities)]
                     )
-                pairs, files = paired_rows(directory)
-                item["source_checksum_check"] = verify_saved_hashes(
-                    directory, [*files, *(Path(i["path"]) for i in identities)]
-                )
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    item["transcript_inspection_error"] = str(error)
                 item["sources"] = identities + [{"path": str(p), "sha256": sha(p)} for p in files]
+                if item["table_identity_status"] != "verified_latest_table":
+                    raise ValueError(item["table_identity_status"])
+                if "transcript_inspection_error" in item:
+                    raise ValueError(item["transcript_inspection_error"])
                 item["saved_model_identity"] = {
                     key: config[key]
                     for key in ("model", "model_path", "checkpoint_sha256", "git_commit")
@@ -424,6 +562,7 @@ def export_saved_cases(
                 support = support_samples(config, root)
                 item.update(status="paired_transcripts_found", paired_rows=len(pairs), eligible=0)
                 for base, hot, comparison in pairs:
+                    export_pairs_checked += 1
                     try:
                         case = candidate(base, hot, config, table, support, root, actual_table_sha)
                         if case is not None:
@@ -437,6 +576,18 @@ def export_saved_cases(
             inventory.append(item)
             tick(number)
     selected = choose(cases, count)
+    verified_runs = sum(
+        item.get("table_identity_status") == "verified_latest_table" for item in inventory
+    )
+    blocker = (
+        "所有已定位目录均未通过最新词表身份检查，尚未对任何配对结果做正式案例筛选。"
+        if inventory and not verified_runs
+        else "扫描范围内未定位到支持的逐条ASR结果文件。"
+        if not inventory
+        else "已检查可用的最新词表转写结果，合格且不重复的原音频不足请求数量。"
+        if len(selected) < count
+        else "已找到请求数量的配对转写恢复案例。"
+    )
     report = {
         "status": "completed" if len(selected) == count else "insufficient_verified_cases",
         "requested_cases": count,
@@ -446,7 +597,16 @@ def export_saved_cases(
         "table_sha256": actual_table_sha,
         "scan_roots": [str(p) for p in scan_roots],
         "candidate_run_directories": len(directories),
+        "runs_with_verified_latest_table": verified_runs,
+        "export_pairs_checked": export_pairs_checked,
+        "blocker_summary": blocker,
         "run_inventory": inventory,
+        "table_identity_status_counts": dict(
+            Counter(item.get("table_identity_status", "metadata_unreadable") for item in inventory)
+        ),
+        "saved_asr_pairs_seen": sum(
+            item.get("transcript_inspection", {}).get("paired_rows_seen", 0) for item in inventory
+        ),
         "rejected_pair_reasons": dict(rejected),
         "by_language": dict(Counter(c["language"] for c in selected)),
         "source_code_sha256": sha(Path(__file__)),
@@ -468,5 +628,10 @@ def export_saved_cases(
             "shortfall",
             "by_language",
             "candidate_run_directories",
+            "runs_with_verified_latest_table",
+            "export_pairs_checked",
+            "blocker_summary",
+            "table_identity_status_counts",
+            "saved_asr_pairs_seen",
         )
     } | {"return_bundle": str(archive)}
