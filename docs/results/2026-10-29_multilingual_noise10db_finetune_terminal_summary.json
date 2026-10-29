@@ -1,0 +1,767 @@
+{
+  "status": "completed",
+  "all_parts_checked": 1738,
+  "counts": {
+    "train_records": 441004,
+    "train_selected_30": 264581,
+    "train_boundary_pairs": 4327,
+    "validation_records": 7492,
+    "validation_boundary_pairs": 90
+  },
+  "features_recomputed": false,
+  "return_bundle": "/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_noise10db_finetune_v1/return_bundle.zip",
+  "30": {
+    "best_epoch": 9,
+    "epochs_completed": 10,
+    "macro_per": 0.07396056506765462
+  },
+  "50": {
+    "best_epoch": 9,
+    "epochs_completed": 10,
+    "macro_per": 0.07373269604942347
+  },
+  "evaluation": {
+    "status": "completed",
+    "by_language": {
+      "baseline/original/en": {
+        "samples": 6000,
+        "top5": {
+          "target_hits": 3792,
+          "target_pairs": 4374,
+          "recall": 0.8669410150891632,
+          "selected": 12458,
+          "outside_reference": 8663,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.676949740034662,
+          "no_target_audio_count": 2886
+        },
+        "top7": {
+          "target_hits": 3847,
+          "target_pairs": 4374,
+          "recall": 0.8795153177869227,
+          "selected": 13087,
+          "outside_reference": 9237,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.676949740034662,
+          "no_target_audio_count": 2886
+        },
+        "pure_ms": {
+          "mean": 6.5566657812645035,
+          "p50": 6.137701217085123,
+          "p95": 10.056791128590703
+        }
+      },
+      "baseline/noise10db/en": {
+        "samples": 6000,
+        "top5": {
+          "target_hits": 3654,
+          "target_pairs": 4374,
+          "recall": 0.8353909465020576,
+          "selected": 12145,
+          "outside_reference": 8488,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6689774696707106,
+          "no_target_audio_count": 2886
+        },
+        "top7": {
+          "target_hits": 3698,
+          "target_pairs": 4374,
+          "recall": 0.8454503886602652,
+          "selected": 12726,
+          "outside_reference": 9025,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6689774696707106,
+          "no_target_audio_count": 2886
+        },
+        "pure_ms": {
+          "mean": 6.536002411390655,
+          "p50": 6.099808029830456,
+          "p95": 9.985134238377213
+        }
+      },
+      "baseline/original/es": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 638,
+          "target_pairs": 724,
+          "recall": 0.8812154696132597,
+          "selected": 1893,
+          "outside_reference": 1238,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "top7": {
+          "target_hits": 659,
+          "target_pairs": 724,
+          "recall": 0.9102209944751382,
+          "selected": 2408,
+          "outside_reference": 1731,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "pure_ms": {
+          "mean": 20.461816256283782,
+          "p50": 16.670539043843746,
+          "p95": 30.17395199276507
+        }
+      },
+      "baseline/noise10db/es": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 616,
+          "target_pairs": 724,
+          "recall": 0.850828729281768,
+          "selected": 1879,
+          "outside_reference": 1246,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "top7": {
+          "target_hits": 638,
+          "target_pairs": 724,
+          "recall": 0.8812154696132597,
+          "selected": 2382,
+          "outside_reference": 1725,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "pure_ms": {
+          "mean": 21.087435353547335,
+          "p50": 16.599607886746526,
+          "p95": 29.681883985176682
+        }
+      },
+      "baseline/original/pt": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 552,
+          "target_pairs": 736,
+          "recall": 0.75,
+          "selected": 1820,
+          "outside_reference": 1250,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "top7": {
+          "target_hits": 582,
+          "target_pairs": 736,
+          "recall": 0.7907608695652174,
+          "selected": 2195,
+          "outside_reference": 1595,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "pure_ms": {
+          "mean": 17.594707288080826,
+          "p50": 13.650936307385564,
+          "p95": 22.961985087022185
+        }
+      },
+      "baseline/noise10db/pt": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 529,
+          "target_pairs": 736,
+          "recall": 0.71875,
+          "selected": 1794,
+          "outside_reference": 1248,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "top7": {
+          "target_hits": 553,
+          "target_pairs": 736,
+          "recall": 0.751358695652174,
+          "selected": 2160,
+          "outside_reference": 1589,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "pure_ms": {
+          "mean": 15.33700875355862,
+          "p50": 13.509660959243774,
+          "p95": 22.560926154255867
+        }
+      },
+      "30/original/en": {
+        "samples": 6000,
+        "top5": {
+          "target_hits": 3811,
+          "target_pairs": 4374,
+          "recall": 0.8712848651120256,
+          "selected": 12457,
+          "outside_reference": 8643,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6724436741767764,
+          "no_target_audio_count": 2886
+        },
+        "top7": {
+          "target_hits": 3864,
+          "target_pairs": 4374,
+          "recall": 0.8834019204389575,
+          "selected": 13091,
+          "outside_reference": 9224,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6724436741767764,
+          "no_target_audio_count": 2886
+        },
+        "pure_ms": {
+          "mean": 6.255275376257487,
+          "p50": 5.775337805971503,
+          "p95": 9.548934875056148
+        }
+      },
+      "30/noise10db/en": {
+        "samples": 6000,
+        "top5": {
+          "target_hits": 3718,
+          "target_pairs": 4374,
+          "recall": 0.8500228623685414,
+          "selected": 12368,
+          "outside_reference": 8647,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6693240901213171,
+          "no_target_audio_count": 2886
+        },
+        "top7": {
+          "target_hits": 3775,
+          "target_pairs": 4374,
+          "recall": 0.8630544124371284,
+          "selected": 12980,
+          "outside_reference": 9202,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6693240901213171,
+          "no_target_audio_count": 2886
+        },
+        "pure_ms": {
+          "mean": 6.203798899504666,
+          "p50": 5.74198504909873,
+          "p95": 9.53300204128027
+        }
+      },
+      "30/original/es": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 647,
+          "target_pairs": 724,
+          "recall": 0.893646408839779,
+          "selected": 1904,
+          "outside_reference": 1239,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "top7": {
+          "target_hits": 665,
+          "target_pairs": 724,
+          "recall": 0.9185082872928176,
+          "selected": 2428,
+          "outside_reference": 1745,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "pure_ms": {
+          "mean": 19.229586442233995,
+          "p50": 16.765932086855173,
+          "p95": 30.136154033243656
+        }
+      },
+      "30/noise10db/es": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 629,
+          "target_pairs": 724,
+          "recall": 0.8687845303867403,
+          "selected": 1900,
+          "outside_reference": 1254,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "top7": {
+          "target_hits": 649,
+          "target_pairs": 724,
+          "recall": 0.8964088397790055,
+          "selected": 2421,
+          "outside_reference": 1754,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "pure_ms": {
+          "mean": 23.25419931090437,
+          "p50": 16.759797232225537,
+          "p95": 30.374927911907434
+        }
+      },
+      "30/original/pt": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 547,
+          "target_pairs": 736,
+          "recall": 0.7432065217391305,
+          "selected": 1827,
+          "outside_reference": 1260,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "top7": {
+          "target_hits": 579,
+          "target_pairs": 736,
+          "recall": 0.7866847826086957,
+          "selected": 2206,
+          "outside_reference": 1606,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "pure_ms": {
+          "mean": 16.206918947282247,
+          "p50": 13.643601909279823,
+          "p95": 23.119123186916113
+        }
+      },
+      "30/noise10db/pt": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 534,
+          "target_pairs": 736,
+          "recall": 0.7255434782608695,
+          "selected": 1801,
+          "outside_reference": 1248,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "top7": {
+          "target_hits": 563,
+          "target_pairs": 736,
+          "recall": 0.7649456521739131,
+          "selected": 2171,
+          "outside_reference": 1589,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "pure_ms": {
+          "mean": 16.266473665600643,
+          "p50": 13.610540889203548,
+          "p95": 22.523798048496246
+        }
+      },
+      "50/original/en": {
+        "samples": 6000,
+        "top5": {
+          "target_hits": 3809,
+          "target_pairs": 4374,
+          "recall": 0.870827617741198,
+          "selected": 12458,
+          "outside_reference": 8646,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6738301559792028,
+          "no_target_audio_count": 2886
+        },
+        "top7": {
+          "target_hits": 3864,
+          "target_pairs": 4374,
+          "recall": 0.8834019204389575,
+          "selected": 13102,
+          "outside_reference": 9235,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6738301559792028,
+          "no_target_audio_count": 2886
+        },
+        "pure_ms": {
+          "mean": 6.4061278470326215,
+          "p50": 5.887066014111042,
+          "p95": 9.749404154717922
+        }
+      },
+      "50/noise10db/en": {
+        "samples": 6000,
+        "top5": {
+          "target_hits": 3733,
+          "target_pairs": 4374,
+          "recall": 0.8534522176497485,
+          "selected": 12392,
+          "outside_reference": 8656,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6710571923743501,
+          "no_target_audio_count": 2886
+        },
+        "top7": {
+          "target_hits": 3787,
+          "target_pairs": 4374,
+          "recall": 0.8657978966620942,
+          "selected": 13010,
+          "outside_reference": 9220,
+          "no_reference_audio_count": 2885,
+          "negative_audio_false_positive_rate": 0.6710571923743501,
+          "no_target_audio_count": 2886
+        },
+        "pure_ms": {
+          "mean": 6.338528944877908,
+          "p50": 5.834593903273344,
+          "p95": 9.61551209911704
+        }
+      },
+      "50/original/es": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 642,
+          "target_pairs": 724,
+          "recall": 0.8867403314917127,
+          "selected": 1903,
+          "outside_reference": 1245,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "top7": {
+          "target_hits": 662,
+          "target_pairs": 724,
+          "recall": 0.914364640883978,
+          "selected": 2428,
+          "outside_reference": 1748,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "pure_ms": {
+          "mean": 26.23329691356048,
+          "p50": 21.101775113493204,
+          "p95": 41.631667874753475
+        }
+      },
+      "50/noise10db/es": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 626,
+          "target_pairs": 724,
+          "recall": 0.8646408839779005,
+          "selected": 1893,
+          "outside_reference": 1250,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "top7": {
+          "target_hits": 648,
+          "target_pairs": 724,
+          "recall": 0.8950276243093923,
+          "selected": 2414,
+          "outside_reference": 1748,
+          "no_reference_audio_count": 3,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 7
+        },
+        "pure_ms": {
+          "mean": 26.814629072905518,
+          "p50": 21.02871797978878,
+          "p95": 41.50861082598567
+        }
+      },
+      "50/original/pt": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 549,
+          "target_pairs": 736,
+          "recall": 0.7459239130434783,
+          "selected": 1825,
+          "outside_reference": 1257,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "top7": {
+          "target_hits": 578,
+          "target_pairs": 736,
+          "recall": 0.7853260869565217,
+          "selected": 2202,
+          "outside_reference": 1604,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "pure_ms": {
+          "mean": 15.581537494435906,
+          "p50": 13.72257899492979,
+          "p95": 22.66836678609252
+        }
+      },
+      "50/noise10db/pt": {
+        "samples": 400,
+        "top5": {
+          "target_hits": 537,
+          "target_pairs": 736,
+          "recall": 0.7296195652173914,
+          "selected": 1804,
+          "outside_reference": 1248,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "top7": {
+          "target_hits": 565,
+          "target_pairs": 736,
+          "recall": 0.7676630434782609,
+          "selected": 2171,
+          "outside_reference": 1587,
+          "no_reference_audio_count": 5,
+          "negative_audio_false_positive_rate": 1.0,
+          "no_target_audio_count": 5
+        },
+        "pure_ms": {
+          "mean": 17.36546711064875,
+          "p50": 13.646352803334594,
+          "p95": 22.85376819781959
+        }
+      }
+    },
+    "paired_vs_baseline": {
+      "30/original/en": {
+        "top5": {
+          "delta_recall_pp": 0.43438500228623683,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.06967022758941012,
+            0.7702763932940644
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 0.3886602652034751,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.04519774011299435,
+            0.7105202842081136
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "30/original/es": {
+        "top5": {
+          "delta_recall_pp": 1.2430939226519337,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.4178272980501393,
+            2.2099447513812156
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 0.8287292817679558,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.13513513513513514,
+            1.5647226173541964
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "30/original/pt": {
+        "top5": {
+          "delta_recall_pp": -0.6793478260869565,
+          "paired_audio_bootstrap_95pct_pp": [
+            -1.955671447196871,
+            0.5610098176718092
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": -0.4076086956521739,
+          "paired_audio_bootstrap_95pct_pp": [
+            -1.7195767195767195,
+            0.957592339261286
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "30/noise10db/en": {
+        "top5": {
+          "delta_recall_pp": 1.4631915866483767,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.8799638989169675,
+            2.100271002710027
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 1.7604023776863282,
+          "paired_audio_bootstrap_95pct_pp": [
+            1.1575714623198676,
+            2.365930599369085
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "30/noise10db/es": {
+        "top5": {
+          "delta_recall_pp": 1.7955801104972375,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.5578800557880056,
+            3.1473533619456364
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 1.5193370165745856,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.535475234270415,
+            2.763157894736842
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "30/noise10db/pt": {
+        "top5": {
+          "delta_recall_pp": 0.6793478260869565,
+          "paired_audio_bootstrap_95pct_pp": [
+            -0.5524861878453039,
+            1.9607843137254901
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 1.358695652173913,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.13315579227696406,
+            2.627939142461964
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "50/original/en": {
+        "top5": {
+          "delta_recall_pp": 0.3886602652034751,
+          "paired_audio_bootstrap_95pct_pp": [
+            -0.023223409196470042,
+            0.781788916992412
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 0.3886602652034751,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.022993791676247412,
+            0.74487895716946
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "50/original/es": {
+        "top5": {
+          "delta_recall_pp": 0.5524861878453039,
+          "paired_audio_bootstrap_95pct_pp": [
+            -0.14144271570014144,
+            1.3793103448275863
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 0.4143646408839779,
+          "paired_audio_bootstrap_95pct_pp": [
+            -0.40816326530612246,
+            1.2178619756427604
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "50/original/pt": {
+        "top5": {
+          "delta_recall_pp": -0.4076086956521739,
+          "paired_audio_bootstrap_95pct_pp": [
+            -1.4379084967320261,
+            0.684931506849315
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": -0.5434782608695652,
+          "paired_audio_bootstrap_95pct_pp": [
+            -1.510989010989011,
+            0.4103967168262654
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "50/noise10db/en": {
+        "top5": {
+          "delta_recall_pp": 1.80612711476909,
+          "paired_audio_bootstrap_95pct_pp": [
+            1.1948529411764706,
+            2.3881289125898446
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 2.034750800182899,
+          "paired_audio_bootstrap_95pct_pp": [
+            1.4246323529411764,
+            2.669079393802307
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "50/noise10db/es": {
+        "top5": {
+          "delta_recall_pp": 1.3812154696132597,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.1404494382022472,
+            2.5936599423631126
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 1.3812154696132597,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.4155124653739612,
+            2.5069637883008355
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      },
+      "50/noise10db/pt": {
+        "top5": {
+          "delta_recall_pp": 1.0869565217391304,
+          "paired_audio_bootstrap_95pct_pp": [
+            -0.411522633744856,
+            2.4896265560165975
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        },
+        "top7": {
+          "delta_recall_pp": 1.6304347826086956,
+          "paired_audio_bootstrap_95pct_pp": [
+            0.0,
+            3.18118948824343
+          ],
+          "bootstrap_unit": "audio; speaker/session independence unverified"
+        }
+      }
+    },
+    "rows": 40800,
+    "checkpoints": {
+      "baseline": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+      "30": "2c31d2cab21eac747715a352eb52a10e6f834b2eb0bfb238f5e266468be58483",
+      "50": "15bda9a643cc6477c27b82047b66571fe56b8c65c593ca20cf968082becb6cd6"
+    },
+    "table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+    "qwen_decoder_used": false,
+    "business_snr_verified": false,
+    "business_noise_assumed_external_not_verified": true,
+    "limitations": [
+      "Full-audio retrieval, not the earlier cumulative-prefix latency measurement.",
+      "Reference-conditioned joint table retained; no claim of unseen business generalization.",
+      "Outside-reference candidates are text-based mismatches, not audited hallucinations.",
+      "No zero-percent continued-training control; gains cannot be solely attributed to noise.",
+      "CTC automatic-label PER and retrieval recall do not establish final ASR WER."
+    ]
+  }
+}

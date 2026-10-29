@@ -1,5 +1,144 @@
 # 工作交接记录
 
+## 0.194 2026-10-29 30%/50%抗噪续训及三版本配对检索完成（终端摘要归档）
+
+用户回传完整终端JSON，要求将本轮训练结果归档。本轮仅核对摘要、记录结果和权重
+路径，不重跑训练/检索/ASR，不替换部署模型、不覆盖工区outputs。日期为归档日期，
+不据此推断工区运行起止时间。回传JSON仅将CRLF换行统一为LF后保存在
+[2026-10-29_multilingual_noise10db_finetune_terminal_summary.json](results/2026-10-29_multilingual_noise10db_finetune_terminal_summary.json)，
+归档SHA256为`e2988ba0e6143e292f0ee52bf0d49619bb46cdd499fc2b7f6a0a6a835c1d6673`；
+源附件原字节SHA为`003fbb84711449e677e55420bb0f83e73650674cafcb001c1ac0ef8c605d33c2`。
+两者JSON字段和值完全一致。这些SHA不是工区return_bundle.zip或模型文件的本地实测SHA。
+
+### 完成状态与身份边界
+
+摘要顶层及evaluation均status=completed；30%/50%各epochs_completed=10、best_epoch=9。
+按0.190恢复入口及训练器完成门的含义，这轮计划内的缓存恢复检查、两次Head续训、
+三版本检索评测均已结束，不是仅完成缓存审计或还需等待50%组。两组从相同1.0 Head
+独立warm start、新建optimizer/schedule，冻结Qwen Encoder，复用三语原480h训练集
+与90类词表；按既定比例以10dB MUSAN噪声替换部分训练输入，不增加一份完整重复语料。
+
+| 环节 | 回传结果 |
+|---|---|
+| 恢复审计 | all_parts_checked=1738，features_recomputed=false |
+| 共享噪声训练池 | train_records=441004，其中30%组选择264581条 |
+| 一帧边界对 | 训练4327条、验证90条，沿用0.190逐ID审计许可 |
+| 噪声验证记录 | validation_records=7492 |
+| 30%组 | 10/10轮，best epoch9，验证macro PER=7.3960565% |
+| 50%组 | 10/10轮，best epoch9，验证macro PER=7.3732696% |
+| 业务检索评测 | 6800条音频×原始/带噪×baseline/30/50=40800行 |
+| 新Head的LLM转写评测 | 本轮qwen_decoder_used=false，未测最终ASR WER |
+
+macro PER为训练器按验证分组等权平均的自动音素标签错误率；不能把7.37%解释为最终
+转写WER。摘要没有逐轮曲线、各组PER及恢复contract，暂不能独立复核收敛过程、
+最差组、模型二进制或工区全部缓存/完成marker。训练GPU4为既定运行安排，摘要未
+返回硬件字段，不能从本次JSON单独证实实际GPU。未回传本轮完整小包，证据等级为
+用户终端摘要及其内部一致性核验，不宣称已验证ZIP内SHA清单。
+
+回传baseline与联合表SHA分别与configs/noise_finetune.workzone.json及0.174固定资产
+一致。新Head SHA为本轮首次收到的工区声明身份：
+
+```text
+baseline: 872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466
+30% best: 2c31d2cab21eac747715a352eb52a10e6f834b2eb0bfb238f5e266468be58483
+50% best: 15bda9a643cc6477c27b82047b66571fe56b8c65c593ca20cf968082becb6cd6
+table:    6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b
+```
+
+### 配对召回结果
+
+评测为完整音频Top5/7检索：EN6000、ES400、PT400；目标词×音频分母分别4374、724、
+736，各Head和原始/带噪条件一致。不是40800条不同音频，也不是此前累计前缀的时延
+统计。每格为百分比，变化列为相对1.0的百分点（pp），不是相对百分比增长。
+
+| 条件 | 语言 | K | 1.0召回 | 30%召回 | Δ30 pp | 50%召回 | Δ50 pp |
+|---|---|---|---:|---:|---:|---:|---:|
+| 原始 | en | 5 | 86.6941% | 87.1285% | +0.4344 | 87.0828% | +0.3887 |
+| 原始 | en | 7 | 87.9515% | 88.3402% | +0.3887 | 88.3402% | +0.3887 |
+| 原始 | es | 5 | 88.1215% | 89.3646% | +1.2431 | 88.6740% | +0.5525 |
+| 原始 | es | 7 | 91.0221% | 91.8508% | +0.8287 | 91.4365% | +0.4144 |
+| 原始 | pt | 5 | 75.0000% | 74.3207% | -0.6793 | 74.5924% | -0.4076 |
+| 原始 | pt | 7 | 79.0761% | 78.6685% | -0.4076 | 78.5326% | -0.5435 |
+| 带噪 | en | 5 | 83.5391% | 85.0023% | +1.4632 | 85.3452% | +1.8061 |
+| 带噪 | en | 7 | 84.5450% | 86.3054% | +1.7604 | 86.5798% | +2.0348 |
+| 带噪 | es | 5 | 85.0829% | 86.8785% | +1.7956 | 86.4641% | +1.3812 |
+| 带噪 | es | 7 | 88.1215% | 89.6409% | +1.5193 | 89.5028% | +1.3812 |
+| 带噪 | pt | 5 | 71.8750% | 72.5543% | +0.6793 | 72.9620% | +1.0870 |
+| 带噪 | pt | 7 | 75.1359% | 76.4946% | +1.3587 | 76.7663% | +1.6304 |
+
+两组带噪Top5/7三语点估计均提高，但仍未回到各自原始音频召回水平；葡语原始音频
+Top5/7均有小幅回退。50%比30%带噪Top7：EN多12个目标命中、ES少1个、PT多2个，
+不能仅凭macro PER略低宣布全面胜出。原始葡语回退的配对bootstrap区间均含0，尚
+不能确认稳定退化。30%带噪Top7相对基线的95%区间分别为EN[+1.1576,+2.3659]、
+ES[+0.5355,+2.7632]、PT[+0.1332,+2.6279]pp；50%葡语带噪Top7区间[0,+3.1812]pp，
+Top5区间[-0.4115,+2.4896]pp。区间为500次按音频配对bootstrap，尚未验证说话人/
+会话独立；没有30%与50%之间的直接配对区间，不能推断两组差异显著。
+
+### 误匹配、时延及决策边界
+
+带噪Top7参考外候选数量baseline→30%→50%：EN9025→9202→9220、ES1725→1754→1748、
+PT1589→1589→1587。召回提高未伴随三语一致的误匹配下降。英语2885条参考无联合表
+热词的负例上，出至少一个候选的比例为66.8977%→66.9324%→67.1057%；该分母不是
+no_target_audio_count=2886，后者只要求没有指定目标。西语/葡语分别仅3/5条参考无
+热词负例，报告均100%，样本过少，不能外推总体误报率。参考外候选及上述负例均由
+文本定义，未人工听审，不能直接当作LLM幻觉。
+
+| 带噪纯检索P95（ms） | baseline | 30% | 50% |
+|---|---:|---:|---:|
+| en | 9.985 | 9.533 | 9.616 |
+| es | 29.682 | 30.375 | 41.509 |
+| pt | 22.561 | 22.524 | 22.854 |
+
+50%组西语原始P95也为41.632ms（baseline30.174、30%组30.136）。这只是本轮运行
+观察，尚未隔离运行时CPU负载等影响，不能据此断言新增噪声必然导致该时延变化。
+
+当前讨论倾向先以30%组作最终ASR验证候选，50%组保留比较；尚未正式指定替换1.0。
+下一步应先核验小包中的分组PER/逐轮结果/身份，再考虑三Head同条件的最终ASR对照，
+验证目标词恢复、误引入和整体转写变化。本条记录不启动新实验。此前50条成功案例
+使用原1.0 Head及其保存Top7，不能冒充本轮新Head的ASR收益。
+
+本轮没有0%加噪且同样续训10轮的对照，因此收益只能归于整体warm-start续训方案，
+不能全部归因于加噪。业务带噪目录实际SNR未核验，与MUSAN是否独立仍未核验；
+沿用参考条件化联合词表，不能声称业务未见词/未见来源泛化。自动标签PER、检索召回
+和最终ASR WER分别评估，当前只完成前两类结果摘要。
+
+### 权重、同步及核验
+
+这两份都是三语共享CTC Head，不是葡语专用权重。工区最佳权重路径：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_noise10db_finetune_v1/head_30/ctc_head_best.pt
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_noise10db_finetune_v1/head_50/ctc_head_best.pt
+```
+
+已结束的本轮不需要重启或补--resume。原恢复命令及相同plan/caches/状态的校验复用
+规则见0.190；不要改plan身份、覆盖既有输出或将第10轮latest当成第9轮best。
+待回传的本轮小包（含两组report/metrics/initial_head/completed、evaluation/report及
+恢复audit/contract，不含权重、特征张量或全量音频）：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/multilingual_noise10db_finetune_v1/return_bundle.zip
+```
+
+分支codex/g2p-coverage-scan，归档起点99ab51d9acd0af4462c69a4d7730fdcec8e447d2；该
+起点不是本次工区训练源码身份，终端未记录实际git_commit。推送归档SHA见本轮回复。
+同步文档及可选的只读核验：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+cat outputs/multilingual_noise10db_finetune_v1/head_30/completed.json
+cat outputs/multilingual_noise10db_finetune_v1/head_50/completed.json
+sha256sum outputs/multilingual_noise10db_finetune_v1/head_30/ctc_head_best.pt
+sha256sum outputs/multilingual_noise10db_finetune_v1/head_50/ctc_head_best.pt
+```
+
+本地核验归档JSON仅统一附件换行、字段和值一致，18组覆盖完整，40800行计数一致；逐项复算36个
+召回率及24个相对基线变化、核对分母/样本数/区间端点顺序和配置中baseline身份。
+git diff --check通过；仅新增本条和小型原始摘要，不改运行代码，未重跑模型或单元
+测试。保留原7份未知测试修改和未跟踪资料，不纳入提交。
+
 ## 0.193 2026-10-28 最新联合4k缺最终ASR对照：GPU5补跑真实恢复案例并打包（待工区）
 
 用户两次运行历史结果扫描均导出0条，对反复诊断而未交付音频提出异议；本轮不再让
