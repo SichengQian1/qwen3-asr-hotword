@@ -1,6 +1,77 @@
 # 工作交接记录
 
+## 0.196 2026-10-29 撤销强制克隆/升级前置条件，先只读复用原aligner（待工区）
+
+用户连续两次回传环境克隆中断，询问为何不能使用原aligner以及是否会删减原环境。
+22/22模型资源导入、426317条发音结构检查在两次终端记录中均已完成；失败发生在
+Conda克隆阶段，清除终端ANSI转义后可见IncompleteRead。第二次为19480212字节已读、
+185669234字节尚缺；摘要未包含包名/URL，不能断言两次为同一个依赖包，也不能将
+此次网络断流继续解释为首次模型下载的证书错误。未进入真实G2P、来源统计或听审。
+
+### 判断修正及证据
+
+隔离运行环境原意是保留旧软件与依赖，clone本身不会删减源环境。但“新版G2P模型
+meta.version=3.4.3”并不推出“必须安装MFA软件3.4.3”。0.178记录工区原aligner已有
+MFA3.4.0/Pynini2.1.7，已有官方PhonetisaurusRewriter。本次实际下载官方
+[v3.4.0 generator.py](https://raw.githubusercontent.com/MontrealCorpusTools/Montreal-Forced-Aligner/v3.4.0/montreal_forced_aligner/g2p/generator.py)与
+[v3.4.3 generator.py](https://raw.githubusercontent.com/MontrealCorpusTools/Montreal-Forced-Aligner/v3.4.3/montreal_forced_aligner/g2p/generator.py)，
+两文件字节完全一致，SHA256均为
+`27417938aae27612922ddd50455292ea5d52e22d1c63c63aff738093073b37b9`。
+另比较Rewriter、PhonetisaurusRewriter、scored_top_rewrites及generate_scored_paths
+的AST也一致。这是优先复用原软件做兼容性实测的依据，不是已证明当前工区全部
+二进制依赖和三语新FST可运行。前次把强制升级设为必经步骤过于保守，本次撤销。
+
+### 本次改动与恢复边界
+
+- 环境阶段改为只读检查现有aligner，记录实际MFA/Pynini版本、官方generator文件
+  SHA及Rewriter参数；明确允许已核对接口的3.4.0/3.4.3。然后仍必须运行三语实际
+  G2P烟测。若导入失败、版本或接口不符，停止并报出证据，不自动安装/替换依赖。
+- 移除自动clone/install路径，不修改旧aligner及ASR环境包；子进程Python加-B，
+  MFA_ROOT_DIR指向新运行日志目录内。旧失败克隆目录/旧运行记录保留，不清理未知环境。
+- 模型revision/22文件哈希、v0.3百类表及其SHA、原训练标签/Head/索引均不变。
+  继续复用models/mfa/hf_g2p_20261029_v03中的完整资源，不再联网获取模型文件。
+- 因运行策略及源码改变，新默认输出为outputs/mfa_v03_foundation_v2，旧v1保留。
+  不能给本次命令手动指定旧v1目录，否则源码契约应拒绝。不需要改/删除旧contract。
+- 外部命令非零退出现在在进度上下文内抛错，终端正确显示interrupted or failed；
+  错误摘要先去除ANSI进度转义与空白再取末尾，避免真正的下载报错被控制符挤掉。
+
+分支codex/g2p-coverage-scan，修复起点0ac822d3d064be90f67bbe23dd075eb461b42253；
+新推送完整SHA见本轮回复。工区运行（沿用已上传的离线包）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/prepare_mfa_v03.py all --asset-archive outputs/mfa_v03_assets_20261029.zip
+```
+
+预期资源检查很快复用22文件，随后出现Read-only runtime check: aligner，再真实执行
+三语G2P。全流程仍CPU运行，无Qwen/Encoder、无训练、无validation/test读取。
+仅API检查通过不能叫模型兼容验收；真实FST结果、未解决输入和人工听审分别确认。
+若现有依赖已损坏等导致无法导入，返回下面小包/日志，再据实际原因决定如何修环境，
+本入口不会悄悄重试升级或删除任何原环境。
+
+```text
+outputs/mfa_v03_foundation_v2/logs/runtime_probe.log
+outputs/mfa_v03_foundation_v2/logs/runtime_probe.json
+outputs/mfa_v03_foundation_v2/return_bundle.zip
+outputs/mfa_v03_foundation_v2/review_audio.zip
+```
+
+前两个文件在只读环境检查执行后生成；失败时可能只有log。小包新增收录环境检查
+日志/身份，优先回传return_bundle.zip；review_audio.zip仍由巴葡同事下载听审并导出
+human_review.json。完成状态仍prepared_pending_human_review。同一代码/配置中断后
+重复同一命令复用已核验阶段，无需--resume；新v2仅重新扫描小词典，不重下模型。
+
+本地相关38项通过，覆盖现有3.4.0/3.4.3选择、版本/接口/导入失败不触发安装、失败
+进度和ANSI错误摘要，另含旧词表行为及前次准备流程回归。相关Ruff、Mypy、CLI和
+git diff --check通过；真实三语资源的本地下载阶段复核通过。未在本机运行MFA/
+工区新FST，不把mock测试或源码一致性等同于真实发音/检索改善。保留原无关修改。
+
 ## 0.195 2026-10-29 新一轮MFA/G2P基础准备：v0.3百类表与葡语两项检查入口（待工区）
+
+本条保留初始交付记录；其强制克隆/升级环境策略和默认v1目录已由0.196替代。
+固定模型、词表及人工审核边界仍有效，以0.196命令继续。
 
 用户授权先准备三语最新适用G2P、单独发布新共享词表，再检查葡语真实音频与标签、
 实际训练语料的来源/方言构成。本次只交付准备及检查入口；不开始训练，不改生产

@@ -1,4 +1,4 @@
-"""Pinned G2P-only foundation assets and an isolated MFA runtime, never old assets."""
+"""Pinned G2P assets and read-only checks of an existing MFA runtime."""
 
 from __future__ import annotations
 
@@ -50,9 +50,12 @@ def command(args: list[str], log: Path, label: str) -> None:
             check=False,
             env={**os.environ, "MFA_ROOT_DIR": str(log.parent / "mfa_work")},
         )
-    if result.returncode:
-        tail = log.read_text(encoding="utf-8", errors="replace")[-5000:]
-        raise RuntimeError(f"{label} failed ({result.returncode}); {log}\n{tail}")
+        if result.returncode:
+            clean = re.sub(
+                r"\x1b\[[0-?]*[ -/]*[@-~]", "", log.read_text(encoding="utf-8", errors="replace")
+            )
+            tail = "\n".join(s for s in clean.splitlines() if s.strip())[-8000:]
+            raise RuntimeError(f"{label} failed ({result.returncode}); {log}\n{tail}")
 
 
 def _fetch(url: str, target: Path) -> None:
@@ -160,12 +163,29 @@ def download(
     return receipt
 
 
+def runtime_versions(config: dict[str, Any]) -> list[str]:
+    versions = config["environment"]["allowed_mfa_versions"]
+    if (
+        not isinstance(versions, list)
+        or not versions
+        or any(v not in {"3.4.0", "3.4.3"} for v in versions)
+    ):
+        raise ValueError("only explicitly reviewed MFA 3.4.0/3.4.3 runtimes are supported")
+    return versions
+
+
 def environment(config: dict[str, Any], assets: Path, logs: Path) -> list[str]:
-    """Clone the existing binary-capable aligner env, modify the new env only."""
+    """Probe the existing environment without installing, cloning or upgrading it.
+
+    Official generator.py is byte-identical in the 3.4.0 and 3.4.3 tags. The
+    runtime probe is still followed by real pinned-FST smoke tests, not treated
+    as proof of compatibility or pronunciation quality on its own.
+    """
     spec = config["environment"]
-    name, base, version = spec["name"], spec["base"], spec["mfa_version"]
-    if name == base or not all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", s) for s in (name, base)):
-        raise ValueError("a distinct, safe new Conda environment name required")
+    name = spec["name"]
+    if spec.get("mode") != "existing_readonly" or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name):
+        raise ValueError("an explicitly read-only, safe existing Conda environment required")
+    versions = runtime_versions(config)
     conda = os.environ.get("CONDA_EXE") or shutil.which("conda")
     if not conda:
         raise ValueError("Conda required; run inside the work-zone Conda shell")
@@ -173,48 +193,66 @@ def environment(config: dict[str, Any], assets: Path, logs: Path) -> list[str]:
         [conda, "env", "list", "--json"], capture_output=True, text=True, check=True
     )
     names = {Path(p).name for p in json.loads(query.stdout)["envs"]}
-    marker = assets / "runtime_environment.json"
-    identity = {"name": name, "base": base, "mfa_version": version}
-    owned = marker.exists() and json.loads(marker.read_text()) == identity
-    prefix = [conda, "run", "--no-capture-output", "-n", name, "python"]
+    if name not in names:
+        raise ValueError(f"existing Conda environment not found: {name}; no installation attempted")
+    prefix = [conda, "run", "--no-capture-output", "-n", name, "python", "-B"]
     probe = [
         "-c",
-        "import importlib.metadata as m; import pynini, pywrapfst; "
+        "import importlib.metadata as m, inspect, json, hashlib; from pathlib import Path; "
+        "import pynini, pywrapfst; from montreal_forced_aligner.g2p import generator; "
         "from montreal_forced_aligner.g2p.generator import PhonetisaurusRewriter; "
-        "print(m.version('montreal-forced-aligner'))",
+        "print(json.dumps({'mfa_version':m.version('montreal-forced-aligner'),"
+        "'pynini_version':m.version('pynini'),"
+        "'rewriter_parameters':list(inspect.signature(PhonetisaurusRewriter).parameters),"
+        "'official_generator_sha256':hashlib.sha256(Path(generator.__file__).read_bytes()).hexdigest()}))",
     ]
-    if name in names:
-        checked = subprocess.run(prefix + probe, capture_output=True, text=True, check=False)
-        if checked.returncode == 0 and checked.stdout.strip().splitlines()[-1:] == [version]:
-            return prefix
-        if not owned:
-            raise ValueError(f"existing {name} has another MFA version; refusing to modify it")
-    else:
-        if base not in names:
-            raise ValueError(f"base Conda environment not found: {base}")
-        write_json(marker, identity)
-        command(
-            [conda, "create", "--yes", "--name", name, "--clone", base],
-            logs / "environment.log",
-            f"Clone {base} into isolated {name}",
+    logs.mkdir(parents=True, exist_ok=True)
+    print(f"Read-only runtime check: {name}; no Conda packages will be changed", flush=True)
+    with stage_progress(f"Check existing {name} MFA API (read only)"):
+        checked = subprocess.run(
+            prefix + probe,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "MFA_ROOT_DIR": str(logs / "mfa_work")},
         )
-    command(
-        [
-            conda,
-            "install",
-            "--yes",
-            "--name",
-            name,
-            "--channel",
-            "conda-forge",
-            f"montreal-forced-aligner={version}",
-        ],
-        logs / "environment.log",
-        f"Install MFA {version} in {name} only",
+        (logs / "runtime_probe.log").write_text(checked.stdout + checked.stderr, encoding="utf-8")
+        if checked.returncode:
+            raise RuntimeError(
+                f"existing {name} cannot import the required MFA API; no installation attempted; "
+                f"see {logs / 'runtime_probe.log'}\n{checked.stderr[-4000:]}"
+            )
+        try:
+            result = json.loads(checked.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError) as error:
+            raise ValueError(f"invalid read-only runtime probe output: {logs}") from error
+        if result.get("mfa_version") not in versions:
+            raise ValueError(
+                f"existing {name} has MFA {result.get('mfa_version')}; "
+                f"reviewed versions {versions}; "
+                "no installation attempted"
+            )
+        required = {
+            "fst",
+            "grapheme_symbol_table",
+            "phone_symbol_table",
+            "num_pronunciations",
+            "grapheme_order",
+            "sequence_separator",
+            "graphemes",
+            "strict",
+            "unicode_decomposition",
+        }
+        if not required.issubset(result.get("rewriter_parameters", [])):
+            raise ValueError("existing MFA rewriter API differs; no installation attempted")
+    write_json(
+        logs / "runtime_probe.json",
+        {**result, "command": prefix, "environment_modified": False, "fst_smoke_pending": True},
     )
-    checked = subprocess.run(prefix + probe, capture_output=True, text=True, check=True)
-    if checked.stdout.strip().splitlines()[-1:] != [version]:
-        raise ValueError("isolated MFA runtime version verification failed")
+    print(
+        f"Existing MFA {result['mfa_version']} API available; next check the actual FSTs",
+        flush=True,
+    )
     return prefix
 
 

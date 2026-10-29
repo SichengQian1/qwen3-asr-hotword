@@ -158,6 +158,8 @@ def package_small(root: Path, config: dict[str, Any], output: Path) -> Path:
         "smoke_g2p.completed.json",
         "source_audit.json",
         "review_report.json",
+        "logs/runtime_probe.json",
+        "logs/runtime_probe.log",
     ]
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in names:
@@ -199,6 +201,7 @@ def run(
         "encoder_loaded": False,
         "test_set_used": False,
         "old_labels_modified": False,
+        "environment_modified": False,
         "human_review": "pending",
         "training_started": False,
     }
@@ -218,7 +221,11 @@ def run(
                     raise ValueError("run download first to initialize the owned asset directory")
                 if prefix is None:
                     prefix = environment(config, assets, output / "logs")
-                report["stages"][stage] = {"status": "runtime_selected", "python_command": prefix}
+                report["stages"][stage] = {
+                    "status": "runtime_selected_pending_fst_smoke",
+                    "python_command": prefix,
+                    "environment_modified": False,
+                }
             elif stage == "smoke":
                 validate_inventory(root, config, assets)
                 if prefix is None:

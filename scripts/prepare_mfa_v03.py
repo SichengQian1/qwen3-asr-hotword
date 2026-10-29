@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--assets-dir", type=Path)
     parser.add_argument("--asset-archive", type=Path, help="optional pinned offline G2P asset ZIP")
-    parser.add_argument("--mfa-python", help="optional existing isolated MFA-3.4.3 Python")
+    parser.add_argument("--mfa-python", help="optional existing MFA-3.4.0/3.4.3 Python; read only")
     parser.add_argument("--request", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--worker-output", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -72,6 +72,7 @@ def main() -> int:
             "assets",
             "gpu_used",
             "encoder_loaded",
+            "environment_modified",
             "test_set_used",
             "human_review",
             "training_started",

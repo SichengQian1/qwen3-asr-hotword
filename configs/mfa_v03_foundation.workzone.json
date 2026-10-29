@@ -296,15 +296,15 @@
     }
   },
   "assets_dir": "models/mfa/hf_g2p_20261029_v03",
-  "output": "outputs/mfa_v03_foundation_v1",
+  "output": "outputs/mfa_v03_foundation_v2",
   "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.3.json",
   "vocab_sha256": "59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f",
   "old_vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
   "old_vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
   "environment": {
-    "name": "aligner_mfa343",
-    "base": "aligner",
-    "mfa_version": "3.4.3"
+    "mode": "existing_readonly",
+    "name": "aligner",
+    "allowed_mfa_versions": ["3.4.0", "3.4.3"]
   },
   "source_run": "outputs/english_countries_refresh_newval_v1",
   "source_plan_sha256": "dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83",

@@ -49,7 +49,9 @@ def test_new_config_is_pinned_and_union_has_no_discarded_old_units() -> None:
     assert set(value["tokens"][2:]) == union
     assert value["metadata"]["training_ready"] is False
     assert set(value["changes_from_v0_2"]["pt_additions_to_shared_vocab"]) == {"ʁ", "kʷ", "ɡʷ"}
-    assert cfg["environment"]["name"] != cfg["environment"]["base"]
+    assert cfg["environment"]["mode"] == "existing_readonly"
+    assert cfg["environment"]["name"] == "aligner"
+    assert assets.runtime_versions(cfg) == ["3.4.0", "3.4.3"]
     for model in cfg["models"].values():
         assert len(model["revision"]) == 40
         assert all(not p.startswith("acoustic/") for p in model["files"])
@@ -156,20 +158,99 @@ def test_strict_unicode_guard_does_not_filter_unsupported_letters() -> None:
     assert rejected == spanish
 
 
-def test_runtime_never_upgrades_an_unowned_existing_environment(tmp_path, monkeypatch) -> None:
+def runtime_probe(version="3.4.0"):
+    return {
+        "mfa_version": version,
+        "pynini_version": "2.1.7",
+        "official_generator_sha256": "a" * 64,
+        "rewriter_parameters": [
+            "fst",
+            "grapheme_symbol_table",
+            "phone_symbol_table",
+            "num_pronunciations",
+            "grapheme_order",
+            "sequence_separator",
+            "graphemes",
+            "strict",
+            "unicode_decomposition",
+        ],
+    }
+
+
+def runtime_config():
+    return {
+        "environment": {
+            "name": "aligner",
+            "mode": "existing_readonly",
+            "allowed_mfa_versions": ["3.4.0", "3.4.3"],
+        }
+    }
+
+
+@pytest.mark.parametrize("version", ["3.4.0", "3.4.3"])
+def test_existing_runtime_is_probed_without_cloning_or_upgrading(
+    tmp_path, monkeypatch, version
+) -> None:
     monkeypatch.setenv("CONDA_EXE", "conda")
     commands = []
 
     def fake(args, **kwargs):
         commands.append(args)
-        stdout = '{"envs":["/envs/aligner", "/envs/new_aligner"]}' if "env" in args else "3.4.0\n"
+        if "env" in args:
+            stdout = '{"envs":["/envs/aligner", "/envs/aligner_mfa343"]}'
+        else:
+            assert args[args.index("-n") + 1] == "aligner"
+            assert "-B" in args
+            assert kwargs["env"]["MFA_ROOT_DIR"] == str(tmp_path / "logs/mfa_work")
+            stdout = json.dumps(runtime_probe(version)) + "\n"
         return subprocess.CompletedProcess(args, 0, stdout, "")
 
     monkeypatch.setattr(assets.subprocess, "run", fake)
-    cfg = {"environment": {"name": "new_aligner", "base": "aligner", "mfa_version": "3.4.3"}}
-    with pytest.raises(ValueError, match="refusing to modify"):
-        assets.environment(cfg, tmp_path, tmp_path / "logs")
-    assert all("install" not in c and "create" not in c for c in commands)
+    prefix = assets.environment(runtime_config(), tmp_path, tmp_path / "logs")
+    assert prefix == ["conda", "run", "--no-capture-output", "-n", "aligner", "python", "-B"]
+    assert len(commands) == 2
+    assert all(not {"install", "create", "remove"}.intersection(c) for c in commands)
+    saved = json.loads((tmp_path / "logs/runtime_probe.json").read_text())
+    assert saved["mfa_version"] == version and not saved["environment_modified"]
+    assert saved["fst_smoke_pending"]
+
+
+@pytest.mark.parametrize("problem", ["version", "signature", "import"])
+def test_runtime_failure_does_not_trigger_installation(tmp_path, monkeypatch, problem) -> None:
+    monkeypatch.setenv("CONDA_EXE", "conda")
+    commands = []
+
+    def fake(args, **kwargs):
+        commands.append(args)
+        if "env" in args:
+            return subprocess.CompletedProcess(args, 0, '{"envs":["/envs/aligner"]}', "")
+        value = runtime_probe("3.3.0" if problem == "version" else "3.4.0")
+        if problem == "signature":
+            value["rewriter_parameters"] = []
+        return subprocess.CompletedProcess(
+            args, int(problem == "import"), json.dumps(value), "missing shared library"
+        )
+
+    monkeypatch.setattr(assets.subprocess, "run", fake)
+    with pytest.raises((RuntimeError, ValueError), match="no installation attempted"):
+        assets.environment(runtime_config(), tmp_path, tmp_path / "logs")
+    assert all(not {"install", "create", "remove"}.intersection(c) for c in commands)
+
+
+def test_failed_command_reports_failure_and_keeps_readable_error(tmp_path, monkeypatch, capsys):
+    def fake(args, **kwargs):
+        kwargs["stdout"].write(
+            "download failed: IncompleteRead\n" + "\x1b[A\n\n" * 2000 + " done\n"
+        )
+        kwargs["stdout"].flush()
+        return subprocess.CompletedProcess(args, 1)
+
+    monkeypatch.setattr(assets.subprocess, "run", fake)
+    with pytest.raises(RuntimeError, match="IncompleteRead") as error:
+        assets.command(["fake"], tmp_path / "command.log", "Example stage")
+    assert "\x1b" not in str(error.value)
+    terminal = capsys.readouterr().out
+    assert "interrupted or failed" in terminal and "; completed;" not in terminal
 
 
 def test_probability_columns_are_not_phonemes_and_variants_not_auto_selected(tmp_path) -> None:

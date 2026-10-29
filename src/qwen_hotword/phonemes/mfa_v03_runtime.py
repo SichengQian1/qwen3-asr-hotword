@@ -1,4 +1,4 @@
-"""Real official Phonetisaurus rewriting; imported only in the isolated MFA env."""
+"""Real official Phonetisaurus rewriting in a checked existing MFA environment."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from qwen_hotword.phonemes.coverage import load_phoneme_vocab, tokenize_ipa_to_vocab
-from qwen_hotword.phonemes.mfa_v03_assets import pin, sha, write_json
+from qwen_hotword.phonemes.mfa_v03_assets import pin, runtime_versions, sha, write_json
 from qwen_hotword.training.stage_progress import stage_progress
 
 
@@ -56,8 +56,8 @@ def run(config: dict[str, Any], assets: Path, root: Path, request: Path, output:
     )
 
     version = importlib.metadata.version("montreal-forced-aligner")
-    if version != config["environment"]["mfa_version"]:
-        raise ValueError(f"expected isolated MFA 3.4.3, got {version}")
+    if version not in runtime_versions(config):
+        raise ValueError(f"unreviewed MFA runtime {version}; no environment changes attempted")
     pin(root / config["vocab"], config["vocab_sha256"])
     vocab = load_phoneme_vocab(root / config["vocab"])
     rows = [json.loads(s) for s in request.read_text(encoding="utf-8").splitlines() if s.strip()]
