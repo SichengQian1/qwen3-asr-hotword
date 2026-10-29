@@ -268,6 +268,7 @@ def run_worker(
     marker = output.with_suffix(".completed.json")
     identity = {
         "request_sha256": sha(request),
+        "worker_config_sha256": sha(Path(config["_config_path"])),
         "asset_receipt_sha256": sha(assets / "verified.json"),
         "runtime_command": prefix,
     }

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "output": "outputs/mfa_v03_noise70_scratch_v1",
+  "foundation_config": "configs/mfa_v03_foundation.workzone.json",
+  "foundation_config_sha256": "2c9e3a1772afcffb79abf3e006ffc94f593d1a387562e7b6f70a06149df0684d",
+  "foundation_output": "outputs/mfa_v03_foundation_v2",
+  "assets_dir": "models/mfa/hf_g2p_20261029_v03",
+  "source_run": "outputs/english_countries_refresh_newval_v1",
+  "source_plan_sha256": "dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83",
+  "source_report_sha256": "57c44ca7d3cebea5696de607efd2af2bb3b26df231e951afde11b9ee84e90398",
+  "noise_source": "outputs/multilingual_noise10db_finetune_v1",
+  "noise_root": "/data/h00911716/data_noise/musan/noise",
+  "seed": 20261027,
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.3.json",
+  "vocab_sha256": "59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f",
+  "old_vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "old_vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "hotword_table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "train_counts": {
+    "en": 263609,
+    "es": 296399,
+    "pt": 321741
+  },
+  "noise_percent": 70,
+  "snr_db": 10,
+  "ratio_unit": "nearest_70_percent_of_eligible_records_per_language",
+  "head_initialization": "random",
+  "encoder_frozen": true,
+  "human_review_required": false,
+  "label_policy": "new_pinned_G2P_Top1_no_legacy_fallback",
+  "g2p_workers": 4,
+  "g2p_words_per_part": 2000,
+  "maximum_quarantine_fraction": 0.05,
+  "training_seed": 20261029,
+  "training": {
+    "epochs": 40,
+    "batch_size": 256,
+    "learning_rate": 0.0003
+  },
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "reference_checkpoint_sha256": {
+    "baseline": "872edc09460cc4a70c53e6868269ca8afcec111b2de82ef52dd34df354873466",
+    "30": "2c31d2cab21eac747715a352eb52a10e6f834b2eb0bfb238f5e266468be58483",
+    "50": "15bda9a643cc6477c27b82047b66571fe56b8c65c593ca20cf968082becb6cd6"
+  },
+  "asr": {
+    "seed": 20261029,
+    "max_new_tokens": 512
+  }
+}

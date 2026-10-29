@@ -1,5 +1,139 @@
 # 工作交接记录
 
+## 0.197 2026-10-29 用户授权v0.3新标签、70%加噪、100类Head从头训练及检索/ASR（待工区）
+
+用户明确省略专家听审及小规模训练对照，确认本轮必须使用新词表生成新训练标签、
+随机初始化新Head，随后指定70%音频带10dB噪声并要求执行。本次交付独立入口，不走
+0.194的旧90类30%/50% warm-start，不加载旧Head初始化，不沿用旧标签，不改旧模型、
+旧训练数据、生产表或历史outputs。70%为本轮实验条件，不是已实测最优比例。
+
+用户刚回传的0.196终端摘要显示：原aligner/MFA3.4.0 API及真实三语G2P运行结束；
+881749条来源扫描结束；1800个PT检查词均有可映射输出、1578个有可用官方词典候选；
+200/200原音频复制成功，status=prepared_pending_human_review。未回传完整小包，
+不能宣称本机核验其逐词发音、来源方言比例或全部工区SHA；不把1800/1800当作
+准确率100%。新入口在工区重新校验固定资源/来源身份，用户授权不设人工听审门槛。
+
+### 固定策略及主流程
+
+配置`configs/mfa_v03_noise70.workzone.json`，入口`scripts/run_mfa_v03_training.py`。
+沿用0.195的三语固定HF模型快照、v0.3百类表及0.196原aligner，只读调用，不克隆/
+安装/升级环境。词表SHA仍为59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f。
+词表原metadata仍保留候选/未听审事实；新实验明确记录用户选择自动标签、不设人工门，
+不会把这一授权改写为“人工验证通过”。
+
+`all`依次执行以下阶段；自动检查包含在其中，没有额外专家任务或试训任务：
+
+1. **prepare：全部新标签。** 从固定1.0实际TRAIN/validation及其缓存定位音频，
+   TRAIN仍为EN263609、ES296399、PT321741条、原各约480h的来源范围；不重新抽样或
+   改划分。三语分别收集唯一词，含已给定4000热词词面，调用新模型Top1，不选词典
+   第一行、不增加未经审核的多发音训练标签、不使用旧phone ID回退。按2000词分块、
+   最多4个CPU子进程，并记录模型/运行库身份及分块完成SHA；已有成功分块复用。
+   G2P worker新增可选g2p_num_pronunciations，本轮为1；历史准备默认仍3。完成标记
+   新增worker配置SHA，防止把不同Top-k配置的输出混用。
+2. **prepare内自动检查。** 整句处理数字/符号/未知字母，不静默删字；缺词、空标签、
+   音素OOV及真实CTC帧数不够的记录进入分片needs_review.jsonl。标签最小帧数包含
+   相邻重复音素额外需要的blank；按现有2x Head及已存Encoder真实长度核验，已知旧
+   噪声缓存存在时用两者较短长度检查。不改变CTC时间倍率、不截断标签。每语种/
+   split拒收超过5%会自动停止并返回label_report，而非悄悄大幅缩减语料；5%为工程
+   防错阈值，不是质量实测值。报告原始/可训练小时及新增、零频音素；未进入训练的
+   音频保留完整来源和原因，不宣称仍全部480h可用。
+3. **cache：70%混合输入。** 在通过自动检查的TRAIN内，每个语种按条数取最接近
+   70%的整数条，固定所有epoch用同一选择；其余30%为原始录音。是替换部分输入，
+   不额外复制70%训练样本，也不是按小时精确取70%；实际噪声小时写报告。保留可用
+   旧50%池随机选择后补足其余样本，以复用同一噪声片段。验证集各有原始/10dB配对
+   视图，噪声录音沿用原MUSAN train/validation隔离，不将验证噪声用于训练。
+4. **cache内复用。** 原始音频的冻结Encoder特征及旧50%池中噪声文件/计划offset/
+   文本/语言完全相同的特征可以复用，但全部重新写入新100类标签缓存。未缓存的
+   噪声输入才在H200上即时混音、抽特征，不生成海量中间WAV。复用前验证文件SHA、
+   样本ID、旧标签与原清单对应关系及Encoder身份；逐片处理，绝不载入全库特征。
+   使用真实长度保存新缓存，记录逐ID的原始/带噪长度；相差1帧时重新检查新标签可行性，
+   不再触发旧replacement视图的形状相等条件，也不放宽原生产训练器的严格默认行为。
+   不够帧或超过1帧的异常变化停止并返回具体样本诊断，不补假帧。
+5. **train：一个全新Head。** 沿用1.0报告的Head结构（Temporal 2x），输出100类，
+   float32随机初始化，initial_head_checkpoint显式为None；Qwen3-ASR-1.7B音频Encoder
+   始终冻结。新AdamW，LR=3e-4、batch256、最多40轮；最少5轮、早停patience6，
+   六组en/es/pt×原始/带噪的validation macro PER选模，loss等作为并列处理。plateau
+   patience2、factor0.5、最低LR5e-6。训练不读取业务评测参考或封存test清单。
+6. **evaluate：统一检索。** 训练及checkpoint固定后才读取旧6800条业务回归资产。
+   同一音频原始/带噪×1.0/旧50%/新70%，40800行Top5/7检索；保留同一4000词面及
+   原门限/Anchor配置，新方案按相同新Top1规则重建音素索引。无法生成新发音的词面
+   明列inactive，仍保留在相同目标分母中计未命中，不用旧ID伪装新版成功，不通过
+   删除难词提高召回。报告分语种召回、参考外候选、负例、时延P50/P95及召回配对差异。
+7. **asr：最终转写。** 同一6800条×原始/带噪，全量运行无热词、旧50%Top7、新70%Top7
+   三种上下文，共40800个请求组合；相同音频/上下文/参数可复用同一真实ASR结果，
+   单独报告实际新增调用数及复用数。使用已审计的Qwen0.0.6 greedy完整音频路径，
+   max_new_tokens512，参考不送入Decoder；不只挑恢复成功案例。报告三语WER、热词
+   恢复/丢失、参考外词、截断/语言异常及请求耗时。WER按NFC/casefold、标点转空格，
+   保留重音字母及数字；参考外词只作文本误引入代理，不称为人工确认的幻觉。
+
+训练PER基于新版自动标签，不能与旧表PER直接当同一指标比较。最终业务集及其热词
+表已多次检查/参考条件化，只称回归比较，不称新盲测；说话人/近重复独立、业务噪声
+实际SNR及其与MUSAN独立性仍未验证。新方案同时改变标签/词表、从头训练和70%条件，
+没有小规模/全量旧标签从头对照，不能隔离每项改动的因果贡献。不会自动部署新模型。
+
+### 工区运行、恢复及回传
+
+分支codex/g2p-coverage-scan，开发起点dbfa094ba99eab6722db05dcebd34697ff34e7a5；
+本次推送SHA见回复。重用原数据、0.196模型目录和已完成噪声工区文件，本地不加载/
+下载完整Qwen或启动任何H200任务。工区沿用物理GPU4、映射逻辑cuda:0：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_mfa_v03_training.py all --gpu 4
+```
+
+all确实含新标签、特征、新Head、检索及ASR全部阶段；不再运行prepare_mfa_v03.py all，
+后者是已完成的旧准备流程，源码更新后也不应强行复用其旧contract重新执行。
+若分段运行，同一入口支持prepare（CPU，不需--gpu）、cache、train、evaluate、asr。
+重跑相同主命令自动复用已核验词块/特征/完成Head/逐条检索/逐请求ASR；不需要--resume。
+训练中断从本轮training_state_latest.pt恢复下一轮，未完成epoch最多重跑当前轮；
+这不是从旧Head续训。标签准备中断可重扫元数据，已完成的G2P词块不重新计算。
+新源码/配置不一致时拒绝混用，保留原目录，需指定新的--output-dir。不覆盖旧outputs。
+
+新目录及关键文件：
+
+```text
+outputs/mfa_v03_noise70_scratch_v1/
+  contract.json / identity.json / report.json
+  g2p/{en,es,pt}/part-*/                   独立词块请求、结果、完成标记、日志
+  labels/{train,validation}/part-*/       新标签与完整needs_review记录
+  label_report.json / hotword_report.json
+  parts/{train,validation}/*/             混合清单、新特征、逐ID复用/长度审计
+  head/ctc_head_best.pt                   新100类Head，不是旧90类权重
+  head/training_state_latest.pt / head/metrics.jsonl
+  training_completed.json
+  retrieval/report.json / retrieval/cells/
+  asr/report.json / asr/cells/
+  return_bundle.zip
+```
+
+运行中可另开终端只读查看进度，不读特征张量、不启动模型：
+
+```bash
+python -B scripts/run_mfa_v03_training.py status
+```
+
+快照显示当前阶段、已完成/总G2P词块和特征片、最后完整epoch及各阶段完成状态，
+但不是重新核验全部哈希。主流程具备真实计数和10秒心跳，静默大模型调用也有心跳。
+运行时长尚未实测，包含全量词生成、补算带噪特征、最多40轮及全量ASR，可能跨天；
+不能从本地mock或1800词小调用推断总ETA。为独立新缓存预留约原始train+val缓存
+1.15倍再加2GiB的可用空间，脚本按实际字节检查，不改写/硬链接旧标签张量。
+
+完成或失败后先回传新目录return_bundle.zip。包内含配置/源码/表身份、自动标签统计、
+缓存摘要、训练曲线、检索和ASR汇总及sha256.txt；失败时含栈和具体长度异常，不含
+权重、全量清单、FST、WAV或Encoder特征。无需再回传/听审旧200音频包。
+
+本地使用合成小特征完成新标签→精确70%选择→旧特征复用/新噪声补算→真实CPU新Head
+训练及恢复测试，验证新ID99进入标签/100输出、initial_head_checkpoint=None、原文件
+字节不变、相差1帧可行性、同请求ASR复用及参考不进入推理参数。G2P/噪声抽特征/
+Decoder在测试中模拟，不冒充工区实测。全仓库968项回归通过；补充无新发音词面仍计
+未命中的检索测试及观察保护后，最终相关58项通过。相关Ruff/Mypy及CLI/whitespace
+检查通过；默认Mypy的NumPy类型桩仍需3.12解析，本次用明确
+--python-version3.12检查相关文件，不声称修复全仓既有类型问题。原7份未知测试修改
+和未跟踪资料保留，不纳入提交。
+
 ## 0.196 2026-10-29 撤销强制克隆/升级前置条件，先只读复用原aligner（待工区）
 
 用户连续两次回传环境克隆中断，询问为何不能使用原aligner以及是否会删减原环境。

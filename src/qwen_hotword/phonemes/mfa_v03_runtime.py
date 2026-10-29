@@ -60,6 +60,9 @@ def run(config: dict[str, Any], assets: Path, root: Path, request: Path, output:
         raise ValueError(f"unreviewed MFA runtime {version}; no environment changes attempted")
     pin(root / config["vocab"], config["vocab_sha256"])
     vocab = load_phoneme_vocab(root / config["vocab"])
+    pronunciation_count = config.get("g2p_num_pronunciations", 3)
+    if type(pronunciation_count) is not int or not 1 <= pronunciation_count <= 3:
+        raise ValueError("G2P pronunciation count must be 1..3")
     rows = [json.loads(s) for s in request.read_text(encoding="utf-8").splitlines() if s.strip()]
     if any(r["language"] not in config["models"] or not isinstance(r["word"], str) for r in rows):
         raise ValueError("invalid worker input")
@@ -89,7 +92,7 @@ def run(config: dict[str, Any], assets: Path, root: Path, request: Path, output:
                     fst,
                     graphemes,
                     phones,
-                    num_pronunciations=3,
+                    num_pronunciations=pronunciation_count,
                     grapheme_order=meta["grapheme_order"],
                     sequence_separator=meta["sequence_separator"],
                     graphemes=set(meta["graphemes"]),
@@ -161,6 +164,7 @@ def run(config: dict[str, Any], assets: Path, root: Path, request: Path, output:
             "python_version": sys.version,
             "pynini_version": importlib.metadata.version("pynini"),
             "official_generator_sha256": sha(Path(generator.__file__)),
+            "num_pronunciations": pronunciation_count,
             "counts": dict(counts),
             "gpu_used": False,
             "encoder_loaded": False,
