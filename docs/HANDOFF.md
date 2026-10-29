@@ -1,5 +1,137 @@
 # 工作交接记录
 
+## 0.195 2026-10-29 新一轮MFA/G2P基础准备：v0.3百类表与葡语两项检查入口（待工区）
+
+用户授权先准备三语最新适用G2P、单独发布新共享词表，再检查葡语真实音频与标签、
+实际训练语料的来源/方言构成。本次只交付准备及检查入口；不开始训练，不改生产
+v0.2表、已有标签、Head、运行索引、历史outputs，不加载/下载Qwen模型。
+本地无法访问H200工区；以下本地文件校验与测试不是工区真实G2P或音频听审结果。
+
+### 固定资源与新词表
+
+截至本次检查，选定下列Hugging Face仓库的不可变快照。这里分别记录G2P自身的
+meta.version，不能把声学模型版本、仓库最近更新时间或MFA软件版本当作G2P版本。
+仅获取方言G2P FST、符号表、元数据、对应词典、规则及说明/已有许可证，共22个
+文件，不获取声学模型。三仓库模型卡声明CC-BY-4.0；保留原始归属与说明。
+
+| 语言范围 | G2P meta.version | 固定仓库与revision |
+|---|---|---|
+| 美式英语 english_us_mfa | 3.3.0 | MontrealCorpusTools/english_mfa @ 1009e3c6c689f10875146a5e4e5c2233f8eaf922 |
+| 拉美西语 spanish_latin_america_mfa | 3.2.0 | MontrealCorpusTools/spanish_mfa @ aba092613e8d8f074f381a09e610ecf64704ef20 |
+| 巴西葡语 portuguese_brazil_mfa | 3.4.3 | MontrealCorpusTools/portuguese_mfa @ 70c9d6fafa338a38269a6b770a8c7d9575d0b96f |
+
+原始来源：[英语快照](https://huggingface.co/MontrealCorpusTools/english_mfa/tree/1009e3c6c689f10875146a5e4e5c2233f8eaf922)、
+[西语快照](https://huggingface.co/MontrealCorpusTools/spanish_mfa/tree/aba092613e8d8f074f381a09e610ecf64704ef20)、
+[葡语快照](https://huggingface.co/MontrealCorpusTools/portuguese_mfa/tree/70c9d6fafa338a38269a6b770a8c7d9575d0b96f)。
+西语现行G2P核心FST与此前3.3.0发布包的对应FST相同，不能把西语声学3.4.3当作新的
+G2P权重。葡语G2P自身确已更新，并使用Phonetisaurus架构。
+
+新增配置`configs/mfa_v03_foundation.workzone.json`固定全部文件的SHA256/字节数、
+方言目录、运行版本、旧表及新表身份、实际基线训练清单来源和联合4k表身份。
+新增`configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.3.json`：98音素单位加
+blank/unk，共100类。旧90个ID及全部旧符号保留，ID90--99追加：
+
+```text
+ã cʷ kʷ pʷ tʷ ɟʷ ɡʷ ɾʲ ɾ̃ ʁ
+```
+
+其中葡语新增需要的共享类别为kʷ、ɡʷ、ʁ；h已在旧共享表。旧葡语的c/ɟ/ɲ不从共享表
+删除，因为其他语言仍需要。新版葡语nh等也可能体现为已有音素组成的序列变化，
+不只是新增类别。新表按MFA空白分隔的完整单位处理，保留鼻化、唇化、多字符音素；
+只允许明确的g/ɡ及塞擦音连接符等价别名。未知单位、意外重音/边界标注整条报错，
+不截取部分发音冒充成功。旧v0.2的默认处理分支保持原样。
+
+新表SHA256：`59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f`。
+它是本轮固定的结构候选，`training_ready=false`，待真实调用和听审后再批准全量标签
+策略。现有Linear(1024,90)不能直接搭配100类表；本轮不改旧Head，也不启动新Head。
+下轮训练仍需单独完成新标签、时间长度可行性、训练及检索适配验证。
+
+### 本地已经核验的内容
+
+22个真实文件均已下载并核对固定SHA/大小；直接扫描三语原始词典426317条语音
+发音行（EN75418、ES221981、PT128918，另外12条非语音特殊行单独统计），新100类表
+零音素OOV。元数据音素数EN78/ES42/PT41；基础G2P输出符号分别70/42/40，词典实际
+单位分别78/43/41。元数据/词典有而基础G2P不输出的单位另列，不宣称这些类别均会
+自然产生训练样本。词典行数不是唯一词数，不是音频标签正确率，也不是召回率。
+
+离线ZIP已实际打包并通过入口导入新目录验证，38,492,278字节，SHA256：
+`38d46128b21a0f63e5708bf55ad0c2d0d7231c1444b0988293def72f048cb488`。
+本机文件为`outputs/mfa_v03_assets_20261029.zip`，不提交Git。以上未实际运行MFA
+推理，未接触工区语音；真实G2P调用、来源统计和音频审核仍待下列工区步骤。
+
+### 工区执行与产物
+
+入口`scripts/prepare_mfa_v03.py all`依次执行五阶段，均为CPU/磁盘工作，无GPU参数：
+
+1. 下载或导入22个固定文件，检查大小/SHA及三语词典音素覆盖。
+2. 从原aligner环境克隆独立aligner_mfa343，只在新环境通过conda-forge安装MFA3.4.3，
+   检查Pynini/OpenFst和官方PhonetisaurusRewriter可导入；不升级原aligner或ASR环境。
+3. 使用该官方重写器真实调用三语FST，保留至多3个候选及原始分数、运行库版本和
+   源码身份。严格检查输入字符，不能静默删字。西语元数据的Unicode分解与现成
+   字符表不兼容时，仅在所有原始NFC字母都存在于元数据及符号表的情况下启用明确
+   记录的NFC适配；不去掉á/ñ/ü，不使用拼写代理，不修改原模型文件。
+4. 从固定基线plan定位并校验它真正使用的TRAIN清单，核对EN263609/ES296399/
+   PT321741条；统计PT来源、小时、声明方言/语言、缺失speaker/session元数据及
+   ID/词法路径重复。只读TRAIN，不读validation/test清单或音频。元数据缺失即未知，
+   不能据此声称已确认巴葡比例、说话人独立或完成全部音频近重复检查。
+5. 从PT训练集确定性选200条，兼顾来源、拼写风险提示和已有业务目标文本；生成
+   新版G2P与官方词典候选对照、旧训练标签和原音频听审页。数字/特殊符号需显式
+   口语化，不生成缺字符的整句标签；不按模型成功与否挑选样本。复制原音频字节并
+   校验SHA，不混音、不重采样。该风险富集样本不是总体准确率评估。
+
+基线来源planSHA：`dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83`；
+联合表SHA仍为`6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b`。
+联合表来自已有业务评测资产，不能将本次对照称作全新未见热词泛化测试。
+
+分支`codex/g2p-coverage-scan`，本次开发起点`10318146997a61ba006e09b568231f9d4fa57ebd`；
+本次实际推送SHA见回复。工区同步、核对该SHA并运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/prepare_mfa_v03.py all
+```
+
+如果工区无法连接Hugging Face，把本轮本地提供的离线ZIP上传到工区仓库outputs下，
+核对上述SHA，然后将最后一行改为：
+
+```bash
+python -B scripts/prepare_mfa_v03.py all --asset-archive outputs/mfa_v03_assets_20261029.zip
+```
+
+有进度计数及静默阶段心跳；环境安装和G2P日志会提示路径。固定目录：
+
+```text
+models/mfa/hf_g2p_20261029_v03/             新资源，旧models/mfa/g2p不变
+outputs/mfa_v03_foundation_v1/report.json
+outputs/mfa_v03_foundation_v1/inventory_audit.json
+outputs/mfa_v03_foundation_v1/source_audit.json
+outputs/mfa_v03_foundation_v1/review_package/review.html
+outputs/mfa_v03_foundation_v1/review_audio.zip
+outputs/mfa_v03_foundation_v1/return_bundle.zip
+```
+
+完成状态应为`prepared_pending_human_review`，不是“听审通过”或“训练完成”。
+先回传小包`return_bundle.zip`核对真实调用、缺词/缺音素及来源统计；听审同事下载
+`review_audio.zip`解压后打开review.html，逐条听原音频对照标签。需熟悉巴葡并能核对
+音标的人员；页面明确区分自动候选与真值，填写结果只在当前页内存中，关闭前必须
+点“导出本次人工审核 JSON”，再返回human_review.json。不需要回传模型/FST/缓存。
+
+中断后重复同一命令即可，无需--resume；按固定配置、源码和文件SHA复用完成阶段，
+不会重新下载已核验文件或重做已完成G2P。未完成的G2P小阶段会重新计算，失败输出
+保留；部分文件不能充当完成结果。配置/相关源码改变必须新建输出目录，不能覆盖
+历史运行。正常退出清理自己的锁；硬中断若留下.lock，先检查其中PID和日志、确认
+原进程已退出再处理，脚本不会自动删除未知锁。模型目录也拒绝接管无身份的已有文件。
+
+### 验证与限制
+
+本地全仓库947项通过；随后新增离线导入和数字/符号保护用例，最终相关33项通过。
+相关Ruff、6文件Mypy、CLI帮助及git diff --check通过。真实资产扫描与离线CLI导入
+通过；隔离环境安装和真实G2P未在本机执行。全仓库Mypy另有既有错误：在HEAD源码的
+独立临时快照上复现相同12项/7文件，另有本机原未跟踪诊断文件5项；本轮相关文件
+检查无错误，不改无关代码。保留既有7份未知测试修改及未跟踪资料，不纳入提交。
+
 ## 0.194 2026-10-29 30%/50%抗噪续训及三版本配对检索完成（终端摘要归档）
 
 用户回传完整终端JSON，要求将本轮训练结果归档。本轮仅核对摘要、记录结果和权重

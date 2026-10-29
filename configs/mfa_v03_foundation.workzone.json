@@ -1,0 +1,354 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-10-29",
+  "scope": "G2P + dialect lexicons + rules; no acoustic model or Qwen weights",
+  "models": {
+    "en": {
+      "repo": "MontrealCorpusTools/english_mfa",
+      "revision": "1009e3c6c689f10875146a5e4e5c2233f8eaf922",
+      "dialect": "english_us_mfa",
+      "meta_version": "3.3.0",
+      "train_date": "2026-05-12 11:53:03.341229",
+      "architecture": "phonetisaurus",
+      "symbol_suffix": "txt",
+      "license": "CC-BY-4.0 (model card)",
+      "files": {
+        "README.md": {
+          "sha256": "28d1316cf1bcbfbf5982dc8a8fae54260fe201bfca647607b99f118c4d84207a",
+          "bytes": 14283
+        },
+        "dictionary/rules.yaml": {
+          "sha256": "cb69bfafef18bc4ba5cffe4217dfbd2a51ba1a46720bd7958de9aa4525f4727b",
+          "bytes": 41047
+        },
+        "g2p/english_us_mfa/meta.json": {
+          "sha256": "d24cc919c996be77742c0299bbd35dd2b22f88ca0b3cbdd4d4cb6f04c0e6d365",
+          "bytes": 1291
+        },
+        "g2p/english_us_mfa/phones.txt": {
+          "sha256": "3ebfd662dc1e0337fb0637e60a2ea538eac90d6d4e827d6ca2ca6100dbf02b25",
+          "bytes": 432
+        },
+        "g2p/english_us_mfa/graphemes.txt": {
+          "sha256": "90348cd8a4af8132165dcb353d107911474ebb356f7364a9dfdcc7dec65e8ce8",
+          "bytes": 2623
+        },
+        "LICENSE": {
+          "sha256": "48a83a6e39f7b2f166763b30776132c9a99aa816f17cb06f87ad5b8542a7b71f",
+          "bytes": 19045
+        },
+        "dictionary/english_us_mfa.dict": {
+          "sha256": "7aafaa1f2fd1c73100a9679d715eab61c8770d83087fd3f68b214ed30a9916e8",
+          "bytes": 3440390
+        },
+        "g2p/english_us_mfa/model.fst": {
+          "sha256": "001bc21fe1934f3b1e86ae006aca9673c6be60de33698101396bec8545b3f7f3",
+          "bytes": 38942770
+        }
+      },
+      "phones": [
+        "aj",
+        "aw",
+        "b",
+        "bʲ",
+        "c",
+        "cʰ",
+        "cʷ",
+        "d",
+        "dʒ",
+        "dʲ",
+        "d̪",
+        "ej",
+        "f",
+        "fʲ",
+        "h",
+        "i",
+        "iː",
+        "j",
+        "k",
+        "kʰ",
+        "kʷ",
+        "l",
+        "m",
+        "mʲ",
+        "m̩",
+        "n",
+        "n̩",
+        "ow",
+        "p",
+        "pʰ",
+        "pʲ",
+        "pʷ",
+        "s",
+        "t",
+        "tʃ",
+        "tʰ",
+        "tʲ",
+        "tʷ",
+        "t̪",
+        "v",
+        "vʲ",
+        "w",
+        "z",
+        "æ",
+        "ç",
+        "ð",
+        "ŋ",
+        "ɐ",
+        "ɑ",
+        "ɑː",
+        "ɒ",
+        "ɒː",
+        "ɔj",
+        "ə",
+        "ɚ",
+        "ɛ",
+        "ɝ",
+        "ɟ",
+        "ɟʷ",
+        "ɡ",
+        "ɡʷ",
+        "ɪ",
+        "ɫ",
+        "ɫ̩",
+        "ɱ",
+        "ɲ",
+        "ɹ",
+        "ɾ",
+        "ɾʲ",
+        "ɾ̃",
+        "ʃ",
+        "ʉ",
+        "ʉː",
+        "ʊ",
+        "ʎ",
+        "ʒ",
+        "ʔ",
+        "θ"
+      ]
+    },
+    "es": {
+      "repo": "MontrealCorpusTools/spanish_mfa",
+      "revision": "aba092613e8d8f074f381a09e610ecf64704ef20",
+      "dialect": "spanish_latin_america_mfa",
+      "meta_version": "3.2.0",
+      "train_date": "2024-09-15 16:51:13.487039",
+      "architecture": "phonetisaurus",
+      "symbol_suffix": "sym",
+      "license": "CC-BY-4.0 (model card)",
+      "files": {
+        "README.md": {
+          "sha256": "49eb640cc91950890f0e8e867aa161af9313bb6b4a539e76dfeb21034b63e4b1",
+          "bytes": 11578
+        },
+        "dictionary/rules.yaml": {
+          "sha256": "29b15152a3d2278b1a7fdf79a92967567f771c214f5a8ea52b51bc7c40a728bb",
+          "bytes": 7086
+        },
+        "g2p/spanish_latin_america_mfa/meta.json": {
+          "sha256": "5604019e242fd52178b3973d0a18ae9061429155c8fd141d68929c33043259f9",
+          "bytes": 961
+        },
+        "g2p/spanish_latin_america_mfa/phones.sym": {
+          "sha256": "3d5f9e8b042ef018ad9ee7be4a247e8662037458d88295aaf060467b615b8c72",
+          "bytes": 248
+        },
+        "g2p/spanish_latin_america_mfa/graphemes.sym": {
+          "sha256": "139782c1847f3af35326a7b197eab24a52fa18d34744ca323ec7a777dbf26c2b",
+          "bytes": 2089
+        },
+        "dictionary/spanish_latin_america_mfa.dict": {
+          "sha256": "cb6b3937a446f3d308bf7baedc87bfba90ff43dabbfa2fd8e62ebb60fab46690",
+          "bytes": 8713661
+        },
+        "g2p/spanish_latin_america_mfa/model.fst": {
+          "sha256": "bd838d5e578296471738f9420d36073a31553bbdc38e2b9d09242f1a98d6508a",
+          "bytes": 38684862
+        }
+      },
+      "phones": [
+        "ɾ",
+        "v",
+        "l",
+        "ʎ",
+        "õ",
+        "ɡ",
+        "ũ",
+        "ð",
+        "ʝ",
+        "ẽ",
+        "i",
+        "ɱ",
+        "e",
+        "t̪",
+        "ĩ",
+        "k",
+        "d̪",
+        "s",
+        "n",
+        "ɟ",
+        "u",
+        "w",
+        "m",
+        "z",
+        "o",
+        "ɟʝ",
+        "ɲ",
+        "tʃ",
+        "x",
+        "ɣ",
+        "a",
+        "f",
+        "p",
+        "r",
+        "ç",
+        "ŋ",
+        "β",
+        "ʃ",
+        "j",
+        "ã",
+        "c",
+        "b"
+      ]
+    },
+    "pt": {
+      "repo": "MontrealCorpusTools/portuguese_mfa",
+      "revision": "70c9d6fafa338a38269a6b770a8c7d9575d0b96f",
+      "dialect": "portuguese_brazil_mfa",
+      "meta_version": "3.4.3",
+      "train_date": "2026-10-08 20:04:14.581204",
+      "architecture": "phonetisaurus",
+      "symbol_suffix": "txt",
+      "license": "CC-BY-4.0 (model card)",
+      "files": {
+        "README.md": {
+          "sha256": "3cb0f71b55f1ac0647eb48b4a2ea5dabd0417c33cb66db71c9ef060f77a80c41",
+          "bytes": 10249
+        },
+        "dictionary/rules.yaml": {
+          "sha256": "de62651ac9e1fe054f6a39b0ef69a9c910c8d689a9980d5e27f5e2671cf12708",
+          "bytes": 7033
+        },
+        "g2p/portuguese_brazil_mfa/meta.json": {
+          "sha256": "cb0d77b5eeab78fd91826e335bfc6b06d35209c89568325667f6f60da85c310e",
+          "bytes": 1022
+        },
+        "g2p/portuguese_brazil_mfa/phones.txt": {
+          "sha256": "348fa098c873a6ac9beeaf982c5dee2467a4d697ef47a2c45d1294461f2b7384",
+          "bytes": 232
+        },
+        "g2p/portuguese_brazil_mfa/graphemes.txt": {
+          "sha256": "f51428378b4acfc6c08a03096d7d5f7f387464d24eccbfc5ad6e7ea90d54288d",
+          "bytes": 3742
+        },
+        "dictionary/portuguese_brazil_mfa.dict": {
+          "sha256": "f2ff44195d21d3d5f52e5a33473f5f1b4670b52d5d99d7ef4edc5a33847dfb1d",
+          "bytes": 5581613
+        },
+        "g2p/portuguese_brazil_mfa/model.fst": {
+          "sha256": "448748d1a6522b0a8d258a9b81cd7aa01d6fe38bf3f2152705fc06ea89e42906",
+          "bytes": 38300918
+        }
+      },
+      "phones": [
+        "a",
+        "b",
+        "d",
+        "dʒ",
+        "e",
+        "ẽ",
+        "f",
+        "h",
+        "i",
+        "ĩ",
+        "j",
+        "j̃",
+        "k",
+        "kʷ",
+        "l",
+        "m",
+        "n",
+        "o",
+        "õ",
+        "p",
+        "s",
+        "t",
+        "tʃ",
+        "u",
+        "ũ",
+        "v",
+        "w",
+        "w̃",
+        "x",
+        "z",
+        "ɐ",
+        "ɐ̃",
+        "ɔ",
+        "ɛ",
+        "ɡ",
+        "ɡʷ",
+        "ɾ",
+        "ʁ",
+        "ʃ",
+        "ʎ",
+        "ʒ"
+      ]
+    }
+  },
+  "assets_dir": "models/mfa/hf_g2p_20261029_v03",
+  "output": "outputs/mfa_v03_foundation_v1",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.3.json",
+  "vocab_sha256": "59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f",
+  "old_vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.2.json",
+  "old_vocab_sha256": "0f4939babf24b35ab8459273b13715b44423870c5d27ffe19f3bd3809e593af4",
+  "environment": {
+    "name": "aligner_mfa343",
+    "base": "aligner",
+    "mfa_version": "3.4.3"
+  },
+  "source_run": "outputs/english_countries_refresh_newval_v1",
+  "source_plan_sha256": "dbf8e6cce9bd07fefcb801107cbea0c50a22f3874fbc51c35ace88d2a01fee83",
+  "expected_train_counts": {
+    "en": 263609,
+    "es": 296399,
+    "pt": 321741
+  },
+  "review_samples": 200,
+  "max_review_words": 5000,
+  "seed": 20261029,
+  "hotword_table": "outputs/reviewed_joint_4000_keywords_v1/keyword_table.json",
+  "hotword_table_sha256": "6bfc29496cd014608ab5890cc7f4dc7fd65fcd2c194e0f2aca021d1264729a1b",
+  "max_hotword_entries": 4000,
+  "smoke_words": {
+    "en": [
+      "cat",
+      "record",
+      "acquaint",
+      "puebla"
+    ],
+    "es": [
+      "casa",
+      "papa",
+      "papá",
+      "año",
+      "pingüino"
+    ],
+    "pt": [
+      "carro",
+      "caro",
+      "banho",
+      "ninho",
+      "avó",
+      "avô",
+      "adequação",
+      "São",
+      "Uber",
+      "você"
+    ]
+  },
+  "exact_nfc_adapter": {
+    "en": false,
+    "es": true,
+    "pt": false
+  }
+}

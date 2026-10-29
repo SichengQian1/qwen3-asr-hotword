@@ -23,7 +23,7 @@ SKIP_CHARS = {
     "¿",
     "¡",
     "'",
-    "\"",
+    '"',
     "(",
     ")",
     "[",
@@ -57,6 +57,7 @@ class PhonemeVocab:
     tokens: tuple[str, ...]
     phone_tokens: tuple[str, ...]
     token_to_id: dict[str, int]
+    tokenization_policy: str = "legacy"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,13 @@ def load_phoneme_vocab(path: str | Path) -> PhonemeVocab:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     tokens = tuple(str(token) for token in value["tokens"])
     token_to_id = {normalization_key(token): index for index, token in enumerate(tokens)}
+    policy = str(value.get("normalization_policy", {}).get("tokenization", "legacy"))
+    if policy not in {"legacy", "mfa_units_v0.3"}:
+        raise ValueError(f"unsupported phoneme tokenization policy: {policy}")
+    if policy == "mfa_units_v0.3" and (
+        len(token_to_id) != len(tokens) or tokens[:2] != ("<blank>", "<unk>")
+    ):
+        raise ValueError("v0.3 requires unique canonical tokens and blank/unk IDs 0/1")
     phone_tokens = tuple(
         sorted(
             (normalization_key(token) for token in tokens if token not in SPECIAL_TOKENS),
@@ -80,7 +88,12 @@ def load_phoneme_vocab(path: str | Path) -> PhonemeVocab:
             reverse=True,
         )
     )
-    return PhonemeVocab(tokens=tokens, phone_tokens=phone_tokens, token_to_id=token_to_id)
+    return PhonemeVocab(
+        tokens=tokens,
+        phone_tokens=phone_tokens,
+        token_to_id=token_to_id,
+        tokenization_policy=policy,
+    )
 
 
 def normalization_key(text: str) -> str:
@@ -104,6 +117,8 @@ def normalize_ipa_for_vocab(ipa: str) -> str:
 
 
 def tokenize_ipa_to_vocab(ipa: str, vocab: PhonemeVocab) -> TokenizationResult:
+    if vocab.tokenization_policy == "mfa_units_v0.3":
+        return _tokenize_mfa_units(ipa, vocab)
     normalized = normalize_ipa_for_vocab(ipa)
     tokens: list[str] = []
     token_ids: list[int] = []
@@ -140,6 +155,25 @@ def tokenize_ipa_to_vocab(ipa: str, vocab: PhonemeVocab) -> TokenizationResult:
     )
 
 
+def _tokenize_mfa_units(ipa: str, vocab: PhonemeVocab) -> TokenizationResult:
+    """Preserve whitespace-delimited MFA units; reject the entire sequence on OOV.
+
+    Stress/boundary annotations are not targets in this version. If supplied,
+    they are reported explicitly instead of silently stripped. No accent,
+    nasalization, labialization or diphthong substitutions are performed.
+    """
+    aliases = {"t͡ʃ": "tʃ", "t͜ʃ": "tʃ", "d͡ʒ": "dʒ", "d͜ʒ": "dʒ", "g": "ɡ"}
+    units = [normalization_key(aliases.get(p, p)) for p in ipa.split()]
+    missing = [p for p in units if p not in vocab.token_to_id or p in SPECIAL_TOKENS]
+    ids = [] if missing else [vocab.token_to_id[p] for p in units]
+    return TokenizationResult(
+        normalized_ipa=" ".join(units),
+        tokens=[vocab.tokens[i] for i in ids],
+        token_ids=ids,
+        oov_units=missing,
+    )
+
+
 def espeak_language_code(language: str) -> str:
     lowered = language.lower().replace("_", "-")
     if lowered.startswith("pt"):
@@ -152,13 +186,17 @@ def espeak_language_code(language: str) -> str:
 
 
 def coerce_record_text(row: dict[str, Any], text_column: str | None) -> str | None:
-    columns = (text_column,) if text_column else (
-        "text",
-        "sentence",
-        "transcript",
-        "transcription",
-        "normalized_text",
-        "raw_transcription",
+    columns = (
+        (text_column,)
+        if text_column
+        else (
+            "text",
+            "sentence",
+            "transcript",
+            "transcription",
+            "normalized_text",
+            "raw_transcription",
+        )
     )
     for column in columns:
         value = row.get(column) if column else None
