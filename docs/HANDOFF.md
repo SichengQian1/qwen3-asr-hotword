@@ -1,5 +1,50 @@
 # 工作交接记录
 
+## 0.199 2026-10-31 同一vLLM实例两阶段CTC/RAG同事接入样例（未实机）
+
+用户选择“先编码/检索，再创建最终生成请求并复用音频表示”，要求代码及MD交给集成
+同事。本次新增独立样例与说明，不改生产入口、模型、Head/音素表、历史outputs，不
+加载或下载本地Qwen，不启动H200/310P计算。公司实际镜像/补丁及FusionMind/vLLM
+各自加载内容未获取；用户所说23.0暂按0.23.0，不能据此认定实际环境已核验。
+
+- 代码：`examples/vllm_two_stage_rag/`；完整说明：
+  `docs/VLLM_TWO_STAGE_CTC_RAG_SAMPLE.md`。通用插件注册新架构名，保留上游模型，
+  worker扩展复用已加载模型；stage1读取ln_post→原100类Head并缓存投影后Z，stage2
+  通过自定义Processor/缓存字段绕过Encoder，按最终Prompt重新Prefill/Decode。
+- 复用现有Anchor/局部重排/词面合并逻辑，无第二套Qwen加载；完整核对Head/vocab/
+  index SHA及vocab_tokens。示例门限参照纯检索入口，不代表各历史分组部署门限。
+- 默认范围为单NPU、TP/PP/DP=1、单音频、串行eager、FP16 Qwen+FP32 Head；对照普通
+  无热词/缓存无热词/缓存CTC提示三条路径，每路径检查Encoder一次、实际Prompt IDs、
+  缓存读取及本样例缓存释放。三路径冒烟总共编码三次，不是一次业务转写重复编码。
+- 本地15项无模型测试、Ruff、样例静态类型和空白检查通过；模拟流程可运行。真实
+  自定义模型/Processor/Ascend算子/RPC尚未在310P/H200验证；不宣称节省完整10GB、
+  已测性能或已满足生产并发。代码依据固定vLLM/Ascend0.23.0，官方当前文档提示
+  Ascend0.30.0起Qwen3-ASR支持停止维护，版本迁移不能盲升。
+
+分支`codex/g2p-coverage-scan`，本次交付SHA见回复。工区或同事获取源码后先跑无设备
+演示即可，不执行旧训练all、不占用GPU5或NPU：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+PYTHONPATH=src:examples/vllm_two_stage_rag python -B -m qwen_rag_vllm_sample.demo
+PYTHONPATH=src:examples/vllm_two_stage_rag python -B -m pytest tests/test_vllm_two_stage_sample.py
+python -B scripts/package_vllm_two_stage_sample.py --output outputs/vllm_two_stage_handoff_001
+```
+
+压缩包含MD、样例、SHA清单、最小项目帮助源码及100类词表，不含模型/Head/业务
+索引/音频；解压后可用`project_subset/src`替换完整仓库`src`运行模拟。包内逐文件SHA
+是内容身份依据，base_git_commit仅表示打包时HEAD，不能覆盖未知工作树修改。
+打包目录与设备报告目录必须是新目录，无resume，已存在则拒绝覆盖；不会覆盖历史
+outputs。`config.example.json`需按同事路径修改，保留配套资产SHA。
+
+真实310P单条对照的完整安装/启动命令见上述MD，只有明确添加
+`--execute-on-device`才运行；入口要求匹配环境、私有空闲设备映射、16k单声道≤30s
+音频。先运行普通路径与缓存无提示对照，失败则不跑CTC提示；无检索词时只记录缓存
+路径通过，不算注入成功。返回新目录`report.json`或`failure.json`、完整日志、实际
+镜像/包版本及NPU型号即可。显存节省需在同并发/上下文/KV预算下另行对比。
+
 ## 0.198 2026-10-30 v0.3新标签、70%噪声、100类新Head实测完成及推理配套约束
 
 用户回传`return_bundle(9).zip`，要求保存结论并说明新Head的推理依赖。本节为工区

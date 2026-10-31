@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen-rag-vllm-sample"
+version = "0.1.0"
+description = "Serial, eager vLLM 0.23.0 two-stage Qwen3-ASR RAG integration sample"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.entry-points."vllm.general_plugins"]
+qwen_rag_two_stage = "qwen_rag_vllm_sample:register"
+
+[project.scripts]
+qwen-rag-two-stage-demo = "qwen_rag_vllm_sample.demo:main"
+qwen-rag-two-stage-smoke = "qwen_rag_vllm_sample.run:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qwen_rag_vllm_sample*"]
