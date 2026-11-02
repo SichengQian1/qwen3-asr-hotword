@@ -240,6 +240,13 @@ def infer(backend: str, cfg: dict[str, Any], output: Path) -> None:
     if "H200" not in torch.cuda.get_device_name(0):
         raise ValueError("this experiment targets the user's H200 work zone")
     runtime.update({"device": torch.cuda.get_device_name(0), "cuda": torch.version.cuda})
+    if backend == "transformers":
+        # This caps PyTorch's caching allocator, not all CUDA/context allocations.
+        # Parent preflight separately reserves headroom for the shared GPU.
+        limit_bytes = int(float(cfg["transformers_allocator_limit_gib"]) * 1024**3)
+        total_bytes = torch.cuda.get_device_properties(0).total_memory
+        torch.cuda.set_per_process_memory_fraction(limit_bytes / total_bytes, device=0)
+        runtime["transformers_allocator_limit_bytes"] = str(limit_bytes)
     plan = read(output / "requests.json")
     if plan["versions"] != versions():
         raise ValueError("backend packages/code differ from frozen preparation")

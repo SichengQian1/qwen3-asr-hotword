@@ -9,13 +9,13 @@
 在工区原来的Python3.12环境、仓库根目录执行：
 
 ```bash
-python -B scripts/compare_asr_backends.py all --gpu 5
+python -B scripts/compare_asr_backends.py all --gpu 4
 ```
 
-5是此前用户授权的物理卡号；需要换卡时填写另一张已分配的空闲卡。它会自动：
+4是用户本次明确指定的物理卡号，允许与该卡现有任务共享。它会自动：
 
-1. 检查Linux x86_64/Python3.12/H200、驱动及该卡占用。占用超过1GiB则停止，不结束
-   其他任务。此阈值为本次独占小测试的工程设置，不表示低于此值就构成使用授权。
+1. 检查Linux x86_64/Python3.12/H200、驱动及实际剩余显存。已有占用不再自动拒绝；
+   按下述预算检查可用空间，不结束其他任务。各GPU阶段开始前重新检查一次。
 2. 在`.venv/qwen_asr_vllm023_cu129`创建独立环境并安装固定依赖，原Conda环境保留。
    首次安装需要网络下载依赖，建议预留25GiB磁盘；不下载Qwen权重。
 3. 执行一个很小的真实CUDA/vLLM RMSNorm算子检查；它只筛除基础运行时问题，不证明
@@ -27,6 +27,28 @@ python -B scripts/compare_asr_backends.py all --gpu 5
    两套模型分进程先后运行，不同时驻留；不会导入上一份Ascend两阶段样例。
 6. 汇总完全一致、格式差异、词语差异、生成token差异、小样本参考WER与热词命中变化，
    自动生成`comparison.tsv`和`return_bundle.zip`。
+
+## 共享4卡的显存预算
+
+旧版把`memory.used > 1024 MiB`作为拒绝条件，用户在GPU4已占用98055 MiB时被拦截。
+该次停在首次预检查，尚未安装环境或执行任何转写；它不是模型显存不足的实测证据。
+**本次改为检查`nvidia-smi`实际报告的`memory.free`，并设置以下工程预算：**
+
+| 项目 | 当前设置 | 含义 |
+|---|---|---|
+| vLLM执行器预算 | 总显存×0.15，约21GiB/140GiB卡 | 包含模型与可用KV空间的预算，按总量而非剩余量计算 |
+| Transformers缓存分配器上限 | 24GiB | 在加载模型前设置PyTorch分配器上限，不限制其他进程 |
+| 空闲余量 | 8GiB | 在较大的单后端预算之外保留，不主动占用 |
+| 启动要求 | `max(总显存×0.15, 24GiB)+8GiB` | 约32GiB实际剩余空间；两后端串行，不把两者预算相加 |
+
+如果该H200仍为约140GiB，总占用98055MiB对应约44GiB剩余，预计能通过；用户日志
+没提供总量/实际free，不能据此断言已通过。入口会打印实际free、各预算和检查结果。
+这些是本轮小测试的资源设置，**不是已测峰值**，也不能保证运行中其他任务扩容后仍
+有足够空间。PyTorch上限仅约束其缓存分配器；CUDA上下文/库的直接分配等不都在其
+范围内，vLLM预算也不能视为所有启动瞬态的硬隔离。显存余量用于降低冲突风险，
+不保证共享计算没有性能影响。本次只比较转写，不把共享卡耗时作为后端性能结论。
+[vLLM0.23预算说明](https://docs.vllm.ai/en/v0.23.0/configuration/engine_args/#--gpu-memory-utilization)、
+[PyTorch2.11分配器上限](https://docs.pytorch.org/docs/2.11/generated/torch.cuda.memory.set_per_process_memory_fraction.html)。
 
 ## 固定版本与两个容易踩的点
 
@@ -79,7 +101,10 @@ CUDA12.9 GA对应驱动575.51.03；CUDA12.x还存在最低525.60.13起的次版�
 ## 输出、恢复和查看
 
 默认配置：`configs/asr_backend_comparison_v023.workzone.json`。
-默认输出：`outputs/asr_backend_comparison_v023_v1`。
+默认输出：`outputs/asr_backend_comparison_v023_shared_v2`。
+旧`outputs/asr_backend_comparison_v023_v1`失败记录保留。由于源码与预算改变，使用新
+目录绑定新实验身份，不绕过旧contract校验；旧次尚未开始推理，没有转写需要重跑。
+依赖版本和独立环境路径不变，若固定环境已成功安装且身份一致可复用，不强制重装。
 
 | 文件 | 含义 |
 |---|---|
@@ -88,6 +113,7 @@ CUDA12.9 GA对应驱动575.51.03；CUDA12.x还存在最低525.60.13起的次版�
 | `details.json` | 逐条词错误数及注入词的命中差异 |
 | `requests.json` | 固定30音频/60请求、候选及共同Prompt；不是训练标签 |
 | `environment.json` / `device.json` / `gpu_probe.json` | 环境、驱动模式与真实基础算子检查 |
+| `memory_checks/*.json` | 各GPU阶段开始前的剩余显存和预算快照；变化不改变设备身份 |
 | `transformers/runtime.json` / `vllm/runtime.json` | 本次推理运行时及关键安装源码身份 |
 | `failure_*.json`、`logs/` | 某个阶段失败原因与完整日志 |
 | `return_bundle.zip` | 小结果包：JSON/TSV/MD和日志尾部，无权重/大特征/波形 |
@@ -106,7 +132,7 @@ python -B scripts/compare_asr_backends.py status
 运行后只需回传：
 
 ```text
-outputs/asr_backend_comparison_v023_v1/return_bundle.zip
+outputs/asr_backend_comparison_v023_shared_v2/return_bundle.zip
 ```
 
 这是小规模完整ASR后端对照，不是CTC PER、总体WER、310P适配、两阶段Encoder缓存

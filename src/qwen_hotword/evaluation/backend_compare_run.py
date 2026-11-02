@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import platform
 import shutil
@@ -57,6 +58,32 @@ def requirements(cfg: dict[str, Any]) -> list[str]:
     ]
 
 
+def memory_budget(total_mib: int, cfg: dict[str, Any]) -> dict[str, int]:
+    """Plan sequential backends against total capacity, preserving shared-GPU headroom."""
+    fraction = float(cfg["gpu_memory_utilization"])
+    allocator_gib = float(cfg["transformers_allocator_limit_gib"])
+    reserve = float(cfg["shared_memory_reserve_mib"])
+    if (
+        total_mib <= 0
+        or not math.isfinite(fraction)
+        or not 0 < fraction <= 1
+        or not math.isfinite(allocator_gib)
+        or not 0 < allocator_gib * 1024 <= total_mib
+        or not math.isfinite(reserve)
+        or reserve <= 0
+    ):
+        raise ValueError("invalid shared-GPU memory budget")
+    vllm = math.ceil(total_mib * fraction)
+    transformers = math.ceil(allocator_gib * 1024)
+    return {
+        "vllm_executor_budget_mib": vllm,
+        "transformers_allocator_limit_mib": transformers,
+        "reserve_mib": math.ceil(reserve),
+        # The backend subprocesses exit in sequence; do not add their budgets.
+        "required_free_mib": max(vllm, transformers) + math.ceil(reserve),
+    }
+
+
 def preflight(gpu: int, cfg: dict[str, Any]) -> dict[str, Any]:
     if sys.platform != "linux" or platform.machine() != "x86_64" or sys.version_info[:2] != (3, 12):
         raise ValueError("run from the H200 work-zone Linux x86_64 Python 3.12 environment")
@@ -64,19 +91,20 @@ def preflight(gpu: int, cfg: dict[str, Any]) -> dict[str, Any]:
         [
             "nvidia-smi",
             f"--id={gpu}",
-            "--query-gpu=name,driver_version,memory.used,memory.total",
+            "--query-gpu=name,driver_version,memory.used,memory.total,memory.free",
             "--format=csv,noheader,nounits",
         ],
         text=True,
     ).strip()
     fields = next(csv.reader(io.StringIO(result)))
-    name, driver, used, total = (field.strip() for field in fields)
+    name, driver, used, total, free = (field.strip() for field in fields)
     info = {
         "physical_gpu": gpu,
         "name": name,
         "driver": driver,
         "used_mib": int(used),
         "total_mib": int(total),
+        "free_mib": int(free),
     }
     driver_tuple = tuple(map(int, driver.split(".")))
     toolkit_tuple = tuple(map(int, cfg.get("cuda_toolkit_driver", "575.51.03").split(".")))
@@ -92,9 +120,35 @@ def preflight(gpu: int, cfg: dict[str, Any]) -> dict[str, Any]:
             f"driver {driver} is below CUDA12 minor-compatibility minimum {cfg['minimum_driver']}; "
             "do not modify node drivers automatically. Return preflight/failure bundle first."
         )
-    if int(used) > 1024:
-        raise ValueError(f"GPU {gpu} is occupied ({used} MiB); stop without disturbing other jobs")
+    budget = memory_budget(int(total), cfg)
+    info["memory_budget"] = budget
+    if int(free) < budget["required_free_mib"]:
+        raise ValueError(
+            f"GPU {gpu} has {free} MiB free, needs {budget['required_free_mib']} MiB "
+            f"(sequential backend budget plus {budget['reserve_mib']} MiB headroom); "
+            "leave other jobs running and retry when enough memory is free"
+        )
     return info
+
+
+def record_preflight(gpu: int, cfg: dict[str, Any], output: Path, stage: str) -> None:
+    info = preflight(gpu, cfg)
+    # Free/used memory changes between stages and retries; it is observation,
+    # not an immutable device identity. Keep each distinct snapshot separately.
+    write_once(
+        output / "device.json",
+        {k: v for k, v in info.items() if k not in ("used_mib", "free_mib")},
+    )
+    snapshot = {"stage": stage, **info}
+    write_once(output / f"memory_checks/{stage}_{digest(snapshot)[:12]}.json", snapshot)
+    budget = info["memory_budget"]
+    print(
+        f"GPU {gpu} shared-memory check: {info['free_mib']} MiB free / "
+        f"{info['total_mib']} MiB total; vLLM budget {budget['vllm_executor_budget_mib']} MiB, "
+        f"Transformers allocator limit {budget['transformers_allocator_limit_mib']} MiB, "
+        f"headroom {budget['reserve_mib']} MiB; backends run sequentially",
+        flush=True,
+    )
 
 
 def environment(root: Path, cfg: dict[str, Any], output: Path, env: dict[str, str]) -> Path:
@@ -308,10 +362,7 @@ def run(root: Path, cfg: dict[str, Any], output: Path, gpu: int, script: Path) -
                 raise ValueError("model architecture differs")
             write_once(output / "model_metadata.json", metadata)
             with stage_progress("Check selected H200, driver and free memory before installing"):
-                info = preflight(gpu, cfg)
-                write_once(
-                    output / "device.json", {k: v for k, v in info.items() if k != "used_mib"}
-                )
+                record_preflight(gpu, cfg, output, "before_install")
             env = dict(os.environ)
             env.update(
                 {
@@ -329,7 +380,7 @@ def run(root: Path, cfg: dict[str, Any], output: Path, gpu: int, script: Path) -
             env.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
             for stage in ("probe", "prepare", "transformers", "vllm"):
                 if stage != "prepare":
-                    preflight(gpu, cfg)
+                    record_preflight(gpu, cfg, output, stage)
                 command(
                     [
                         str(python),

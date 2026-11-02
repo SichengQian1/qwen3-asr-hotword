@@ -61,7 +61,7 @@ def main() -> int:
         )
         return 0
     if args.gpu is None or args.gpu < 0:
-        parser.error("all requires --gpu N for an allocated, idle physical H200")
+        parser.error("all requires --gpu N for an allocated physical H200 with enough free memory")
     from qwen_hotword.evaluation.backend_compare_run import run
 
     try:

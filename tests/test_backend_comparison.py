@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import platform
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -162,25 +164,102 @@ def test_installation_uses_fixed_native_wheel_and_not_old_qwen_extra() -> None:
     assert not any("qwen-asr[" in requirement for requirement in requirements)
 
 
-def test_preflight_stops_on_old_driver_or_busy_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runner.sys, "platform", "linux")
-    monkeypatch.setattr(runner.sys, "version_info", (3, 12, 0))
-    monkeypatch.setattr(runner.platform, "machine", lambda: "x86_64")
-    cfg = {"minimum_driver": "525.60.13"}
+def memory_config() -> dict[str, Any]:
+    return {
+        "minimum_driver": "525.60.13",
+        "gpu_memory_utilization": 0.15,
+        "transformers_allocator_limit_gib": 24,
+        "shared_memory_reserve_mib": 8192,
+    }
+
+
+def test_preflight_allows_user_shared_gpu_but_rejects_old_driver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "version_info", (3, 12, 0))
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    cfg = memory_config()
     monkeypatch.setattr(
-        runner.subprocess, "check_output", lambda *a, **kw: "NVIDIA H200, 520.1, 0, 140000"
+        subprocess, "check_output", lambda *a, **kw: "NVIDIA H200, 520.1, 0, 143771, 143000"
     )
     with pytest.raises(ValueError, match="do not modify node drivers"):
-        runner.preflight(5, cfg)
+        runner.preflight(4, cfg)
     monkeypatch.setattr(
-        runner.subprocess, "check_output", lambda *a, **kw: "NVIDIA H200, 580.1, 12000, 140000"
+        subprocess,
+        "check_output",
+        lambda *a, **kw: "NVIDIA H200, 580.1, 98055, 143771, 45000",
     )
-    with pytest.raises(ValueError, match="occupied"):
-        runner.preflight(5, cfg)
+    result = runner.preflight(4, cfg)
+    assert result["physical_gpu"] == 4 and result["used_mib"] == 98055
+    assert result["memory_budget"] == {
+        "vllm_executor_budget_mib": 21566,
+        "transformers_allocator_limit_mib": 24576,
+        "reserve_mib": 8192,
+        "required_free_mib": 32768,
+    }
+
+
+def test_preflight_uses_reported_free_memory_and_keeps_headroom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "version_info", (3, 12, 0))
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    # total-used appears sufficient, but driver-reported free excludes reserved memory.
     monkeypatch.setattr(
-        runner.subprocess, "check_output", lambda *a, **kw: "NVIDIA H200, 580.1, 0, 140000"
+        subprocess,
+        "check_output",
+        lambda *a, **kw: "NVIDIA H200, 580.1, 110000, 143771, 32000",
     )
-    assert runner.preflight(5, cfg)["physical_gpu"] == 5
+    with pytest.raises(ValueError, match="32000 MiB free, needs 32768 MiB"):
+        runner.preflight(4, memory_config())
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("gpu_memory_utilization", 0),
+        ("gpu_memory_utilization", 1.1),
+        ("gpu_memory_utilization", float("nan")),
+        ("transformers_allocator_limit_gib", -1),
+        ("transformers_allocator_limit_gib", 200),
+        ("shared_memory_reserve_mib", 0),
+        ("shared_memory_reserve_mib", float("inf")),
+    ],
+)
+def test_invalid_memory_budgets_are_rejected(key: str, value: float) -> None:
+    with pytest.raises(ValueError, match="invalid shared-GPU"):
+        runner.memory_budget(143771, {**memory_config(), key: value})
+
+
+def test_vllm_budget_is_fraction_of_total_and_backends_are_sequential() -> None:
+    budget = runner.memory_budget(143771, {**memory_config(), "gpu_memory_utilization": 0.3})
+    assert budget["vllm_executor_budget_mib"] == 43132
+    assert budget["required_free_mib"] == 43132 + 8192
+
+
+def test_changing_free_memory_does_not_change_device_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = {
+        "physical_gpu": 4,
+        "name": "NVIDIA H200",
+        "total_mib": 143771,
+        "used_mib": 98055,
+        "free_mib": 45000,
+        "memory_budget": runner.memory_budget(143771, memory_config()),
+    }
+    monkeypatch.setattr(runner, "preflight", lambda *a: dict(snapshot))
+    runner.record_preflight(4, memory_config(), tmp_path, "before_install")
+    snapshot.update({"used_mib": 100000, "free_mib": 43000})
+    runner.record_preflight(4, memory_config(), tmp_path, "vllm")
+    identity = json.loads((tmp_path / "device.json").read_text())
+    assert "used_mib" not in identity and "free_mib" not in identity
+    checks = sorted((tmp_path / "memory_checks").glob("*.json"))
+    assert len(checks) == 2
+    assert {json.loads(p.read_text())["free_mib"] for p in checks} == {45000, 43000}
 
 
 def test_saved_source_tag_hash_and_identity_are_checked(tmp_path: Path) -> None:

@@ -1,5 +1,5 @@
 {
-  "output": "outputs/asr_backend_comparison_v023_v1",
+  "output": "outputs/asr_backend_comparison_v023_shared_v2",
   "environment": ".venv/qwen_asr_vllm023_cu129",
   "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
   "source_run": "outputs/mfa_v03_noise70_scratch_v1",
@@ -16,5 +16,7 @@
   "seed": 20261102,
   "max_new_tokens": 512,
   "max_model_len": 4096,
-  "gpu_memory_utilization": 0.25
+  "gpu_memory_utilization": 0.15,
+  "transformers_allocator_limit_gib": 24,
+  "shared_memory_reserve_mib": 8192
 }

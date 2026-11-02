@@ -1,5 +1,42 @@
 # 工作交接记录
 
+## 0.201 2026-11-02 H200后端对照允许共享GPU4，按剩余显存预算检查（待工区）
+
+用户执行0.200入口，GPU4占用98055MiB，被旧`used>1024MiB`条件拦截。该阈值过严，
+不代表模型实际OOM。日志显示首次安装前预检查失败，尚未安装测试环境、加载Qwen或
+执行转写。用户明确指定共享GPU4；本地无工区访问，不声称已核验实际free或跑通。
+本节取代0.200对空闲卡/1GiB阈值、默认GPU5和输出路径的指导，其余比较协议不变。
+
+- 查询`memory.free`，以实际剩余量判断，允许已有任务占用。默认vLLM预算从总量25%
+  改为15%（约140GiB卡为21GiB）；Transformers加载前设置PyTorch缓存分配器24GiB
+  上限，两进程串行；预检查要求`max(总量*0.15,24GiB)+8GiB`，约32GiB剩余。
+  这是工程预算，不是实测峰值或整进程显存硬隔离。CUDA直接分配与其他任务后续增量
+  仍可能影响可用性；不杀进程、不改宿主配置，不用于共享环境时延比较。
+- 各GPU阶段前重检，打印实际free/total和预算；保存`memory_checks/*.json`。used/free
+  为动态观察，排除出不可变device身份，避免正常显存波动导致恢复校验失败。
+- 新默认输出`outputs/asr_backend_comparison_v023_shared_v2`，旧v1失败目录完整保留。
+  源码及预算变更不绕过旧contract；不能手动指定旧v1输出复用。固定依赖版本/环境
+  路径不变，已就绪且身份一致则复用安装。用户此次v1尚无推理结果，无需重复转写。
+- 仍使用Qwen3-ASR-1.7B、vLLM0.23.0+cu129，30音频、两模式、每后端60次；不新增
+  CTC计算、训练、生产资产变更或全量评测。详见`docs/ASR_BACKEND_COMPARISON_V023.md`。
+
+分支`codex/g2p-coverage-scan`，本次推送SHA见回复。工区原Python3.12环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/compare_asr_backends.py all --gpu 4
+```
+
+新v2中断后重复相同命令，身份核验后跳过成功逐条转写，无需resume；全部完成则只
+核验/打包，不加载模型。只读进度：`python -B scripts/compare_asr_backends.py status`。
+回传`outputs/asr_backend_comparison_v023_shared_v2/return_bundle.zip`，含显存检查快照、
+环境/版本、报告与逐条差异，失败时含失败快照/日志尾部，不含权重/特征/波形。
+本地26项后端比较测试、15项两阶段样例测试通过（共41项），Ruff格式/检查、相关
+源码与测试的静态类型、空白检查通过。覆盖共享高占用卡放行、实际free不足拒绝、
+串行预算/余量、错误配置拒绝及动态显存快照恢复；不是H200显存/依赖或推理实测。
+
 ## 0.200 2026-11-02 用户授权H200固定vLLM0.23.0与Transformers小规模转写对照（待工区）
 
 用户要求将本轮vLLM固定为0.23.0后开始测试。本地无工区远程连接，交付自动安装/
