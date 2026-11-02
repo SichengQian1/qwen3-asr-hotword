@@ -1,5 +1,48 @@
 # 工作交接记录
 
+## 0.202 2026-11-02 H200安装vLLM被HTTPS证书链拦截，独立CA检查及原目录续跑（待工区）
+
+用户回传GPU4空闲142875MiB/总143771MiB，预检查通过、venv创建成功，pip下载官方
+GitHub vLLM0.23.0+cu129 wheel时因`self-signed certificate in certificate chain`失败。
+本次没有模型加载、样本准备、CTC或转写结果；不能当作vLLM0.23兼容/显存不足证据。
+企业网关/代理CA缺失是可能原因，未取得工区证书链或CA路径，不假装已确认根因。
+
+- 新增独立`scripts/check_asr_install_tls.py`与辅助模块`backend_install_tls.py`。
+  按环境变量CA、系统bundle、当前Python/Conda bundle查已有证书，逐项严格HTTPS
+  HEAD检查GitHub wheel及重定向、PyPI索引/实际wheel、PyTorch索引，10秒单请求超时，
+  逐bundle/端点打印进度；不下载大包或用GPU。PyPI检查用0.0.6元数据实际wheel地址，
+  不能用返回404的CDN根路径作通过条件。HTTP错误单列，不误报为TLS证书失败。
+- `--run --gpu 4`仅在全部检查通过后启动原入口，给子进程传`PIP_CERT`等CA变量。
+  不关闭验证、不下载/自动信任陌生证书，不改全局pip/系统证书或原Conda环境。
+  无有效bundle时明确提示管理员提供可信PEM bundle及`--ca-bundle`；不能承诺诊断
+  脚本必然修复企业网络。HEAD通过也不能保证所有传递依赖地址都可访问。
+- **不修改**0.201绑定的四个原源码及配置，原run_contract保持有效，不改版本、GPU、
+  样本/推理设置、模型或结果目录。venv不重建；原失败日志保留，无推理项需要重跑。
+
+分支仍`codex/g2p-coverage-scan`，本次推送SHA见回复。工区原Python3.12环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/check_asr_install_tls.py --run --gpu 4
+```
+
+若无CA通过，回传屏幕上的简短CA检查结果，由管理员提供实际可信bundle路径后用
+同一命令加`--ca-bundle /actual/path/company-ca-bundle.pem`。默认只诊断，不带--run
+不启动安装或GPU。原测试中断重复这条新命令或原all命令（需保留有效CA变量）即可，
+无需resume；已有成功逐条转写仍按原contract复用。只读查看仍为
+`python -B scripts/compare_asr_backends.py status`。
+回传路径仍为`outputs/asr_backend_comparison_v023_shared_v2/return_bundle.zip`；CA检查
+失败发生在原入口前，仅输出终端诊断，不把旧zip冒充新诊断包。若进入安装或推理，
+原入口照常生成失败或成功小包。完整说明见`docs/ASR_BACKEND_COMPARISON_V023.md`。
+
+本地新增11项CA逻辑测试，连同后端对照26项、两阶段样例15项共52项通过；Ruff格式/
+检查、相关静态类型、CLI帮助及空白检查通过。检查旧四文件和原配置相对0.201未改，
+确保原contract可继续核验。本地对PyPI实际wheel做HEAD返回200，未下载wheel；这
+不能证明工区网络可用。没有在工区实测安装或宣称证书问题已解决。用户未知7份测试
+修改和未跟踪资料保留，不纳入交付。
+
 ## 0.201 2026-11-02 H200后端对照允许共享GPU4，按剩余显存预算检查（待工区）
 
 用户执行0.200入口，GPU4占用98055MiB，被旧`used>1024MiB`条件拦截。该阈值过严，

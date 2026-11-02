@@ -98,6 +98,40 @@ CUDA12.9 GA对应驱动575.51.03；CUDA12.x还存在最低525.60.13起的次版�
 **不会删除西葡重音、鼻化拼写、ñ或数字来制造一致。**即使是greedy，也不预设两套
 浮点/算子实现必须逐字相同。词语不同时结合参考及专名命中判断，不自动认定vLLM错。
 
+## 安装时提示自签名证书链怎么办
+
+2026-11-02用户在GPU4得到142875MiB free/143771MiB total，显存检查通过；随后创建
+venv成功，pip下载GitHub vLLM wheel时提示`self-signed certificate in certificate chain`。
+此时尚未加载模型或开始转写。它是HTTPS信任问题，不能当作vLLM依赖/模型不兼容；
+是否由企业代理CA引起，未取得工区证书链前仍是推测。之前MFA下载也有相似记录。
+
+新增独立小入口，不改已绑定实验身份的四个原运行源码/配置文件，继续同一v2目录：
+
+```bash
+python -B scripts/check_asr_install_tls.py --run --gpu 4
+```
+
+先检查环境变量指定的CA、Linux系统bundle、当前Conda/Python bundle（仅已有文件）。
+逐个使用严格HTTPS HEAD检查官方GitHub固定wheel及其重定向、PyPI索引/实际wheel
+地址、PyTorch CUDA索引，打印每项结果，不下载大型wheel或占用GPU。某一bundle全部
+通过后，只在测试子进程内设置`PIP_CERT`等CA变量，自动接着运行原`all --gpu 4`。
+不改系统证书、pip配置、原Conda依赖或已有contract；失败日志保留，不新建实验目录。
+依赖版本不变，原venv继续使用，安装成功的固定包可由pip复用；后续仍要以实际pip
+安装/包检查为准，HEAD检查不能证明所有传递依赖的下载路径可访问。
+
+若全都`certificate_verification_failed`，需要工区管理员提供可信CA的**PEM bundle**
+（包括需要的公司根证书/公共根），将实际路径传入同一入口；代码无法凭空补出该证书：
+
+```text
+python -B scripts/check_asr_install_tls.py --ca-bundle /实际路径/company-ca-bundle.pem --run --gpu 4
+```
+
+`http_error_403`、超时或HEAD不受支持等是其他可访问性问题，要按输出区分，不能都
+继续称作证书错误。可省略`--run --gpu 4`只做CPU/网络检查。此入口不关闭验证，也不
+自动信任从报错连接拿到的证书。[pip官方CA配置说明](https://pip.pypa.io/en/stable/topics/https-certificates/)
+明确支持`PIP_CERT`/`REQUESTS_CA_BUNDLE`/`CURL_CA_BUNDLE`；PyPI wheel检查地址来自
+[qwen-asr0.0.6官方元数据](https://pypi.org/pypi/qwen-asr/0.0.6/json)。
+
 ## 输出、恢复和查看
 
 默认配置：`configs/asr_backend_comparison_v023.workzone.json`。
