@@ -1,5 +1,55 @@
 # 工作交接记录
 
+## 0.200 2026-11-02 用户授权H200固定vLLM0.23.0与Transformers小规模转写对照（待工区）
+
+用户要求将本轮vLLM固定为0.23.0后开始测试。本地无工区远程连接，交付自动安装/
+执行入口；未在本机安装CUDA依赖、加载Qwen或冒称H200实测。不改旧Conda环境、
+生产入口、CTC权重/词表/标签/索引，也不重跑训练或全6800评测。
+
+- 入口`scripts/compare_asr_backends.py`；配置
+  `configs/asr_backend_comparison_v023.workzone.json`；说明
+  `docs/ASR_BACKEND_COMPARISON_V023.md`。
+- 独立环境`.venv/qwen_asr_vllm023_cu129`，官方vLLM0.23.0+cu129发布wheel及SHA固定；
+  Torch/torchaudio2.11.0+cu129、torchvision0.26.0+cu129，transformers4.57.6与
+  qwen-asr0.0.6。不装会固定0.14.0的qwen-asr[vllm] extra。vLLM0.23需要Torch2.11，
+  不能沿用旧Torch2.10轮子ABI。25GiB磁盘是安装起步预留，不是实测最终占用。
+- 默认同一只读完整Qwen3-ASR-1.7B。new70已保存retrieval结果按固定文件SHA顺序取
+  三语×原始/10dB各5条≤30s音频，共30条；查新Head/index身份、逐来源JSON SHA，
+  文件及规范化波形精确去重；不按成功转写/热词恢复选择，不宣称说话人独立。
+- 每条无热词/相同new70 Top7两种Prompt，两边各60请求，共120次，新跑FP16。
+  两套模型分进程顺序运行；原生vLLM进程不导入旧qwen_asr注册实现，并核验模型模块。
+  同一float32波形预先按hop160补零，Prompt一次序列化；对齐EOS/greedy/长度，核对
+  实际完整展开token IDs，输入不同或输出截断立即停止。参考仅事后评分，不入模型。
+- 驱动按CUDA12次版本兼容最低525.60.13初筛，575.51.03为12.9 GA对应驱动；不能
+  把低于575一概判不兼容。记录模式并运行真实小CUDA/RMSNorm检查，再看完整推理。
+  可能仍遇到旧驱动PTX/JIT限制，不自动修改宿主驱动。卡占用>1GiB则停止，不杀进程。
+- 本地新增16项无GPU测试通过；连同上次样例共31项通过；Ruff/静态类型/空白检查
+  通过。测试验证比较/拒收、标点与重音区分、门限前提、历史结果保护和打包等逻辑，
+  不是依赖安装或原生vLLM0.23实机兼容证据。
+
+交付分支仍`codex/g2p-coverage-scan`，推送SHA见回复。工区原Python3.12环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/compare_asr_backends.py all --gpu 5
+```
+
+5为此前用户明确授权的物理卡；若现在被占用入口会停止，换卡必须是另行已分配的卡。
+脚本自动执行安装→基础GPU检查→冻结30条→Transformers→原生vLLM→比较/打包，有
+阶段名、实际条数及活动提示。默认新目录`outputs/asr_backend_comparison_v023_v1`，
+禁止与历史来源/环境/模型目录重叠。输出contract绑定配置、GPU及源码；重复同命令
+核验后复用成功项、继续未完成项，不需resume；全部完成则不再加载模型。环境无本轮
+标识时拒绝往已有目录安装，依赖/源码变化应另开目录，不覆盖已有结果。
+
+只读查看：`python -B scripts/compare_asr_backends.py status`。成功返回report.json、
+comparison.tsv/MD、details.json，区分exact/format_only/word_difference，保留
+é/ñ等，报告小样本参考WER、生成token和注入词命中差异。失败保留failure快照、
+必要时input_mismatch.json及日志。回传同目录`return_bundle.zip`即可，不含模型/
+大特征/波形；没有安装或推理实测结果前不填写一致率，不据此宣称310P或两阶段缓存
+已验证。未知7份测试修改及其他未跟踪资料继续保留，不纳入交付。
+
 ## 0.199 2026-10-31 同一vLLM实例两阶段CTC/RAG同事接入样例（未实机）
 
 用户选择“先编码/检索，再创建最终生成请求并复用音频表示”，要求代码及MD交给集成
