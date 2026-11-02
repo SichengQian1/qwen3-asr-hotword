@@ -50,6 +50,11 @@ def versions() -> dict[str, str]:
 
 
 def prepare(root: Path, cfg: dict[str, Any], output: Path) -> None:
+    if cfg.get("selection_policy") == "full_saved_inventory":
+        from qwen_hotword.evaluation.backend_compare_full import prepare_full
+
+        prepare_full(root, cfg, output)
+        return
     import librosa
     import numpy as np
     import soundfile as sf
@@ -353,7 +358,11 @@ def infer(backend: str, cfg: dict[str, Any], output: Path) -> None:
             skip_special_tokens=True,
             spaces_between_special_tokens=False,
         )
-    with stage_progress(f"{backend} matched requests", total=len(requests), every=1) as tick:
+    with stage_progress(
+        f"{backend} matched requests",
+        total=len(requests),
+        every=100 if cfg.get("selection_policy") == "full_saved_inventory" else 1,
+    ) as tick:
         for number, request in enumerate(requests, 1):
             if request["request_id"] in completed:
                 tick(number)
@@ -370,6 +379,8 @@ def infer(backend: str, cfg: dict[str, Any], output: Path) -> None:
                     padding=True,
                 )
                 ids = batch["input_ids"][0].tolist()
+                if request.get("prepared_input_ids_sha256") not in (None, digest(ids)):
+                    raise ValueError("Transformers Prompt IDs differ from CPU preparation")
                 if len(ids) + cfg["max_new_tokens"] > cfg["max_model_len"]:
                     raise ValueError("shared context budget exceeded")
                 batch = batch.to("cuda:0").to(torch.float16)

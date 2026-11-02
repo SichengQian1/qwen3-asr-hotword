@@ -171,3 +171,67 @@ outputs/asr_backend_comparison_v023_shared_v2/return_bundle.zip
 
 这是小规模完整ASR后端对照，不是CTC PER、总体WER、310P适配、两阶段Encoder缓存
 或显存/时延基准测试。若有词语差异，再针对这些条目复测/定位，无需先扩大量。
+
+## 2026-11-02：用户指定扩大到完整6800条回归集
+
+小样本已在H200完成：60对中57对原文相同，1对仅格式不同，2对有词语不同；30对带
+热词结果的规范化词序列均相同。它不能证明全量行为，因此按用户新要求扩大范围。
+本节是新一轮交付，**全量实测尚未执行**。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 python -B scripts/compare_asr_backends.py all --full-eval --gpu 4
+```
+
+- 英语6000条、西语400条、葡语400条是**基础音频条数**；热词库仍为上轮共同4k词面
+  对应的new70实际Top7。每条基础音频包含original/noise10db两种条件，共13600份音频；
+  每份分别无热词/相同Top7，两套后端各27200次，共54400次。无候选时保留空提示，
+  不因无热词、错词或转写结果而筛选。
+- 新配置`configs/asr_backend_comparison_v023_full.workzone.json`，新输出
+  `outputs/asr_backend_comparison_v023_full6800_v1`，不覆盖小样本、训练或旧ASR输出。
+  原小样本依然可用`status`只读查看；本次涉及运行源码变更，不能用旧目录再次启动all
+  绕过旧contract。新全量任务从自己的目录续跑。
+- **只复用已安装成功的独立venv**`.venv/qwen_asr_vllm023_cu129`，要求已有环境身份和
+  ready记录，缺失即停止；不会调用pip安装或下载模型。仍核验精确版本/安装源码。
+  `VLLM_ALLOW_INSECURE_SERIALIZATION=1`延续已成功小测试的本地可信`apply_model`
+  函数RPC设置，只作用于该命令及子进程，不是SSL设置，不更改全局环境。
+- 使用相同Qwen3-ASR-1.7B快照、FP16、greedy、batch1/TP1、种子、EOS、512输出token、
+  4096上下文和显存预算。Transformers与vLLM串行运行；不切换注意力实现，不把本轮
+  偷换成新数值设置。`enforce_eager=True`不代表vLLM使用Transformers eager attention。
+- 复用最新100类Head/new70索引对应的已保存检索结果，不重跑Encoder+CTC检索，不重训、
+  不重做MFA映射。两边完整ASR都新跑；历史BF16转写不作为本轮FP16结果。
+- CPU先审计全部new70记录，核对Head/vocab/index SHA、六组计数和原始/带噪sample身份
+  及参考文本配对，随后逐音频验证源SHA、规范化/共同补零、保存共同波形与两种Prompt。
+  **不沿用小样本的30秒筛选，不去掉重复内容记录**；按身份完整保留并报告重复数，
+  不把重复记录当作新增独立证据，也不宣称speaker-disjoint。
+- CPU准备按音频保存带自校验的独立小cell，可断点复用；提前核对Processor展开后的
+  输入长度。上下文超限、无效音频、错配、后端输入token不同或输出截断时明确停止，
+  不悄悄删样本/截句凑齐数量。之后可根据错误条目决定是否另开扩大长度预算的版本，
+  不能把失败后的不完整集合当完整评测。
+- 推理每100条进度、静默阶段每10秒活动提示。同一命令中断后重跑，无需`--resume`，
+  校验来源/源码/参数/包身份后只继续未完成项。已完成全量任务重复命令仅验证/打包。
+  CPU准备和推理均无需一次把所有音频/声学特征装进内存；共同float32波形占磁盘约
+  每小时0.23GB，13600份若平均10秒约8.7GB（估算，实际见preparation_summary）。
+
+只读进度：
+
+```bash
+python -B scripts/compare_asr_backends.py status --full-eval
+```
+
+`full_preparation_audio_conditions`最终应为13600，`saved_calls`两边分别27200。
+`report.json`有总体、逐语言、逐Prompt和语言×条件×Prompt的完全一致/格式/词语差异、
+参考WER与注入词命中差异；`target_hits_differ`仅涉及参考支持的注入候选，不是完整
+业务热词召回率或全体词都正确的证明。本集是已查看过的回归集，不是新增盲测。
+
+回传新输出目录的`return_bundle.zip`即可。全量模式自动限制为**小于100000字节**，
+包含汇总、身份、日志尾部和最多24条分层轮取的差异预览；超限时缩短预览/省略日志。
+完整`comparison.tsv`、`details.json`、`requests.json`及逐条cell留在工区，未打进小包；
+预览不是所有差异。没有模型权重、完整波形或大型特征。需要具体条目时再按request_id
+定位，不能依据预览比例估计差异率。
+
+本地63项CPU检查通过，含模拟Processor的准备/续跑、长音频与重复保留、全量身份拒收、
+已就绪环境约束及100KB打包；静态检查不代表已在H200执行这轮54400次推理。此轮也
+不能验证310P、两阶段Encoder缓存、CTC输出一致性或后端显存/性能收益。

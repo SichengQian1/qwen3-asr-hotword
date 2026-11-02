@@ -1,5 +1,57 @@
 # 工作交接记录
 
+## 0.203 2026-11-02 H200后端对照扩展至EN6000/ES400/PT400原始及10dB全量回归集（待工区）
+
+用户回传的小样本结果已完成核对：同30份音频×两种Prompt共60对，57对完全一致、
+1对仅格式差异、2对词语差异；30对带热词的规范化词序列均相同。参考WER为
+Transformers42/748、vLLM41/748；少量葡语差异的数值根因尚未定位，不能断言实现
+错误或全部只是浮点舍入。用户现明确要求扩大到原英语6000条、西葡各400条的集合。
+
+- 增加`--full-eval`及固定全量配置，读取最新`mfa_v03_noise70_scratch_v1`保存的new70
+  检索结果；核验100类Head、v0.3音素表及索引身份、六组计数、原始/带噪身份和参考
+  文本一一配对。6800条基础音频×两种声学条件=13600份，×无热词/相同Top7=27200对，
+  两个后端合计54400次。是音频条数，不是6000词/400词热词库；词表规模仍沿用共同4k。
+- 新增`backend_compare_full.py`，CPU准备保留全部样本，包括>30秒与重复内容记录；
+  重复单列、不称独立样本。不重跑CTC、不重训、不改MFA/标签/音素词表/热词索引。
+  CPU提前核对展开Prompt长度，源SHA/精确版本/模型元数据及两边实际Prompt核验保留。
+  超长上下文、无效音频、截断等明确停止，不删样本冒充完成。两边均重新跑FP16完整
+  ASR，不把此前BF16历史结果与新FP16混比；这轮不改注意力后端以掩盖差异。
+- CPU按音频原子保存准备cell与规范化波形，支持断点；推理复用成功逐条结果，100条
+  进度/10秒活动提示。两后端分进程串行，GPU4按原约32GiB实际free要求检查，无新增
+  并行模型或整卡独占要求。共享卡不能用于严格后端性能基准结论。
+- 只复用已成功安装的`.venv/qwen_asr_vllm023_cu129`，缺ready身份则停止，**不会再
+  pip安装或联网下载**。固定包版本、FP16/greedy/TP1、512输出token/4096上下文和原
+  显存预算。沿用小测试已实测通过的命令级`VLLM_ALLOW_INSECURE_SERIALIZATION=1`，
+  用于可信本地模型模块核验RPC；不是SSL配置，不改全局环境。
+- 新输出`outputs/asr_backend_comparison_v023_full6800_v1`；小样本、训练和历史输出
+  保留。源码变更后不能将新all指向旧小样本目录复用旧contract；旧目录只读status仍可。
+  全量自身同命令恢复不需resume，源码/参数/设备身份改变则拒绝混用。
+- 全量回传包限制<100000字节，报告增加逐语言/Prompt汇总，附最多24条分层差异预览。
+  完整comparison.tsv/details.json/requests与逐条cell留工区；预览不能估计总体差异率。
+  只比较最终转写，不把同集回归当盲测，不把注入候选命中差异当全体热词召回率。
+
+分支`codex/g2p-coverage-scan`，推送SHA见回复。工区仍用原Python环境启动父入口：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+VLLM_ALLOW_INSECURE_SERIALIZATION=1 python -B scripts/compare_asr_backends.py all --full-eval --gpu 4
+```
+
+只读进度：`python -B scripts/compare_asr_backends.py status --full-eval`。
+中断重复同一all命令即可；完整完成后再次执行只校验/打包，不加载模型。回传：
+`outputs/asr_backend_comparison_v023_full6800_v1/return_bundle.zip`。成功应有27200对、
+两边各27200个逐条结果；准备13600份音频，计数及重复/时长见preparation_summary。
+浮点波形每小时约0.23GB，若13600份平均10秒约8.7GB；这是估算，非工区已测占用。
+完整说明见`docs/ASR_BACKEND_COMPARISON_V023.md`。
+
+本地63项相关CPU测试通过（原后端26、全量新增11、两阶段15、TLS11），包括模拟
+Processor准备中断/续跑、保留>30秒输入和重复、错配拒收、禁止重新安装、完整结果
+本地留存与<100KB回传；Ruff、相关静态类型及空白检查通过。没有本地加载Qwen、安装
+CUDA/vLLM、访问H200音频或执行全量推理；工区结果待回传。未知7份测试修改和未跟踪
+PPT/资料保持原状，不纳入本次交付。
+
 ## 0.202 2026-11-02 H200安装vLLM被HTTPS证书链拦截，独立CA检查及原目录续跑（待工区）
 
 用户回传GPU4空闲142875MiB/总143771MiB，预检查通过、venv创建成功，pip下载官方

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install isolated vLLM0.23 and compare 30 shared audio inputs on an allocated H200."""
+"""Compare Transformers and native vLLM0.23 on shared H200 audio inputs."""
 
 from __future__ import annotations
 
@@ -16,8 +16,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("all", "status", "_worker"))
     parser.add_argument("--gpu", type=int, help="previously allocated physical H200 number")
-    parser.add_argument(
-        "--config", type=Path, default=ROOT / "configs/asr_backend_comparison_v023.workzone.json"
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--config", type=Path)
+    selection.add_argument(
+        "--full-eval", action="store_true", help="all EN6000/ES400/PT400, original + noise10db"
     )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument(
@@ -39,7 +41,12 @@ def main() -> int:
         else:
             infer(args.stage, cfg, args.output_dir)
         return 0
-    cfg = read(args.config.resolve())
+    config = args.config or ROOT / "configs" / (
+        "asr_backend_comparison_v023_full.workzone.json"
+        if args.full_eval
+        else "asr_backend_comparison_v023.workzone.json"
+    )
+    cfg = read(config.resolve())
     output = (args.output_dir or ROOT / cfg["output"]).resolve()
     if args.action == "status":
         report = read(output / "report.json") if (output / "report.json").exists() else None
@@ -49,6 +56,11 @@ def main() -> int:
                     "output": str(output),
                     "report": report,
                     "requests_prepared": (output / "requests.json").exists(),
+                    "full_preparation_audio_conditions": (
+                        len(list((output / "preparation/cells").glob("*.json")))
+                        if args.full_eval or cfg.get("selection_policy") == "full_saved_inventory"
+                        else None
+                    ),
                     "saved_calls": {
                         name: len(list((output / name / "cells").glob("*.json")))
                         for name in ("transformers", "vllm")

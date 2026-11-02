@@ -1,0 +1,29 @@
+{
+  "output": "outputs/asr_backend_comparison_v023_full6800_v1",
+  "environment": ".venv/qwen_asr_vllm023_cu129",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "source_run": "outputs/mfa_v03_noise70_scratch_v1",
+  "source_head_sha256": "a6eba051856dbe4c7ac793dd237c06b7f98cd951a76199f57ee3b84c57483229",
+  "source_index_sha256": "b478451da20fc15d99fed4f3da99f4164cdc8d266e29d05f2b08c4de80d4a98d",
+  "vllm_wheel": "https://github.com/vllm-project/vllm/releases/download/v0.23.0/vllm-0.23.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl#sha256=8bc2203995d061e6b988916b71b9dee8a5970f5fdc5f37d4445a877a2fab2cc1",
+  "torch_index": "https://download.pytorch.org/whl/cu129",
+  "minimum_driver": "525.60.13",
+  "cuda_toolkit_driver": "575.51.03",
+  "sample_rate": 16000,
+  "pad_waveform_to_samples": 160,
+  "seed": 20261102,
+  "max_new_tokens": 512,
+  "max_model_len": 4096,
+  "gpu_memory_utilization": 0.15,
+  "transformers_allocator_limit_gib": 24,
+  "shared_memory_reserve_mib": 8192,
+  "selection_policy": "full_saved_inventory",
+  "expected_audio_counts": {
+    "en": 6000,
+    "es": 400,
+    "pt": 400
+  },
+  "source_vocab_sha256": "59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f",
+  "require_ready_environment": true,
+  "compact_return_bundle": true
+}

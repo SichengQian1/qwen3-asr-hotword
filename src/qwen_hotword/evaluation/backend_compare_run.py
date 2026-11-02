@@ -166,6 +166,12 @@ def environment(root: Path, cfg: dict[str, Any], output: Path, env: dict[str, st
         "torch_index": cfg["torch_index"],
     }
     marker = target / "test_environment_contract.json"
+    if cfg.get("require_ready_environment") and (
+        not marker.exists() or not (target / "test_environment_ready.json").exists()
+    ):
+        raise ValueError(
+            "full evaluation requires the already verified environment; no installation"
+        )
     if target.exists() and not marker.exists():
         raise ValueError("environment path already exists without this experiment's identity")
     if not target.exists():
@@ -231,6 +237,11 @@ def environment(root: Path, cfg: dict[str, Any], output: Path, env: dict[str, st
 
 
 def package(output: Path) -> Path:
+    contract = output / "run_contract.json"
+    if contract.exists() and read(contract)["config"].get("compact_return_bundle"):
+        from qwen_hotword.evaluation.backend_compare_full import compact_package
+
+        return compact_package(output)
     destination = output / "return_bundle.zip"
     temporary = output / "return_bundle.zip.pending"
     names = [p for p in output.rglob("*.json") if p.name != "pip_install_report.json"]
@@ -253,6 +264,15 @@ def summarize(output: Path) -> dict[str, Any]:
         for backend in ("transformers", "vllm")
     }
     details, report = compare_rows(requests, rows)
+    contract = output / "run_contract.json"
+    if (
+        contract.exists()
+        and read(contract)["config"].get("selection_policy") == "full_saved_inventory"
+    ):
+        from qwen_hotword.evaluation.backend_compare_full import full_report, preview
+
+        report.update(full_report(read(output / "requests.json")))
+        write_once(output / "differences_preview.json", preview(details))
     write_once(output / "report.json", report)
     write_once(output / "details.json", {"rows": details})
     columns = [
@@ -280,17 +300,18 @@ def summarize(output: Path) -> dict[str, Any]:
     if destination.exists() and destination.read_text(encoding="utf-8") != table.getvalue():
         raise ValueError("existing comparison table changed")
     if not destination.exists():
-        destination.write_text(table.getvalue(), encoding="utf-8", newline="")
+        with destination.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(table.getvalue())
     totals = report["by_group"]["overall"]
     text = (
         "# H200：Transformers 与 vLLM0.23.0 转写对照\n\n"
         f"对照{totals['pairs']}组：原文完全一致{totals['exact']}组，仅格式差异"
         f"{totals['format_only']}组，词语差异{totals['word_difference']}组。\n\n"
-        f"小样本参考WER：Transformers {totals['transformers_wer']}，"
+        f"本轮参考WER：Transformers {totals['transformers_wer']}，"
         f"vLLM {totals['vllm_wer']}（小数比例）。\n\n"
         "两边FP16、同一环境、波形与实际Prompt token核对一致；未重跑CTC。\n\n"
         "逐条结果见comparison.tsv；details.json保留热词命中差异。"
-        "这是功能对照，不是总体质量、310P兼容或显存/性能结论。\n"
+        "这是同一回归集的功能对照，不是新盲测、310P兼容或显存/性能结论。\n"
     )
     md = output / "comparison.md"
     if md.exists() and md.read_text(encoding="utf-8") != text:
@@ -326,6 +347,8 @@ def run(root: Path, cfg: dict[str, Any], output: Path, gpu: int, script: Path) -
             Path(__file__).with_name("backend_comparison.py"),
             Path(__file__).with_name("backend_compare_runtime.py"),
         ]
+        if cfg.get("selection_policy") == "full_saved_inventory":
+            files.append(Path(__file__).with_name("backend_compare_full.py"))
         write_once(
             output / "run_contract.json",
             {
@@ -361,7 +384,7 @@ def run(root: Path, cfg: dict[str, Any], output: Path, gpu: int, script: Path) -
             ):
                 raise ValueError("model architecture differs")
             write_once(output / "model_metadata.json", metadata)
-            with stage_progress("Check selected H200, driver and free memory before installing"):
+            with stage_progress("Check selected H200, driver and free memory"):
                 record_preflight(gpu, cfg, output, "before_install")
             env = dict(os.environ)
             env.update(

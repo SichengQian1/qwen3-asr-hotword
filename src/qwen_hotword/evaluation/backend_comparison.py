@@ -213,7 +213,12 @@ def compare_rows(
             "vllm_target_hits": [word for word in targets if contains(b["text"], word)],
         }
         details.append(row)
-        for group in ("overall", f"{request['language']}/{request['condition']}/{request['mode']}"):
+        for group in (
+            "overall",
+            f"language/{request['language']}",
+            f"mode/{request['mode']}",
+            f"{request['language']}/{request['condition']}/{request['mode']}",
+        ):
             groups[group].append(row)
     summaries = {}
     for group, rows in groups.items():
