@@ -1,5 +1,34 @@
 # 工作交接记录
 
+## 0.206 2026-11-05 中英阿 v1.0 共享发音表，埃及口语参考（仅资产）
+
+用户要求只交付发音单位和逐来源映射，阿语偏埃及方言。新表独立于现有英西葡资产：
+`configs/phonemes/zh_en_ar_ipa_vocab.v1.0.json` 和
+`configs/phonemes/zh_en_ar_ipa_mapping.v1.0.tsv`；来源及设计见
+[中英阿音素表说明](ZH_EN_AR_IPA_VOCAB_V1_0.md)。共 **248 类（246 个发音单位）**，普通话
+142、美式英语 78、阿语并集 95；开罗来源层 79。保留完整带调单位、长音、叠辅音及修饰；
+只合并相同 IPA 单位、Unicode 规范等价和既有明确别名。`spn`/`<eps>` 不作为 CTC 标签。
+
+- 普通话和英语使用固定官方 MFA 元数据与实际词典发音列并集；中文词典比 G2P 声明多 5 个发音单位。
+- 阿语以可追溯的开罗音系/语音参考为主，独立保留 MSA 参考和旧 `arabic_mfa` 原始词典。
+  QCRI DialG2P 实际回查的是带标音书写/口语对照，未当作 IPA 清单或已运行 G2P。
+  尚无业务语料或发音听审结论，不声称覆盖所有埃及地区或完成文本到音素的方言转换。
+- SHA256：JSON `8ab1bad085a87925de5f89590c6310dbe486ec7821de41ae0ee2a89e9433f771`；
+  TSV `3fb0555f38c7d049649f8a621713bc752ac54623a95964be389224c00fdff277`。
+
+分支 `codex/g2p-coverage-scan`；工区仅需同步文件，可选只读核验：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B -m pytest tests/test_zh_en_ar_vocab.py
+```
+
+无需安装发音模型、加载 Qwen、读取音频或训练。无运行目录、续跑步骤或回传文件。
+本地定向 18 项、交付范围 Ruff/Mypy 和空白检查通过；全量 pytest 在收集阶段因本机未安装
+Torch 停止，整库 Ruff/Mypy 另有交付范围外的问题，本次未改这些文件。
+已有工作树修改、英西葡生产表和历史 outputs 保持原样。
+
 ## 0.205 2026-11-03 v0.3三件套及新旧推理接入差异说明（文档交付，无生产变更）
 
 用户要求整理可转交同事的MD，并确认应传哪些文件和路径。新增
