@@ -45,14 +45,61 @@ def normalize(text: str) -> str:
     return " ".join("".join(chars).split())
 
 
-def inspect_checkpoint(model_path: Path) -> dict[str, Any]:
-    directory = (model_path.parent if model_path.name == "optimizer.pt" else model_path).resolve()
+def inspect_checkpoint(model_path: Path, base_model: Path | None = None) -> dict[str, Any]:
+    optimizer_locator = model_path.name == "optimizer.pt"
+    directory = (model_path.parent if optimizer_locator else model_path).resolve()
+    config_path = directory / "adapter_config.json"
+    if not config_path.is_file():
+        if base_model is not None:
+            raise ValueError("--base-model is only used with a PEFT LoRA checkpoint")
+        return {
+            "format": "full_hf",
+            "optimizer_path_used_as_locator": optimizer_locator,
+            **inspect_full_model(directory),
+        }
+
+    config = read(config_path)
+    if config.get("peft_type") != "LORA":
+        raise ValueError(f"{config_path}: expected peft_type=LORA, got {config.get('peft_type')!r}")
+    for name in ("adapter_model.safetensors", "adapter_model.bin"):
+        weight = directory / name
+        if weight.is_file() and weight.stat().st_size > 0:
+            break
+        if weight.exists():
+            raise ValueError(f"invalid or empty adapter weight: {weight}")
+    else:
+        raise ValueError(f"{directory}: missing adapter_model.safetensors or adapter_model.bin")
+
+    recorded_base = config.get("base_model_name_or_path")
+    base_source = "--base-model" if base_model is not None else "adapter_config.json"
+    if base_model is None:
+        base_model = Path(recorded_base) if isinstance(recorded_base, str) else Path()
+        if not base_model.is_absolute() or not base_model.is_dir():
+            raise ValueError(
+                f"{config_path}: base_model_name_or_path={recorded_base!r} "
+                "is not an accessible absolute local directory. "
+                "Pass --base-model with the exact local Qwen3-ASR checkpoint used to train LoRA."
+            )
+    return {
+        "format": "peft_lora",
+        "directory": str(directory),
+        "optimizer_path_used_as_locator": optimizer_locator,
+        "adapter_config_sha256": sha(config_path),
+        "adapter_weight": {"file": weight.name, "bytes": weight.stat().st_size},
+        "recorded_base": recorded_base,
+        "recorded_base_revision": config.get("revision"),
+        "base_source": base_source,
+        "base_model": inspect_full_model(base_model.resolve()),
+    }
+
+
+def inspect_full_model(directory: Path) -> dict[str, Any]:
     if not directory.is_dir():
         raise ValueError(
             f"checkpoint directory is unavailable: {directory} (check /data_103 mount)"
         )
     if (directory / "adapter_config.json").exists():
-        raise ValueError(f"{directory}: PEFT adapter metadata present; supply a merged HF export")
+        raise ValueError(f"{directory}: the base-model path must be a full HF checkpoint")
 
     formats = ("model.safetensors", "pytorch_model.bin")
     weights = []
@@ -98,7 +145,6 @@ def inspect_checkpoint(model_path: Path) -> dict[str, Any]:
         raise ValueError(f"expected a Qwen3-ASR model_type in {directory / 'config.json'}")
     return {
         "directory": str(directory),
-        "optimizer_path_used_as_locator": model_path.name == "optimizer.pt",
         "config_sha256": sha(directory / "config.json"),
         "weight_index_sha256": sha(index) if index else None,
         "weights": [{"file": p.name, "bytes": p.stat().st_size} for p in weights],
@@ -152,6 +198,30 @@ def load_qwen(checkpoint: str, gpu: int, batch_size: int, max_new_tokens: int) -
         max_inference_batch_size=batch_size,
         max_new_tokens=max_new_tokens,
     )
+
+
+def attach_lora(model: Any, directory: str) -> int:
+    """Keep Qwen's original generation methods and validate the injected weights."""
+    peft = import_module("peft")
+    config = peft.PeftConfig.from_pretrained(directory, local_files_only=True)
+    config.inference_mode = True
+    saved = peft.utils.load_peft_weights(directory, device="cpu", local_files_only=True)
+    # A PEFT wrapper adds this prefix to saved tensors. The Qwen model itself has no prefix.
+    weights = {key.removeprefix("base_model.model."): value for key, value in saved.items()}
+    if not weights or len(weights) != len(saved):
+        raise ValueError(f"{directory}: empty adapter or duplicate keys after removing PEFT prefix")
+    peft.inject_adapter_in_model(config, model)
+    expected = peft.get_peft_model_state_dict(model, save_embedding_layers=False)
+    missing = sorted(set(expected) - weights.keys())
+    result = peft.set_peft_model_state_dict(model, weights)
+    if not expected or missing or result.unexpected_keys:
+        raise ValueError(
+            f"{directory}: adapter tensors do not match the base model "
+            f"(expected={len(expected)}, missing={missing[:5]}, "
+            f"unexpected={result.unexpected_keys[:5]})"
+        )
+    model.eval()
+    return len(weights)
 
 
 def decode_audio(audio: Any, shard: Path, location: str) -> tuple[Any, int]:
@@ -265,10 +335,18 @@ def run(
 ) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=False)
     print(f"Output directory: {output}", flush=True)
-    packages = ("qwen-asr", "transformers", "torch", "pyarrow", "soundfile", "jiwer")
+    packages = ["qwen-asr", "transformers", "torch", "pyarrow", "soundfile", "jiwer"]
+    is_lora = checkpoint["format"] == "peft_lora"
+    if is_lora:
+        packages.append("peft")
     versions = {name: version(name) for name in packages}
+    model_path = checkpoint["base_model"]["directory"] if is_lora else checkpoint["directory"]
     with stage_progress("Load local Qwen3-ASR checkpoint"):
-        model = load_qwen(checkpoint["directory"], gpu, batch_size, max_new_tokens)
+        model = load_qwen(model_path, gpu, batch_size, max_new_tokens)
+    if is_lora:
+        with stage_progress("Attach and verify checkpoint LoRA tensors"):
+            loaded_tensors = attach_lora(model.model, checkpoint["directory"])
+        checkpoint = {**checkpoint, "adapter_tensors_loaded": loaded_tensors}
     result = {
         "status": "completed",
         "dataset": "Casablanca/Morocco/validation",

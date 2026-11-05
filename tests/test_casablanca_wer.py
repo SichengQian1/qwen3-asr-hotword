@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from qwen_hotword.evaluation.casablanca_wer import (
+    attach_lora,
     evaluate,
     inspect_checkpoint,
     inspect_shards,
@@ -38,9 +39,72 @@ def test_checkpoint_locator_requires_complete_local_hf_export(tmp_path: Path) ->
     assert checkpoint["weights"] == [{"file": "model-00001-of-00001.safetensors", "bytes": 7}]
     assert checkpoint["weight_index_sha256"]
 
-    (tmp_path / "adapter_config.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(ValueError, match="merged HF export"):
+    (tmp_path / "adapter_config.json").write_text('{"peft_type":"LORA"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="missing adapter_model"):
         inspect_checkpoint(optimizer)
+
+
+def test_lora_preflight_uses_recorded_local_base_or_explicit_override(tmp_path: Path) -> None:
+    base = tmp_path / "exact-base"
+    base.mkdir()
+    for name in ("tokenizer_config.json", "preprocessor_config.json", "tokenizer.json"):
+        (base / name).write_text("{}", encoding="utf-8")
+    (base / "config.json").write_text('{"model_type":"qwen3_asr"}', encoding="utf-8")
+    (base / "model.safetensors").write_bytes(b"fixture")
+
+    adapter = tmp_path / "checkpoint-4900"
+    adapter.mkdir()
+    config = adapter / "adapter_config.json"
+    (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+    config.write_text(json.dumps({"peft_type": "LORA", "base_model_name_or_path": str(base)}))
+    metadata = inspect_checkpoint(adapter / "optimizer.pt")
+    assert metadata["format"] == "peft_lora"
+    assert metadata["directory"] == str(adapter)
+    assert metadata["base_model"]["directory"] == str(base)
+    assert metadata["base_source"] == "adapter_config.json"
+
+    config.write_text('{"peft_type":"LORA","base_model_name_or_path":"organization/unknown-base"}')
+    with pytest.raises(ValueError, match=r"organization/unknown-base.*--base-model"):
+        inspect_checkpoint(adapter)
+    metadata = inspect_checkpoint(adapter, base)
+    assert metadata["base_source"] == "--base-model"
+    assert metadata["base_model"]["directory"] == str(base)
+    assert metadata["recorded_base"] == "organization/unknown-base"
+    with pytest.raises(ValueError, match="base-model path must be a full HF checkpoint"):
+        inspect_checkpoint(adapter, adapter)
+
+
+def test_attach_saved_lora_keeps_original_model_and_requires_all_tensors(tmp_path: Path) -> None:
+    torch = pytest.importorskip("torch")
+    peft = pytest.importorskip("peft")
+    safetensors = pytest.importorskip("safetensors.torch")
+
+    def tiny_base() -> Any:
+        model = torch.nn.Sequential(torch.nn.Linear(3, 2, bias=False))
+        torch.nn.init.zeros_(model[0].weight)
+        return model
+
+    trained = peft.get_peft_model(
+        tiny_base(), peft.LoraConfig(r=1, lora_alpha=1, target_modules=["0"])
+    )
+    for parameter in trained.parameters():
+        if parameter.requires_grad:
+            torch.nn.init.ones_(parameter)
+    trained.save_pretrained(tmp_path)
+
+    model = tiny_base()
+    inputs = torch.ones((1, 3))
+    assert torch.count_nonzero(model(inputs)) == 0
+    assert attach_lora(model, str(tmp_path)) == 2
+    assert torch.equal(model(inputs), trained(inputs))
+    assert not model.training
+
+    weight_path = tmp_path / "adapter_model.safetensors"
+    weights = safetensors.load_file(weight_path)
+    weights.pop(next(iter(weights)))
+    safetensors.save_file(weights, weight_path, metadata={"format": "pt"})
+    with pytest.raises(ValueError, match="adapter tensors do not match.*missing"):
+        attach_lora(tiny_base(), str(tmp_path))
 
 
 def test_normalization_preserves_arabic_letters_and_code_switching() -> None:

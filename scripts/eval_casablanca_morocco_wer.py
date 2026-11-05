@@ -24,7 +24,8 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--language", choices=("auto", "Arabic"), default="auto")
-    parser.add_argument("--model", type=Path, help="local HF directory or optimizer.pt locator")
+    parser.add_argument("--model", type=Path, help="local HF or LoRA directory, or optimizer.pt")
+    parser.add_argument("--base-model", type=Path, help="local HF base used to train the LoRA")
     parser.add_argument("--parquet", type=Path, nargs="+", help="override the input Parquet paths")
     parser.add_argument("--output-dir", type=Path, help="new output directory")
     args = parser.parse_args()
@@ -36,7 +37,7 @@ def main() -> int:
     config = read(ROOT / "configs/casablanca_morocco_wer.workzone.json")
     try:
         with stage_progress("Check local model and Parquet metadata"):
-            checkpoint = inspect_checkpoint(args.model or Path(config["model"]))
+            checkpoint = inspect_checkpoint(args.model or Path(config["model"]), args.base_model)
             shards = inspect_shards(args.parquet or [Path(path) for path in config["parquet"]])
         if args.check:
             result = {

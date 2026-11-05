@@ -1,5 +1,27 @@
 # 工作交接记录
 
+## 0.208 2026-11-05 Casablanca WER 支持直接加载 PEFT LoRA
+
+工区预检发现 `checkpoint-4900/adapter_config.json`，确认该目录是 PEFT adapter。
+0.207 的完整模型加载限制已修正。新版从 `base_model_name_or_path` 选择可访问的
+本地完整 Qwen3-ASR 目录，在内存注入已保存的 LoRA 参数，并用原 Qwen3-ASR
+官方接口转写。模型报告记录实际基座、adapter 配置哈希和加载张量数。
+如果记录的路径不可用，传 `--base-model` 指向训练时使用的那份完整模型。
+不根据训练目录名推断基座，不访问 Hub，不读优化器，不导出合并权重。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/eval_casablanca_morocco_wer.py --check
+python -B scripts/eval_casablanca_morocco_wer.py --gpu 5
+```
+
+若预检提示基座不可用，预检和正式运行均追加 `--base-model /实际的训练基座目录`。
+LoRA 正式评测额外需要 PEFT。本地加载测试使用 PEFT 0.18.1 和 Transformers 4.57.6。
+预检只读元数据，不要求 PEFT 或 GPU。数据、评分、默认输出与 0.207 相同。运行中断后
+在新目录重跑，成功后只回传 `report.json`。真实基座和 WER 尚待工区核验。
+
 ## 0.207 2026-11-05 Casablanca 摩洛哥验证集 WER（评测入口）
 
 用官方 [Qwen3-ASR Transformers 接口](https://github.com/QwenLM/Qwen3-ASR#transformers-backend)
