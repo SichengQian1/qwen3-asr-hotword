@@ -1,0 +1,7 @@
+{
+  "model": "/data_103/h00911716/train_qwen_models/rl_models_v75ckpt100k/rl_asr_qwen17_v75ckpt100k_h00911716_r12_h200_v0836/checkpoint-4900/optimizer.pt",
+  "parquet": [
+    "/data/c00936624/test_data/Casablanca/Morocco/validation-00000-of-00002.parquet",
+    "/data/c00936624/test_data/Casablanca/Morocco/validation-00001-of-00002.parquet"
+  ]
+}

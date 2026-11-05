@@ -1,5 +1,36 @@
 # 工作交接记录
 
+## 0.207 2026-11-05 Casablanca 摩洛哥验证集 WER（评测入口）
+
+用官方 [Qwen3-ASR Transformers 接口](https://github.com/QwenLM/Qwen3-ASR#transformers-backend)
+评测用户指定的 RL `checkpoint-4900`。固定模型和两份 Parquet 路径见
+`configs/casablanca_morocco_wer.workzone.json`。脚本把 `optimizer.pt` 当作定位文件，
+只加载其父目录中的完整 HF 模型和处理器。只有优化器、PEFT adapter 或其他非 HF 权重时，
+先由训练侧导出同一 checkpoint 的完整推理目录，再传 `--model`。不使用基模替代。
+
+在同时可见 `/data_103` 和 `/data` 的 H200 容器中执行，GPU 编号按实际分配修改：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/eval_casablanca_morocco_wer.py --check
+python -B scripts/eval_casablanca_morocco_wer.py --gpu 4
+```
+
+`--check` 只核验本地 checkpoint 结构、模型/分片文件元数据、Parquet 字段和实际行数，
+不加载模型或占 GPU。正式评测使用 qwen-asr、Torch、PyArrow、SoundFile 和 jiwer 4，
+默认 BF16、自动语言识别、batch 4 和最多 512 个生成 token，参考文本仅用于评分。
+两份分片逐条计分，读音频或参考失败时中止。主指标
+`wer.normalized.wer_percent` 按全语料的总编辑错误除以参考词数。两侧对称做 NFC、
+大小写、阿语标音和标点归一化，保留阿语字母差别、混说词和数字。同时输出
+`wer.raw.wer_percent` 供核对；这是项目评分口径。
+
+运行有阶段、实际条数和周期活动日志。默认每次新建
+`outputs/casablanca_morocco_wer_*`，指定 `--output-dir` 时也必须是新目录。
+中断后可在新目录重跑，无续跑。成功时只需回传小文件 `report.json`，
+完整 `predictions.jsonl` 留工区。本地使用模拟转写验证读取和评分，工区 WER 待运行。
+
 ## 0.206 2026-11-05 中英阿 v1.0 共享发音表，埃及口语参考（仅资产）
 
 用户要求只交付发音单位和逐来源映射，阿语偏埃及方言。新表独立于现有英西葡资产：
