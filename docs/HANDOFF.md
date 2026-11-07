@@ -1,5 +1,33 @@
 # 工作交接记录
 
+## 0.209 2026-11-08 中英阿 v1.1 MFA G2P 输出表
+
+用户要求另出全 MFA G2P 的一版，阿语暂按官方历史 GlobalPhone G2P。新增
+`configs/phonemes/zh_en_ar_mfa_g2p_vocab.v1.1.json` 和
+`configs/phonemes/zh_en_ar_mfa_g2p_mapping.v1.1.tsv`。
+[说明及英语符号表导出方法](ZH_EN_AR_MFA_G2P_VOCAB_V1_1.md)。
+普通话 3.0.0 有 134 个发音单位，美式英语 3.3.0 有 70 个，阿语 2.0.0 有 42 个。
+中英共享 29 个 IPA 单位，阿语 GlobalPhone 标签带 `ar_gp:` 前缀单独编号。总计 219 类，
+含 CTC blank/unk。旧 v1.0 仍为埃及口语参考，v1.1 使用独立 ID。
+
+英语 FST 内嵌符号表和外置文件不同。外置输入有 324 项同编号不匹配，输出有 31 项，
+且缺少嵌入的 `m̩`。同一快照的 `.txt` 与内嵌表导出结果逐字节相同，既有英西葡 v0.3
+固定的是 `.txt`。打标使用这两份 `.txt` 或内嵌表。
+三套真实 FST 全部输出弧和九个词的重写映射已核验。阿语测试输入为 GlobalPhone 罗马化，
+实际原始阿文训练集接入与标签质量尚待验证。JSON SHA256
+`bafc1fbb50f5c370c00ec92092e7c2166a136479c8f44aefc25ba157d7be1f19`，TSV SHA256
+`d5121e8cf1784d382130639050371545ebe7515bd7f2c19e82e8fa1be6309a47`。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B -m pytest tests/test_zh_en_ar_mfa_g2p_vocab.py
+sha256sum configs/phonemes/zh_en_ar_mfa_g2p_{vocab,mapping}.v1.1.*
+```
+
+本节点只同步和核验小资产，无训练或推理输出目录、续跑步骤、回传文件。
+
 ## 0.208 2026-11-05 Casablanca WER 支持直接加载 PEFT LoRA
 
 工区预检发现 `checkpoint-4900/adapter_config.json`，确认该目录是 PEFT adapter。
