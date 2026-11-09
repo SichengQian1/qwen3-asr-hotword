@@ -62,8 +62,16 @@ def run_multilingual_stream(
         raise ValueError("explicit same-step or next-step required")
     if output.exists() and not resume and not audit_only:
         raise FileExistsError(f"output exists; --resume only for identical inputs: {output}")
+    cfg = _json(config)
     with stage_progress("Verify all three languages, frozen targets and noisy inputs"):
-        plan, runtime = prepare_multilingual_stream(root, config)
+        if "new70_source" in cfg:
+            from qwen_hotword.evaluation.multilingual_stream_new70 import prepare_new70_stream
+
+            if effect != "same-step":
+                raise ValueError("new70 delivery uses the previous same-step timing contract")
+            plan, runtime = prepare_new70_stream(root, config)
+        else:
+            plan, runtime = prepare_multilingual_stream(root, config)
     plan.update(stage="full", effect=effect)
     for filename in plan["inputs"]:
         path = Path(filename)
@@ -78,6 +86,7 @@ def run_multilingual_stream(
         "prefix_count": plan["prefix_count"],
         "checkpoint_sha256": plan["checkpoint"]["sha256"],
         "model_loaded": False,
+        **plan.get("delivery_asset_identity", {}),
     }
     if audit_only:
         return audited
@@ -180,13 +189,14 @@ def run_multilingual_stream(
                 "qwen_decoder_used": False,
                 "word_timestamps_available": False,
                 "output_dir": str(output),
+                **plan.get("delivery_asset_identity", {}),
             }
             report = {
                 **summary,
                 "by_dataset": metrics["by_dataset"],
                 "code_sha256": plan["code_sha256"],
                 "audio_pairing": plan["audio_pairing"],
-                "candidate_pool_surfaces": len(runtime["bundle"].entries),
+                "candidate_pool_surfaces": len({e.normalized for e in runtime["variants"]}),
                 "candidate_pronunciations": len(runtime["variants"]),
                 "causality_checked": True,
                 "snr_verified": False,

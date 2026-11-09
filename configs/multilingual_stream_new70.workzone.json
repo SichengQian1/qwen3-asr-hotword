@@ -1,0 +1,16 @@
+{
+  "source_stream": "outputs/multilingual_stream_contexts_ep27_noise10db_v1/full_same-step",
+  "source_run_config_sha256": "47134f2d4489a260ea2bdeb8a7d120b0b4e0658ff687335952846ebe20224743",
+  "new70_source": "outputs/mfa_v03_noise70_scratch_v1",
+  "checkpoint_sha256": "a6eba051856dbe4c7ac793dd237c06b7f98cd951a76199f57ee3b84c57483229",
+  "index_sha256": "b478451da20fc15d99fed4f3da99f4164cdc8d266e29d05f2b08c4de80d4a98d",
+  "vocab": "configs/phonemes/en_es_ptbr_precision_ipa_vocab.v0.3.json",
+  "vocab_sha256": "59fbac2f4d7251056f63b30597a8ab4fd4ae7e2a1801a2c527e680e6fdaaec7f",
+  "dataset_counts": {"en": 6000, "es": 400, "pt": 400},
+  "prefix_count": 26354,
+  "declared_surfaces": 4000,
+  "active_surfaces": 3986,
+  "pronunciations": 3998,
+  "output_root": "outputs/multilingual_stream_contexts_v03_new70_noise10db_v1",
+  "full_run_authorization": "user_requested_new70_delivery_2026-11-09"
+}

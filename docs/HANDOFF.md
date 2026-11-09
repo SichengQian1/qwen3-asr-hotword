@@ -1,5 +1,36 @@
 # 工作交接记录
 
+## 0.210 2026-11-09 v0.3 new70 三语 6800 条 Context Learning 交付（待工区运行）
+
+复用 0.174 已完成 same-step 的带噪音频清单、11 个数据集键、门限、参考及目标分母。
+按新 100 类 Head、v0.3 音素表、3986 有效词面/3998 条新发音重跑 26,354 个累计前缀。
+4000 个原词面仍用于归并和评测，14 个未激活词面按原目标计量。入口固定旧 run_config
+SHA、当前三件套 SHA、样本音频 SHA 和当前执行代码，沿用 Top5/7 共用排序、逐前缀
+恢复及下游格式校验。工区运行报告记录实际结果，当前只有本地验证。
+
+分支 `codex/g2p-coverage-scan`。工区在已有 Qwen 环境执行，GPU4 为示例。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_multilingual_stream.py \
+  --config configs/multilingual_stream_new70.workzone.json \
+  --effect same-step --gpu 4
+```
+
+独立输出 `outputs/multilingual_stream_contexts_v03_new70_noise10db_v1/full_same-step`。
+中断后同一命令加 `--resume`，输入和运行身份一致时复用已完成前缀。可加 `--audit-only`
+执行 CPU 预检。完成后在输出根目录用 `sha256sum --quiet -c sha256.txt` 核验。
+`delivery/` 下的 `stream_contexts.json`、`durations.json`、`audio_manifest.json` 交下游。
+回传终端 `terminal_summary.json` 或根目录 `summary_bundle.zip` 即可。
+
+同事说明见 [Context Learning 交付与新版 MFA](CONTEXT_LEARNING_V03_DELIVERY.md)，含固定
+G2P 版本 EN 3.3.0 / ES 3.2.0 / PT 3.4.3、实际 MFA 软件 3.4.0 和可复制的 CPU Top1
+命令。三件套路径继续查 0.205。相关本地测试 36 项通过，含真实小 WAV、模拟检索的
+新入口及原流式回归，Ruff、相关 Mypy、文档命令语法及空白检查通过。新的 runner
+代码身份会使旧封存任务的严格恢复拒绝，旧交付可直接按原 SHA 校验和使用。
+
 ## 0.209 2026-11-08 中英阿 v1.1 MFA G2P 输出表
 
 用户要求另出全 MFA G2P 的一版，阿语暂按官方历史 GlobalPhone G2P。新增
