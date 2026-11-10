@@ -1,5 +1,48 @@
 # 工作交接记录
 
+## 0.212 2026-11-10 英阿 CTC 新训练集来源预检（待工区运行）
+
+目标是制作新版英阿 CTC 训练集。使用 0.211 的独立 114 类词表。
+英语优先埃及口音英语，缺口使用 0.125 原美式英语冻结训练池。
+阿语优先四份 Gaoshan 埃及口语，缺口使用四份 MSA 来源。实际清单及已知路径
+别名固定在 `configs/en_ar_training_sources.workzone.json`。原美式 donor 只接收
+`en-US/train` 行，正式冻结前另核验 0.125 的清单 SHA。每语 480 小时沿用为规划值，
+实际可用容量以打标和隔离后的统计为准。
+
+分支 `codex/g2p-coverage-scan`，在工区现有 Qwen 环境执行 CPU 预检。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/audit_en_ar_training_sources.py --check
+```
+
+每份输入最多读 32 行。核对格式和挂载后，执行全量清单与音频头盘点。
+
+```bash
+python -B scripts/audit_en_ar_training_sources.py --audit
+```
+
+原音频路径优先，旧 `/home_92` 仅在对应 `/host_home` 文件存在时回退。
+`/data_91` 没有默认别名，工区确认实际挂载后可追加
+`--audio-fallback /data_91=/实际挂载根`。Swift 原始参考取 `response` 的 ASR 标签后
+文本，同时核对 `messages`，仅标点或空白差异单独计数。全量结果报告头部时长、
+结构通过条数、差异原因与示例，按来源实时打印已扫描条数与耗时。小时数尚未经过
+去重、留出隔离、音素覆盖及 CTC 长度校验。只查音频头，不解码、不扫描完整 WAV
+指纹、不加载 GPU 模型。
+
+默认每次新建 `outputs/en_ar_training_source_audit_*`，显式目录也必须不存在。
+中断后重新执行会建新目录。回传小文件 `report.json` 和可分享的 `samples.json`，
+用 `jq '.mode, .status, .sources[]' "$OUT/report.json"` 核验每份输入状态，
+`OUT` 取终端打印的本次目录。完整 `source_inventory.jsonl` 留在工区。
+本地小 WAV 验证了路径回退、JSON 数组和 JSONL、阿语标点/文本差异和预检行数上限。
+
+下一步先分别试标埃及口语和 MSA，确认原文到 GlobalPhone 输入的转写、补标音、
+输出映射和埃及语音的实际一致性。通过后才全量制词典及句级标签，按来源统计覆盖、
+OOV 和 CTC 可对齐性。先隔离验证集与测试集、再去重并按来源优先级填充有效训练
+时长，最后冻结 train/validation 清单和输入身份。当前没有生成正式训练标签或清单。
+
 ## 0.211 2026-11-10 独立英阿 MFA G2P 音素表 v1.0
 
 用户要求保留中英阿表，另交英阿表。新增

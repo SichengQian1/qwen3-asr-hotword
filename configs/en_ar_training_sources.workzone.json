@@ -1,0 +1,20 @@
+{
+  "swift_root": "/data/h00911716/code/ms-swift/self_test/datalist",
+  "groups": {
+    "en_egy": ["en/swift-en-egy-train.json"],
+    "ar_egy": [
+      "ar_with_punc/egy/egy_all_without_langtag/gaoshan/train/swift-egy-gaoshan-100-0903.json",
+      "ar_with_punc/egy/egy_all_without_langtag/gaoshan/train/swift-egy-gaoshan-40h-0909.json",
+      "ar_with_punc/egy/egy_all_without_langtag/gaoshan/train/swift-egy-gaoshan-44h-0914.json",
+      "ar_with_punc/egy/egy_all_without_langtag/gaoshan/train/swift-egy-gaoshan-62h-0922.json"
+    ],
+    "ar_msa": [
+      "ar_with_punc/msa/train/swift-msa-Arabic_Broadcast_News_Speech_10h.json",
+      "ar_with_punc/msa/train/swift-msa-MGB2-1200h.json",
+      "ar_with_punc/msa/train/swift-msa-biaobei-msa-200h.json",
+      "ar_with_punc/msa/train/swift-msa-ldc-msa-800h.json"
+    ]
+  },
+  "us_donor": "outputs/multilingual_480h_training_v2_a48f58e452/full_ctc_train_en.jsonl",
+  "audio_fallbacks": {"/home_92": "/host_home"}
+}
