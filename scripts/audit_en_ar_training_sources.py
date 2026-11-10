@@ -14,12 +14,17 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from qwen_hotword.training.en_ar_source_audit import audit
 
+SWIFT_GROUPS = ("en_egy", "ar_egy", "ar_msa")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="at most 32 rows per source")
     mode.add_argument("--audit", action="store_true", help="check every audio header")
+    parser.add_argument(
+        "--group", choices=(*SWIFT_GROUPS, "en_us_donor"), help="audit only this group"
+    )
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("--audio-fallback", action="append", default=[], metavar="OLD=NEW")
     parser.add_argument("--output-dir", type=Path, help="new output directory")
@@ -43,10 +48,12 @@ def main() -> int:
     swift = Path(config["swift_root"])
     sources = [
         (group, swift / relative)
-        for group in ("en_egy", "ar_egy", "ar_msa")
+        for group in SWIFT_GROUPS
+        if args.group in (None, group)
         for relative in config["groups"][group]
     ]
-    sources.append(("en_us_donor", ROOT / config["us_donor"]))
+    if args.group in (None, "en_us_donor"):
+        sources.append(("en_us_donor", ROOT / config["us_donor"]))
     run_name = f"en_ar_training_source_audit_{uuid4().hex[:8]}"
     output = args.output_dir or ROOT / "outputs" / run_name
     try:

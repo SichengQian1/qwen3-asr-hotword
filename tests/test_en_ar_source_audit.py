@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import wave
 from pathlib import Path
 from typing import Any
@@ -94,3 +96,50 @@ def test_probe_limits_reads_and_full_audit_reports_malformed_source(tmp_path: Pa
     full = audit(sources, {}, tmp_path / "full", limit=None, workers=1)
     assert full["status"] == "review"
     assert "invalid JSONL" in full["sources"][0]["error"]
+
+
+def test_cli_audits_only_the_selected_group(tmp_path: Path) -> None:
+    audio = tmp_path / "test.wav"
+    write_wav(audio)
+    filenames = [f"egy_{index}.json" for index in range(4)]
+    for name in filenames:
+        (tmp_path / name).write_text(
+            json.dumps([swift_row(audio, "صباح الخير", "صباح الخير")]), encoding="utf-8"
+        )
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "swift_root": str(tmp_path),
+                "groups": {
+                    "ar_egy": filenames,
+                    "en_egy": ["missing_en.json"],
+                    "ar_msa": ["missing_msa.json"],
+                },
+                "us_donor": str(tmp_path / "missing_donor.jsonl"),
+                "audio_fallbacks": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_en_ar_training_sources.py"
+    subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--audit",
+            "--group",
+            "ar_egy",
+            "--config",
+            str(config),
+            "--output-dir",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["mode"] == "full_header_audit"
+    assert [Path(row["path"]).name for row in report["sources"]] == filenames
+    assert [row["readable_headers"] for row in report["sources"]] == [1] * 4
