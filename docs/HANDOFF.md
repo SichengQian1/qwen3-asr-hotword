@@ -25,7 +25,7 @@ python -B scripts/run_multilingual_stream.py \
 `delivery/` 下的 `stream_contexts.json`、`durations.json`、`audio_manifest.json` 交下游。
 回传终端 `terminal_summary.json` 或根目录 `summary_bundle.zip` 即可。
 
-同事说明见 [Context Learning 交付与新版 MFA](CONTEXT_LEARNING_V03_DELIVERY.md)，含固定
+同事说明见 [三语 MFA G2P 使用说明](CONTEXT_LEARNING_V03_DELIVERY.md)，含固定
 G2P 版本 EN 3.3.0 / ES 3.2.0 / PT 3.4.3、实际 MFA 软件 3.4.0 和可复制的 CPU Top1
 命令。三件套路径继续查 0.205。相关本地测试 36 项通过，含真实小 WAV、模拟检索的
 新入口及原流式回归，Ruff、相关 Mypy、文档命令语法及空白检查通过。新的 runner
