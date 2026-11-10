@@ -12,12 +12,14 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from collections import Counter, defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Set
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -30,6 +32,9 @@ from qwen_hotword.training.experiment_a import (
     read_audio_metadata,
 )
 from qwen_hotword.training.stage_progress import stage_progress
+
+if TYPE_CHECKING:
+    from qwen_hotword.training.sharded_ctc import DiskFeatureCache
 
 VOCAB = ROOT / "configs/phonemes/en_ar_mfa_g2p_vocab.v1.0.json"
 MAPPING = ROOT / "configs/phonemes/en_ar_mfa_g2p_mapping.v1.0.tsv"
@@ -196,37 +201,50 @@ def source_records(inventories: dict[str, Path]) -> Iterator[dict[str, Any]]:
 def freeze(
     output: Path,
     inventories: dict[str, Path],
-    english: Path,
-    arabic: Path,
+    english: Path | None,
+    arabic: Path | None,
     train_hours: float,
+    *,
+    protected_audio: Set[str] = frozenset(),
 ) -> dict[str, Any]:
     from qwen_hotword.training.mfa_round_common import read, words
     from qwen_hotword.training.mfa_round_labels import top1_tokens
 
-    en = read(english)
-    if (
-        en["status"] != "english_g2p_completed"
-        or en["vocab_sha256"] != VOCAB_SHA
-        or en["donor_sha256"] != DONOR_SHA
-        or en["inventory_sha256"] != sha(inventories["en_egy"])
-    ):
-        raise ValueError("English G2P is not from this source inventory and vocabulary")
+    en = {}
+    if english is not None:
+        en = read(english)
+        if (
+            en["status"] != "english_g2p_completed"
+            or en["vocab_sha256"] != VOCAB_SHA
+            or en["donor_sha256"] != DONOR_SHA
+            or en["inventory_sha256"] != sha(inventories["en_egy"])
+        ):
+            raise ValueError("English G2P is not from this source inventory and vocabulary")
     ar: dict[tuple[str, int], dict[str, Any]] = {}
-    for row in iter_jsonl(arabic):
-        key = (row["source"], row["row"])
-        if key in ar:
-            raise ValueError("duplicate source/row in Arabic romanization input")
-        ar[key] = row
+    if arabic is not None:
+        for row in iter_jsonl(arabic):
+            key = (row["source"], row["row"])
+            if key in ar:
+                raise ValueError("duplicate source/row in Arabic romanization input")
+            ar[key] = row
+    languages = [lang for lang, path in (("en", english), ("ar", arabic)) if path is not None]
+    if not languages:
+        raise ValueError("at least one language is required")
+    selected_sources = {
+        group: path for group, path in inventories.items() if group[:2] in languages
+    }
+    validation_hours = {group: VALIDATION_HOURS[group] for group in selected_sources}
     hours: dict[tuple[str, str], float] = defaultdict(float)
     counts: Counter[tuple[str, str]] = Counter()
+    frame_totals: Counter[str] = Counter()
     rejections: Counter[str] = Counter()
-    seen: set[str] = set()
+    seen = set(protected_audio)
     with ExitStack() as stack:
         files = {
             split: stack.enter_context((output / f"{split}.jsonl").open("x", encoding="utf-8"))
             for split in ("train", "validation")
         }
-        for row in source_records(inventories):
+        for row in source_records(selected_sources):
             group = row["group"]
             lang = group[:2]
             val_goal = VALIDATION_HOURS[group]
@@ -287,6 +305,7 @@ def freeze(
             seen.add(fingerprint)
             hours[key] += seconds / 3600
             counts[(split, group)] += 1
+            frame_totals[split] += encoder_frames
             manifest_row = {
                 "id": f"en-ar-v1-{fingerprint}",
                 "audio_path": str(path),
@@ -305,115 +324,269 @@ def freeze(
                 "experiment": "full-ctc-v1",
             }
             files[split].write(json.dumps(manifest_row, ensure_ascii=False) + "\n")
-    capacity = all(hours[("train", lang)] >= train_hours for lang in ("en", "ar")) and all(
-        hours[("validation", group)] >= goal for group, goal in VALIDATION_HOURS.items()
+    capacity = all(hours[("train", lang)] >= train_hours for lang in languages) and all(
+        hours[("validation", group)] >= goal for group, goal in validation_hours.items()
     )
     return {
         "status": "labels_complete" if capacity else "insufficient_labeled_hours",
+        "languages": languages,
+        "vocab_sha256": VOCAB_SHA,
         "train_target_hours_per_language": train_hours,
-        "validation_target_hours": VALIDATION_HOURS,
+        "validation_target_hours": validation_hours,
         "hours": {"/".join(key): value for key, value in hours.items()},
         "rows_by_group": {"/".join(key): value for key, value in counts.items()},
+        "estimated_encoder_frames": frame_totals,
         "rejections": rejections,
         "train_manifest_sha256": sha(output / "train.jsonl"),
         "validation_manifest_sha256": sha(output / "validation.jsonl"),
-        "arabic_label_policy": "externally_supplied_romanizations_official_mfa_top1",
+        "arabic_label_policy": (
+            "externally_supplied_romanizations_official_mfa_top1" if arabic is not None else None
+        ),
         "split_identity": "exact_file_sha256",
         "speaker_disjoint_verified": False,
     }
 
 
-def gpu_stages(output: Path, gpu: int) -> None:
-    environment = {
-        **os.environ,
-        "CUDA_VISIBLE_DEVICES": str(gpu),
-        "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
-    }
+def wait_for_english(path: Path, pid: int) -> None:
+    with stage_progress(f"Wait for running English MFA PID {pid}"):
+        while not path.is_file():
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError as error:
+                if path.is_file():
+                    return
+                raise ValueError(f"English MFA exited without publishing {path}") from error
+            proc = Path(f"/proc/{pid}")
+            stat = proc / "stat"
+            if stat.is_file():
+                try:
+                    state = stat.read_text().rsplit(")", 1)[-1].split()[0]
+                    command = (proc / "cmdline").read_bytes().split(b"\0")
+                except FileNotFoundError:
+                    continue
+                if path.is_file():
+                    return
+                if state == "Z":
+                    raise ValueError(f"English MFA exited without publishing {path}")
+                if b"prepare-en" not in command:
+                    raise ValueError(f"PID {pid} is no longer the English MFA process")
+            time.sleep(5)
+
+
+def frozen_english_audio(output: Path, train_hours: float) -> set[str]:
+    from qwen_hotword.training.mfa_round_common import read
+
+    report = read(output / "label_report.json")
+    if (
+        report.get("status") != "labels_complete"
+        or report.get("languages") != ["en"]
+        or report.get("vocab_sha256") != VOCAB_SHA
+        or report.get("train_target_hours_per_language") != train_hours
+    ):
+        raise ValueError(f"incompatible frozen English labels: {output}")
+    seen: set[str] = set()
+    with stage_progress("Verify frozen English manifests and protected audio"):
+        for split in ("train", "validation"):
+            manifest = output / f"{split}.jsonl"
+            pin(manifest, report[f"{split}_manifest_sha256"])
+            for row in iter_jsonl(manifest):
+                identity = row["audio_sha256"]
+                if row["language"] != "en" or row["split"] != split or identity in seen:
+                    raise ValueError("invalid or duplicate frozen English audio identity")
+                seen.add(identity)
+    return seen
+
+
+def cache_stage(output: Path, gpu: int, report: dict[str, Any]) -> None:
     cache = output / "cache"
-    manifests = [
+    if not cache.exists():
+        estimated = sum(report["estimated_encoder_frames"].values()) * 1024 * 2
+        minimum_free = math.ceil(1.15 * estimated) + 2 * 1024**3
+        free = shutil.disk_usage(output).free
+        if free < minimum_free:
+            raise ValueError(
+                f"insufficient space for feature cache at {output}: "
+                f"{free / 1024**3:.1f} GiB available, need about {minimum_free / 1024**3:.1f} GiB"
+            )
+    command = [
+        sys.executable,
+        "-B",
+        str(ROOT / "scripts/cache_full_training_features.py"),
+        "--config",
+        str(ROOT / "configs/480h_cache.workzone.yaml"),
         "--train-manifest",
         str(output / "train.jsonl"),
         "--validation-manifest",
         str(output / "validation.jsonl"),
         "--vocab",
         str(VOCAB),
+        "--output-dir",
+        str(cache),
+        "--prevalidated-audio-paths",
     ]
-    for script, extra, stage in (
-        (
-            "cache_full_training_features.py",
-            [
-                "--config",
-                str(ROOT / "configs/480h_cache.workzone.yaml"),
-                "--output-dir",
-                str(cache),
-                "--prevalidated-audio-paths",
-            ],
-            "Cache frozen Qwen Encoder features",
-        ),
-        (
-            "train_full_ctc.py",
-            [
-                "--train-cache",
-                str(cache / "train"),
-                "--validation-cache",
-                str(cache / "validation"),
-                "--output-dir",
-                str(output / "head"),
-                "--head-type",
-                "temporal_upsample",
-                "--epochs",
-                "40",
-                "--early-stopping-min-delta",
-                "0.0005",
-                "--learning-rate",
-                "0.0003",
-                "--minimum-learning-rate",
-                "0.000005",
-                "--validation-group-column",
-                "language",
-                "--expected-validation-groups",
-                "en,ar",
-                "--early-stopping-metric",
-                "validation_macro_per",
-                "--checkpoint-selection-metric",
-                "validation_macro_per",
-            ],
-            "Train new 114-class Head",
-        ),
+    for split in ("train", "validation"):
+        count = sum(
+            n for group, n in report["rows_by_group"].items() if group.startswith(split + "/")
+        )
+        command.extend([f"--expected-{split}-samples", str(count)])
+    with stage_progress("Cache full frozen Qwen Encoder features"):
+        subprocess.run(
+            command,
+            check=True,
+            env={
+                **os.environ,
+                "CUDA_VISIBLE_DEVICES": str(gpu),
+                "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+            },
+        )
+
+
+def combine_caches(parts: list[DiskFeatureCache], output: Path) -> DiskFeatureCache:
+    if len(parts) == 1:
+        return parts[0]
+    first = parts[0]
+    if any(
+        p.split != first.split
+        or p.encoder_frozen_parameters != first.encoder_frozen_parameters
+        or p.ctc_time_upsampling_factor != first.ctc_time_upsampling_factor
+        or not p.sha256_verified
+        for p in parts
     ):
-        with stage_progress(stage):
-            subprocess.run(
-                [sys.executable, "-B", str(ROOT / "scripts" / script), *manifests, *extra],
-                check=True,
-                env=environment,
-            )
+        raise ValueError("incompatible feature cache views")
+    shards = tuple(shard for part in parts for shard in part.shards)
+    ids = [sample for shard in shards for sample in shard.sample_ids]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate audio across the combined feature caches")
+    return replace(
+        first,
+        root=output / "cache_views" / first.split,
+        sample_count=len(ids),
+        shard_count=len(shards),
+        feature_bytes=sum(shard.feature_bytes for shard in shards),
+        fingerprint=hashlib.sha256(
+            "".join(part.fingerprint for part in parts).encode()
+        ).hexdigest(),
+        shards=shards,
+    )
+
+
+def train_stage(output: Path, gpu: int, english: Path | None) -> None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    import torch
+
+    from qwen_hotword.phonemes.coverage import load_phoneme_vocab
+    from qwen_hotword.training.ctc_diagnostics import load_validation_sample_groups
+    from qwen_hotword.training.mfa_round_common import read
+    from qwen_hotword.training.sharded_ctc import (
+        exclusive_training_run,
+        load_disk_feature_cache,
+        train_sharded_ctc_head,
+    )
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is unavailable on the requested physical GPU")
+    roots = [output] if english is None else [english, output]
+    views = {}
+    groups: dict[str, str] = {}
+    encoder_identity: dict[str, Any] | None = None
+    with stage_progress("Verify feature shard SHA256 and Encoder identity before training"):
+        for split in ("train", "validation"):
+            parts = []
+            for root in roots:
+                cache = root / "cache" / split
+                manifest = root / f"{split}.jsonl"
+                config = read(cache / "cache_config.json")
+                current = {
+                    k: config[k] for k in ("model", "tap_module", "hidden_size", "feature_dtype")
+                }
+                if encoder_identity is not None and current != encoder_identity:
+                    raise ValueError(
+                        "English and Arabic features have different Encoder identities"
+                    )
+                encoder_identity = current
+                part = load_disk_feature_cache(
+                    cache, expected_split=split, source_manifest_path=manifest, vocab_path=VOCAB
+                )
+                parts.append(part)
+                if split == "validation":
+                    groups.update(
+                        load_validation_sample_groups(manifest, part, group_column="language")
+                    )
+            views[split] = combine_caches(parts, output)
+    train_ids = {value for shard in views["train"].shards for value in shard.sample_ids}
+    if set(groups.values()) != {"en", "ar"} or train_ids.intersection(groups):
+        raise ValueError("combined train/validation isolation or bilingual coverage failed")
+    write_json(
+        output / "cache_sources.json",
+        {
+            "reused_english_output": str(english) if english else None,
+            "train_fingerprint": views["train"].fingerprint,
+            "validation_fingerprint": views["validation"].fingerprint,
+            "encoder_identity": encoder_identity,
+        },
+    )
+    head = output / "head"
+    with exclusive_training_run(head), stage_progress("Train new 114-class Head"):
+        train_sharded_ctc_head(
+            views["train"],
+            views["validation"],
+            load_phoneme_vocab(VOCAB),
+            head,
+            vocab_path=VOCAB,
+            device="cuda:0",
+            head_type="temporal_upsample",
+            epochs=40,
+            early_stopping_min_delta=0.0005,
+            learning_rate=0.0003,
+            minimum_learning_rate=0.000005,
+            validation_sample_groups=groups,
+            early_stopping_metric="validation_macro_per",
+            checkpoint_selection_metric="validation_macro_per",
+        )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare-en", "all", "_arabic-worker"))
+    parser.add_argument("action", choices=("prepare-en", "cache-en", "all", "_arabic-worker"))
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--english-g2p", type=Path)
+    parser.add_argument("--english-cache", type=Path, help="completed cache-en output for all")
+    parser.add_argument("--wait-for-english-pid", type=int)
+    parser.add_argument("--resume", action="store_true", help="resume existing cache-en shards")
     parser.add_argument("--arabic-romanizations", type=Path)
     parser.add_argument("--arabic-model", type=Path, default=ROOT / "models/mfa/g2p/arabic_g2p.zip")
     parser.add_argument("--train-hours", type=float, default=480)
     args = parser.parse_args()
     output = args.output_dir.resolve()
-    if args.action != "prepare-en":
-        if args.arabic_romanizations is None or not args.arabic_romanizations.is_file():
-            parser.error("an Arabic romanization JSONL is required")
-        if args.action == "all" and (
-            args.gpu is None
-            or args.gpu < 0
-            or not math.isfinite(args.train_hours)
-            or args.train_hours <= 0
-        ):
-            parser.error("all requires --gpu N and positive --train-hours")
+    if args.action in {"all", "_arabic-worker"} and (
+        args.arabic_romanizations is None or not args.arabic_romanizations.is_file()
+    ):
+        parser.error("an Arabic romanization JSONL is required")
+    if args.action in {"all", "cache-en"} and (
+        args.gpu is None
+        or args.gpu < 0
+        or not math.isfinite(args.train_hours)
+        or args.train_hours <= 0
+    ):
+        parser.error("GPU actions require --gpu N and positive --train-hours")
+    if args.resume and args.action != "cache-en":
+        parser.error("--resume applies only to cache-en")
+    if args.wait_for_english_pid is not None and (
+        args.action != "cache-en"
+        or args.english_g2p is None
+        or args.wait_for_english_pid <= 0
+        or args.resume
+    ):
+        parser.error("waiting requires new cache-en, --english-g2p and a positive PID")
+    if args.english_cache is not None and (args.action != "all" or args.english_g2p is not None):
+        parser.error("--english-cache is for all and replaces --english-g2p")
     try:
         pin(VOCAB, VOCAB_SHA)
         pin(MAPPING, MAPPING_SHA)
-        output.mkdir(parents=True, exist_ok=False)
+        if not args.resume:
+            output.mkdir(parents=True, exist_ok=False)
         print(f"Output directory: {output}", flush=True)
         if args.action == "_arabic-worker":
             arabic_g2p(args.arabic_model, args.arabic_romanizations, output)
@@ -423,6 +596,29 @@ def main() -> int:
             path = prepare_english(ROOT, inventories, output)
             print(json.dumps({"status": "english_g2p_completed", "english_g2p": str(path)}))
             return 0
+        if args.action == "cache-en":
+            if args.resume:
+                frozen_english_audio(output, args.train_hours)
+                report = json.loads((output / "label_report.json").read_text(encoding="utf-8"))
+            else:
+                if args.wait_for_english_pid is not None:
+                    wait_for_english(args.english_g2p, args.wait_for_english_pid)
+                english = args.english_g2p or prepare_english(ROOT, inventories, output)
+                report = freeze(output, inventories, english, None, args.train_hours)
+                write_json(output / "label_report.json", report)
+                print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+            if report["status"] != "labels_complete":
+                return 2
+            cache_stage(output, args.gpu, report)
+            print(json.dumps({"status": "english_cache_completed", "output_dir": str(output)}))
+            return 0
+        english_cache = args.english_cache.resolve() if args.english_cache else None
+        protected: set[str] = set()
+        if english_cache is not None:
+            cache_report = english_cache / "cache/feature_cache_report.json"
+            if json.loads(cache_report.read_text(encoding="utf-8")).get("status") != "pass":
+                raise ValueError(f"incomplete English feature cache: {english_cache}")
+            protected = frozen_english_audio(english_cache, args.train_hours)
         conda = shutil.which("conda")
         if conda is None:
             raise ValueError("existing aligner Conda environment required")
@@ -448,15 +644,23 @@ def main() -> int:
                 ],
                 check=True,
             )
-        english = args.english_g2p or prepare_english(ROOT, inventories, output)
+        english = None
+        if english_cache is None:
+            english = args.english_g2p or prepare_english(ROOT, inventories, output)
         report = freeze(
-            output, inventories, english, arabic / "arabic_labels.jsonl", args.train_hours
+            output,
+            inventories,
+            english,
+            arabic / "arabic_labels.jsonl",
+            args.train_hours,
+            protected_audio=protected,
         )
         write_json(output / "label_report.json", report)
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         if report["status"] != "labels_complete":
             return 2
-        gpu_stages(output, args.gpu)
+        cache_stage(output, args.gpu, report)
+        train_stage(output, args.gpu, english_cache)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:
         print(
             json.dumps({"status": "failed", "error": str(error)}, ensure_ascii=False),

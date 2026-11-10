@@ -22,6 +22,23 @@ donor SHA，按 2000 词分片用四个 CPU worker 产出新英阿 ID。词级�
 `english_g2p.json` 留工区复用，只回传 `english_g2p_report.json`。这个命令不做
 句级冻结、Encoder 缓存或训练。
 
+用户随后明确英语也要全量提 Encoder。新增 `cache-en`，复用现有英语 G2P，
+完成约 480h 英语训练及约 4h 埃及口音英语验证的清单冻结，然后缓存两套全量特征。
+语料选样仍按完整音频 SHA256 去重和分流，终端显示实际扫描行数和缓存分片。
+已有词级任务仍在跑时，可以将其 PID 交给 `--wait-for-english-pid`。它会等原任务
+发布完整发音表，再继续执行。已完成时可省略等待参数。
+
+```bash
+python -B scripts/run_en_ar_training.py cache-en --gpu 4 \
+  --english-g2p outputs/en_ar_english_g2p_v1/english_g2p.json \
+  --output-dir outputs/en_ar_english_encoder_v1
+```
+
+在 `label_report.json` 已生成且标签通过后，缓存若中断，同一目录执行
+`cache-en --gpu 4 --output-dir outputs/en_ar_english_encoder_v1 --resume`，
+将核验已冻结清单与已完成分片，跳过重新打标。英语缓存完成后回传
+`label_report.json` 和 `cache/feature_cache_report.json`。
+
 具备真实阿语候选后用同一入口的 `all`。阿语 JSONL 每行含 `group`（`ar_egy` /
 `ar_msa`）、`source`（盘点原绝对清单路径）、`row`、原 `text` 和对应 ASCII
 `romanized`。需提供固定 SHA 的阿语 zip，默认 `models/mfa/g2p/arabic_g2p.zip`。
@@ -29,9 +46,13 @@ donor SHA，按 2000 词分片用四个 CPU worker 产出新英阿 ID。词级�
 ```bash
 python -B scripts/run_en_ar_training.py all --gpu 4 \
   --output-dir outputs/en_ar_ctc_overnight_v1 \
-  --english-g2p outputs/en_ar_english_g2p_v1/english_g2p.json \
+  --english-cache outputs/en_ar_english_encoder_v1 \
   --arabic-romanizations /工区路径/arabic_romanizations.jsonl
 ```
+
+使用 `--english-cache` 后只补算阿语特征，并在训练前核验两路分片 SHA256、
+Encoder 和词表身份，按引用合并，无需复制或重提英语缓存。也可改用
+`--english-g2p` 让 `all` 一次缓存双语。
 
 通过新标签、CTC 长度、精确音频字节隔离和时长检查后才缓存冻结 Encoder 并训练。
 训练每语默认 480h，英语优先埃及口音再美式，阿语优先埃及口语再补充池。验证目标为
@@ -40,8 +61,8 @@ python -B scripts/run_en_ar_training.py all --gpu 4 \
 Temporal 2x、hidden 512、kernel 5、dropout 0.1、batch 256、最多 40 轮、LR 3e-4、
 最低 5e-6、早停改善 0.0005，按英阿 macro PER 选模。PER 是对自动参考标签的拟合指标。
 不读 test，不运行 ASR 或检索。完成后回传 `label_report.json` 和 `head/report.json`。
-每次必须指定新目录，整条封装暂不支持恢复。旧目录不覆盖；已成功的英语词表可
-在新目录中复用。工区缓存与训练尚待实跑。
+新任务必须指定新目录，`all` 的整条封装暂不支持恢复。旧目录不覆盖；已成功的英语
+词表和缓存可在新目录中复用。工区缓存与训练尚待实跑。
 
 ## 0.212 2026-11-10 英阿 CTC 新训练集来源预检及埃及阿语挂载复查
 

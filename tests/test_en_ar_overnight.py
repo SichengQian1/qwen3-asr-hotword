@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import wave
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from qwen_hotword.phonemes.mfa_v03_assets import sha
+from qwen_hotword.phonemes.mfa_v03_assets import sha, write_json
 from qwen_hotword.training.en_ar_source_audit import iter_jsonl
+from qwen_hotword.training.sharded_ctc import DiskFeatureCache, FeatureShardDescriptor
 from scripts import run_en_ar_training as run
 
 
@@ -94,6 +96,25 @@ def test_freeze_gates_audio_and_reuses_english_g2p(
     )
     assert {tuple(row["phoneme_token_ids"]) for row in training} == {(20, 60), (97, 91, 72)}
 
+    en_output = tmp_path / "english_freeze"
+    en_output.mkdir()
+    en_report = run.freeze(en_output, inputs, en, None, 0.0002)
+    assert en_report["status"] == "labels_complete"
+    assert en_report["languages"] == ["en"]
+    write_json(en_output / "label_report.json", en_report)
+    protected = run.frozen_english_audio(en_output, 0.0002)
+    assert len(protected) == 2
+    ar_output = tmp_path / "arabic_freeze"
+    ar_output.mkdir()
+    ar_report = run.freeze(ar_output, inputs, None, ar, 0.0002, protected_audio=protected)
+    assert ar_report["status"] == "labels_complete"
+    assert ar_report["languages"] == ["ar"]
+    assert all(
+        row["audio_sha256"] not in protected
+        for split in ("train", "validation")
+        for row in iter_jsonl(ar_output / f"{split}.jsonl")
+    )
+
     ar.write_text("", encoding="utf-8")
     blocked = tmp_path / "blocked"
     blocked.mkdir()
@@ -108,3 +129,42 @@ def test_arabic_input_requires_ascii_and_audit_identity(tmp_path: Path) -> None:
     path.write_text(json.dumps({**row, "romanized": "مش"}) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="invalid Arabic"):
         list(run.romanizations(path))
+
+
+def test_combine_references_existing_feature_shards(tmp_path: Path) -> None:
+    shard = FeatureShardDescriptor(
+        shard_index=0,
+        feature_path=tmp_path / "en.pt",
+        metadata_path=tmp_path / "en.json",
+        record_count=1,
+        total_frames=5,
+        total_target_tokens=2,
+        feature_bytes=10,
+        feature_sha256="a" * 64,
+        sample_ids=("en-id",),
+        ctc_time_upsampling_factor=2,
+    )
+    en = DiskFeatureCache(
+        split="train",
+        root=tmp_path / "en",
+        sample_count=1,
+        shard_count=1,
+        feature_bytes=10,
+        encoder_frozen_parameters=123,
+        fingerprint="a" * 64,
+        sha256_verified=True,
+        ctc_time_upsampling_factor=2,
+        shards=(shard,),
+    )
+    ar = replace(
+        en,
+        root=tmp_path / "ar",
+        fingerprint="b" * 64,
+        shards=(replace(shard, feature_path=tmp_path / "ar.pt", sample_ids=("ar-id",)),),
+    )
+    combined = run.combine_caches([en, ar], tmp_path / "joined")
+    assert combined.sample_count == 2
+    assert combined.shards == (*en.shards, *ar.shards)
+    assert not combined.root.exists()
+    with pytest.raises(ValueError, match="duplicate audio"):
+        run.combine_caches([en, en], tmp_path / "joined")
