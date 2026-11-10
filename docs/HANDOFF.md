@@ -1,5 +1,30 @@
 # 工作交接记录
 
+## 0.211 2026-11-10 独立英阿 MFA G2P 音素表 v1.0
+
+用户要求保留中英阿表，另交英阿表。新增
+`configs/phonemes/en_ar_mfa_g2p_vocab.v1.0.json` 和
+`configs/phonemes/en_ar_mfa_g2p_mapping.v1.0.tsv`，详见
+[英阿表说明](EN_AR_MFA_G2P_VOCAB_V1_0.md)。复核官方来源后沿用美式英语 3.3.0 和
+GlobalPhone 阿语历史包 2.0.0。英语 70 类（ID 2–71），阿语 42 类（ID 72–113），
+blank/unk 保留 0/1，总计 114 类。阿语保留 `ar_gp:`，新 ID 独立于中英阿。
+两套 FST 输出弧及六个词的 G2P 到新 ID 核验通过。原始阿文到 GlobalPhone 输入
+及目标语料标签质量待实际数据验证。
+
+分支 `codex/g2p-coverage-scan`。只读同步与核验如下。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B -m pytest tests/test_en_ar_mfa_g2p_vocab.py tests/test_zh_en_ar_mfa_g2p_vocab.py
+sha256sum configs/phonemes/en_ar_mfa_g2p_{vocab,mapping}.v1.0.*
+```
+
+JSON SHA256 `888881b84d0b2d2a1a2591baa1e160be82395fd21e6753246c80f9b9a12b55df`。
+TSV SHA256 `69814cb775c51af2dd491188c77ecd6867b1f2652d9aa83b3a17fa338f7e594a`。
+只交小资产，无训练或推理运行目录、续跑步骤或工区回传文件。
+
 ## 0.210 2026-11-09 v0.3 new70 三语 6800 条 Context Learning 交付（待工区运行）
 
 复用 0.174 已完成 same-step 的带噪音频清单、11 个数据集键、门限、参考及目标分母。
