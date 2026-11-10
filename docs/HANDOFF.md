@@ -1,5 +1,48 @@
 # 工作交接记录
 
+## 0.213 2026-11-10 英阿候选打标至训练入口（先交付英语 Top1）
+
+参考 0.197–0.198 的英西葡 v0.3 100 类训练。新入口使用 0.211 英阿 114 类表、
+原有工区 aligner、固定 EN 3.3.0 和 AR GlobalPhone 2.0.0。两个只读盘点目录复用
+0.212 的 `7987bde0` / `5bda8943`。后者四批埃及阿语 78,839 个头可读，共
+266.709046 小时。76,046 条、255.101952 小时通过结构检查，2,793 条两处转写不同。
+
+阿文 → GlobalPhone 的批量前端尚未建立。两条小样本的手写候选可生成 ID，不能推及
+全量。没有对应候选时，今晚可先在工区的 Qwen Conda 环境执行可复用的英语词级打标：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_en_ar_training.py prepare-en --output-dir outputs/en_ar_english_g2p_v1
+```
+
+重用上轮已安装的官方模型目录 `models/mfa/hf_g2p_20261029_v03`。只读复核旧美式
+donor SHA，按 2000 词分片用四个 CPU worker 产出新英阿 ID。词级表
+`english_g2p.json` 留工区复用，只回传 `english_g2p_report.json`。这个命令不做
+句级冻结、Encoder 缓存或训练。
+
+具备真实阿语候选后用同一入口的 `all`。阿语 JSONL 每行含 `group`（`ar_egy` /
+`ar_msa`）、`source`（盘点原绝对清单路径）、`row`、原 `text` 和对应 ASCII
+`romanized`。需提供固定 SHA 的阿语 zip，默认 `models/mfa/g2p/arabic_g2p.zip`。
+
+```bash
+python -B scripts/run_en_ar_training.py all --gpu 4 \
+  --output-dir outputs/en_ar_ctc_overnight_v1 \
+  --english-g2p outputs/en_ar_english_g2p_v1/english_g2p.json \
+  --arabic-romanizations /工区路径/arabic_romanizations.jsonl
+```
+
+通过新标签、CTC 长度、精确音频字节隔离和时长检查后才缓存冻结 Encoder 并训练。
+训练每语默认 480h，英语优先埃及口音再美式，阿语优先埃及口语再补充池。验证目标为
+埃及英语 4h、埃及阿语与阿语补充池各 2h；按音频字节哈希分流，不宣称说话人独立。
+只用盘点的原音频，未复刻上轮 70% 混噪或旧 Encoder 特征复用。Head 随机初始化，
+Temporal 2x、hidden 512、kernel 5、dropout 0.1、batch 256、最多 40 轮、LR 3e-4、
+最低 5e-6、早停改善 0.0005，按英阿 macro PER 选模。PER 是对自动参考标签的拟合指标。
+不读 test，不运行 ASR 或检索。完成后回传 `label_report.json` 和 `head/report.json`。
+每次必须指定新目录，整条封装暂不支持恢复。旧目录不覆盖；已成功的英语词表可
+在新目录中复用。工区缓存与训练尚待实跑。
+
 ## 0.212 2026-11-10 英阿 CTC 新训练集来源预检及埃及阿语挂载复查
 
 目标是制作新版英阿 CTC 训练集。使用 0.211 的独立 114 类词表。
