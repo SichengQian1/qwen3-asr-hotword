@@ -36,7 +36,7 @@ git pull --ff-only origin codex/g2p-coverage-scan
 git rev-parse HEAD
 python -B scripts/repair_arabic_native_labels.py \
   --source-dir outputs/arabic_native_labels_v1 \
-  --output-dir outputs/arabic_native_labels_caphi_y_v2
+  --output-dir outputs/arabic_native_labels_caphi_y_v2 --workers 4
 ```
 
 新目录必须不存在；中断后同一命令加 `--resume`，核验修复契约、原报告/契约、
@@ -47,6 +47,24 @@ python -B scripts/repair_arabic_native_labels.py \
 本地 13 项相关单元/回归测试、Ruff、Mypy、diff whitespace 检查通过；另用已固定
 的真实 CALIMA 文件复现三个词/句的新旧差异，并验证小样本定向恢复和 resume
 标签 SHA 不变。这些本地结果不替代工区全量恢复的实测小时数。
+
+用户随后要求争取 1h 内恢复。入口新增 `--workers`（默认 1，建议先 4）独立 CPU
+进程调度，使用 spawn，每个进程跨分片复用自己的 CALIMA 与词缓存；最后按原分片
+顺序合并。该词级形态分析不使用 GPU。并行只改变调度，恢复条件和标签算法不变。
+全局显示已完成/总分片、分组条数、恢复条数和耗时。报告 `execution` 另记实际并发
+与当前脚本 SHA；不能把未实测的加速比当作工区耗时保证。
+
+若上一版串行恢复已经运行，先在原终端 Ctrl+C，等进程退出并释放锁，再 pull，
+使用原输出目录和 `--workers 4 --resume`。只兼容已审核串行脚本 SHA
+`7bfa6321e9036929e4a335a652f85d2d7c5c617c55b53df4da1afd31081a7d31`：
+除脚本调度升级外其余契约必须完全一致，保留原契约和已完成片。未知代码/输入
+变更仍拒绝复用。运行中的串行与并行任务不能同时写同一目录。
+
+本地 16 项相关测试验证串/并行输出顺序和 SHA 一致、损坏输入拒绝及已审核升级；
+另以固定真实 CALIMA 文件执行 2 个 spawn 进程的小样本恢复/续跑，聚合标签 SHA
+与串行逐字节一致。单进程本地初始峰值约 0.74 GiB（后续词缓存会增长），
+工区 4 进程建议具备至少 4 个可用 CPU 核并预留约 16 GiB 空闲内存。
+这些本地探针不等于工区全量吞吐；工区并行耗时仍待返回。
 
 以新报告确认可用总小时和来源比例后，后续入口沿用 0.214 的 `all-native`，
 将 `--arabic-native-labels` 指向 `outputs/arabic_native_labels_caphi_y_v2`。

@@ -6,11 +6,14 @@ from __future__ import annotations
 import argparse
 import importlib.metadata
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
 import sys
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +30,16 @@ from scripts.label_arabic_native import CONFIG, VOCAB, exclusive_job, verify_ass
 
 OLD_BACKEND_SHA = "2d0f0349436ceb4a2618bb61d105e1225a719cbc4db62481c4ba76ae516cfc0f"
 RETRY_ISSUES = {"phone_OOV:'ar_ipa:y'", "phone_OOV:'ar_ipa:yː'"}
+REVIEWED_SERIAL_SHA = "7bfa6321e9036929e4a335a652f85d2d7c5c617c55b53df4da1afd31081a7d31"
+_WORKER_SOURCE = Path()
+_WORKER_OUTPUT = Path()
+_WORKER_CONFIG: dict[str, Any] = {}
+_WORKER_TOKENS: list[str] = []
+_WORKER_FRONTEND: CalimaFrontend | None = None
+
+
+def _silent_tick(_value: int) -> None:
+    pass
 
 
 def recovered_record(
@@ -55,6 +68,8 @@ def repair_part(
     config: dict[str, Any],
     tokens: list[str],
     frontend: CalimaFrontend | None,
+    *,
+    progress: bool = True,
 ) -> tuple[dict[str, Any], CalimaFrontend | None]:
     old = json.loads(marker.read_text(encoding="utf-8"))
     for key in ("labels", "review"):
@@ -82,8 +97,10 @@ def repair_part(
     with (
         (folder / "labels.pending").open("wb") as labels,
         (folder / "review.pending").open("w", encoding="utf-8") as review,
-        stage_progress(
-            f"Reuse/retry {old['group']} part {marker.parent.name}", total=total
+        (
+            stage_progress(f"Reuse/retry {old['group']} part {marker.parent.name}", total=total)
+            if progress
+            else nullcontext(_silent_tick)
         ) as tick,
     ):
         with (source / old["labels"]).open("rb") as existing:
@@ -130,7 +147,77 @@ def repair_part(
     return piece, frontend
 
 
-def repair(config: dict[str, Any], source: Path, output: Path, *, resume: bool) -> dict[str, Any]:
+def _initialize_worker(
+    source: Path, output: Path, config: dict[str, Any], tokens: list[str]
+) -> None:
+    global _WORKER_SOURCE, _WORKER_OUTPUT, _WORKER_CONFIG, _WORKER_TOKENS, _WORKER_FRONTEND
+    _WORKER_SOURCE, _WORKER_OUTPUT = source, output
+    _WORKER_CONFIG, _WORKER_TOKENS = config, tokens
+    _WORKER_FRONTEND = None
+
+
+def _repair_worker(marker: Path) -> dict[str, Any]:
+    global _WORKER_FRONTEND
+    piece, _WORKER_FRONTEND = repair_part(
+        _WORKER_SOURCE,
+        _WORKER_OUTPUT,
+        marker,
+        _WORKER_CONFIG,
+        _WORKER_TOKENS,
+        _WORKER_FRONTEND,
+        progress=False,
+    )
+    return piece
+
+
+def repair_pieces(
+    config: dict[str, Any], source: Path, output: Path, markers: list[Path], *, workers: int
+) -> list[dict[str, Any]]:
+    tokens = json.loads(VOCAB.read_text())["tokens"]
+    if workers == 1:
+        frontend = None
+        pieces = []
+        for index, marker in enumerate(markers, 1):
+            piece, frontend = repair_part(source, output, marker, config, tokens, frontend)
+            pieces.append(piece)
+            print(f"Serial repair: {index:,}/{len(markers):,} parts completed", flush=True)
+        return pieces
+    completed: dict[Path, dict[str, Any]] = {}
+    counts: Counter[str] = Counter()
+    pool = ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_initialize_worker,
+        initargs=(source, output, config, tokens),
+    )
+    try:
+        with stage_progress(
+            f"Parallel Arabic repair ({workers} CPU processes)", total=len(markers), every=1
+        ) as tick:
+            pending = {pool.submit(_repair_worker, marker): marker for marker in markers}
+            for future in as_completed(pending):
+                marker = pending[future]
+                piece = future.result()
+                completed[marker] = piece
+                counts[piece["group"]] += piece["rows"]
+                tick(len(completed))
+                print(
+                    f"{piece['group']}: checked {counts[piece['group']]:,} source rows; "
+                    f"part {marker.parent.name} recovered {piece['recovered_rows']:,} rows",
+                    flush=True,
+                )
+    finally:
+        # On failure/interruption, cancel queued work; completed part markers remain reusable.
+        pool.shutdown(wait=True, cancel_futures=True)
+    # Completion order must never change label order, IDs, counts or manifest SHA256.
+    return [completed[marker] for marker in markers]
+
+
+def repair(
+    config: dict[str, Any], source: Path, output: Path, *, resume: bool, workers: int = 1
+) -> dict[str, Any]:
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
     if source == output or source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("source and repair output must be separate directories")
     report_path = source / "report.json"
@@ -160,27 +247,28 @@ def repair(config: dict[str, Any], source: Path, output: Path, *, resume: bool) 
     output.mkdir(parents=True, exist_ok=resume)
     contract = output / "contract.json"
     if resume:
-        if json.loads(contract.read_text()) != identity:
-            raise ValueError("repair inputs or code changed; use a new output directory")
-    else:
-        write_json(contract, identity)
-    pieces = []
-    totals = {}
-    frontend = None
-    tokens = json.loads(VOCAB.read_text())["tokens"]
-    for group, original in previous["by_group"].items():
-        group_pieces = []
-        rows_done = recovered = 0
-        for marker in sorted((source / "parts" / group).glob("*/completed.json")):
-            piece, frontend = repair_part(source, output, marker, config, tokens, frontend)
-            group_pieces.append(piece)
-            rows_done += piece["rows"]
-            recovered += piece["recovered_rows"]
+        recorded = json.loads(contract.read_text())
+        if recorded != identity:
+            comparable = {**recorded, "script_sha256": identity["script_sha256"]}
+            if recorded.get("script_sha256") != REVIEWED_SERIAL_SHA or comparable != identity:
+                raise ValueError("repair inputs or code changed; use a new output directory")
             print(
-                f"{group}: repaired/reused {rows_done:,}/{original['source_rows']:,} "
-                f"source rows; recovered {recovered:,} rows",
+                "Reviewed serial-to-parallel upgrade: "
+                "original contract and completed parts retained",
                 flush=True,
             )
+            identity = recorded
+    else:
+        write_json(contract, identity)
+    markers = [
+        marker
+        for group in previous["by_group"]
+        for marker in sorted((source / "parts" / group).glob("*/completed.json"))
+    ]
+    pieces = repair_pieces(config, source, output, markers, workers=workers)
+    totals = {}
+    for group, original in previous["by_group"].items():
+        group_pieces = [piece for piece in pieces if piece["group"] == group]
         rows = sum(piece["rows"] for piece in group_pieces)
         if rows != original["source_rows"]:
             raise ValueError("source completed part count differs from original report")
@@ -192,7 +280,6 @@ def repair(config: dict[str, Any], source: Path, output: Path, *, resume: bool) 
             "review_rows": rows - ready,
             "reasons": dict(sum((Counter(piece["reasons"]) for piece in group_pieces), Counter())),
         }
-        pieces.extend(group_pieces)
     manifest = output / "labels.jsonl"
     with (
         stage_progress("Assemble repaired Arabic labels"),
@@ -214,6 +301,7 @@ def repair(config: dict[str, Any], source: Path, output: Path, *, resume: bool) 
         "by_group": totals,
         "labels_sha256": sha(manifest),
         "identity": identity,
+        "execution": {"workers": workers, "script_sha256": sha(Path(__file__))},
         "repair": {
             "source_dir": str(source),
             "recovered_rows": sum(piece["recovered_rows"] for piece in pieces),
@@ -234,8 +322,11 @@ def main() -> int:
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--workers", type=int, default=1, help="CPU processes, recommended: 4")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     try:
         if not args.worker:
@@ -249,7 +340,11 @@ def main() -> int:
         verify_assets(config)
         with exclusive_job(args.output_dir.resolve()):
             report = repair(
-                config, args.source_dir.resolve(), args.output_dir.resolve(), resume=args.resume
+                config,
+                args.source_dir.resolve(),
+                args.output_dir.resolve(),
+                resume=args.resume,
+                workers=args.workers,
             )
         print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
         return 0
