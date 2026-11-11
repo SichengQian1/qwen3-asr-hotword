@@ -1,0 +1,9 @@
+{
+  "model": "/data_103/h00911716/train_qwen_models/rl_models_v75ckpt100k/rl_asr_qwen17_v75ckpt100k_h00911716_r15_h200_v0836/checkpoint-5100-merged",
+  "baseline_english": "outputs/en_ar_english_encoder_20261110_173957",
+  "baseline_arabic": "outputs/en_ar_native_ctc_v1",
+  "cache_config": "configs/480h_cache.workzone.yaml",
+  "architecture_manifest": "configs/models/qwen3-asr-1.7b.yaml",
+  "train_hours_per_language": 480,
+  "minimum_gpu_free_gib": 40
+}

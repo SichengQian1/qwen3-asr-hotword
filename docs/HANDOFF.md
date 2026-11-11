@@ -1,6 +1,66 @@
 # 工作交接记录
 
-## 0.215 2026-11-11 阿语全量自动标注返回及 CAPHI-y 定向恢复（待工区运行）
+## 0.216 2026-11-11 英阿 r15 merged Encoder 对照训练入口（待工区运行）
+
+用户确认本轮另需基于已增训且 **Encoder 已改变** 的 Qwen 模型训练 CTC，使用物理
+GPU 4 单卡。已启动的基模实验保留。新源完整目录为
+`/data_103/h00911716/train_qwen_models/rl_models_v75ckpt100k/rl_asr_qwen17_v75ckpt100k_h00911716_r15_h200_v0836/checkpoint-5100-merged`，
+用户列出 `model.safetensors` 单文件、配置和完整 tokenizer/processor 相关文件。
+本机不能访问该模型，模型完整性与实际提特征仍须在工区执行。
+
+新入口 `scripts/run_en_ar_merged.py`，配置 `configs/en_ar_merged_r15.workzone.json`。
+不再比较新旧 Encoder 是否相同；按用户明确的已改变前提，**英语和阿语全部重提**。
+复用基模实验已经冻结的四份 train/validation 清单与音素 ID，逐文件 SHA、样本顺序、
+英阿/跨 split 音频 SHA 和 ID 隔离均核验，不重新选 480h，也不重跑 G2P 或读 WAV
+做去重。默认英文来源 `outputs/en_ar_english_encoder_20261110_173957`，阿语来源
+`outputs/en_ar_native_ctc_v1`。后者尚未发布完整 `label_report.json` 时，run 会在
+创建新任务目录和使用 GPU 之前等待并显示活动；若原冻结明确失败则停止。
+单独 prepare 遇到未封存的清单会直接返回错误。
+
+新实验目录建立 `model/Qwen3-ASR-1.7B` 只读使用视图：链接原 HF 文件，按实际
+safetensors 头中的 tensor key 生成合法的单分片索引。这样兼容现有 basename/
+weight-index 契约，不修改原模型、共享基模配置或已生成缓存。原完整权重和各 HF
+元数据以 SHA256 封存；只用 empty/meta weights 检查 1.7B 参数数量、24 层 Encoder、
+1024 维 ln_post 和 2048 维投影等架构字段，不在本地加载完整 Qwen。
+
+按 en/ar 分开缓存，保留每语言 512 样本分片边界及原拼接顺序；Encoder batch 8，
+逻辑 cuda:0，单 GPU 进程。EN 缓存仍用原 114 类表验证原英语 ID，AR 缓存用 167
+类表；合并后训练新初始化的 167 类 temporal-upsample Head。与基模相同的 seed、
+40 epoch 上限、LR 3e-4、最小 LR 5e-6、min_delta 0.0005、early-stop patience 6、
+英阿 macro PER 选点。Qwen（包括新的 Encoder）始终冻结。
+共享 `train_stage` 只增加默认 false 的 resume 参数，原基模调用行为保持一致。
+
+分支 `codex/g2p-coverage-scan`，工区原 Qwen 环境直接自动准备、两语缓存和训练：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_en_ar_merged.py run --gpu 4 \
+  --output-dir outputs/en_ar_r15_5100_ctc_v1
+```
+
+输出必须为新目录。也可先仅 CPU 执行 `prepare --output-dir ...` 查看模型/数据/
+存储摘要，再用同目录 `run --gpu 4 --output-dir ... --resume`。`plan.json` 完整生成
+后，中断统一使用同一 run 命令加 `--resume`：检查代码、配置、模型整权重 SHA 和
+四份清单，已完成缓存由模型身份及分片 SHA 校验后复用；Head 从
+`training_state_latest.pt` 恢复。若 prepare 未完成、缺 plan.json，保留部分目录并
+回传错误，不自动覆盖/删除产物。每阶段显示实际条数/分片、耗时和活动提示。
+
+预估并检查新 EN+AR 缓存存储空间，保留 15% 余量与 2 GiB 缓冲；模型使用链接，
+不复制大权重。GPU 阶段前用 nvidia-smi 检查所选物理卡至少 40 GiB 空闲，不足时
+5 秒轮询并显示活动；原基模任务不暂停。同卡并发会共享算力，门槛不承诺耗时。
+缓存模型路径/config/index 身份必须对应新 merged 视图，旧基模缓存即使完整也拒收。
+
+返回新目录的 `plan.json`、`cache_sources.json`、`head/report.json` 或最终
+`report.json` 即可。新报告明确 `baseline_hidden_states_reused=false`，记录两语重提、
+四份配对清单 SHA、merged 整权重 SHA 和最终 Head 指标。完整缓存和权重留工区。
+本地仅用小 safetensors/清单验证文件视图、字节一致的配对划分、隔离、模型变化/
+错误缓存拒收、GPU 等待和续跑，以及原缓存/训练器回归；没有声称已取得新模型实测。
+本地该组 32 项测试、Ruff、Mypy、git diff --check 均通过；小 BF16 safetensors 的
+头部读取也验证通过。完整 r15 模型未在本地加载或下载。
+
+## 0.215 2026-11-11 阿语全量自动标注返回及 CAPHI-y 定向恢复（已返回）
 
 用户回传 `outputs/arabic_native_labels_v1/report.json` 的终端 JSON，状态
 `automatic_labels_completed`。源码、配置和词表 SHA 与本地实际文件逐项一致；
@@ -70,6 +130,17 @@ python -B scripts/repair_arabic_native_labels.py \
 将 `--arabic-native-labels` 指向 `outputs/arabic_native_labels_caphi_y_v2`。
 仍须通过去重、阿语各 2h 验证和有效 train 480h 检查才提 Encoder。当前埃及
 候选仅 114.37h，其余拒收尚未查明，不能宣称恢复了原计划全部埃及语料或质量已认证。
+
+随后用户回传 32 进程恢复完成报告，修复脚本 SHA
+`8417f4c6f6ae58a3d3680a7b0148ad66391cc8206999db684bbfba3cc4ff9094`、前端 SHA
+`686394f85bcbaa27c62f9266c6dd14e3f61d2676e7ff218ae7898c5b283d3753` 与本地逐项一致。
+514,599 条目标拒收中恢复 512,551 条 / 1,222.947380h，剩余 2,048 条因 CTC 长度
+不可行继续 review，计数闭合。EGY 不变 42,517 条 / 114.372347h，补样池变为
+624,886 条 / 1,307.298262h，合计 667,403 条 / 1,421.670609h，均为去重及留验证
+之前的候选时长。报告聚合 SHA
+`f692fa95ab4308a8a5a62b08fd466bffea37e5a6a3e3a3002abc282dffa4a2ba`，大文件未回本机。
+恢复报告本身没有提 Encoder 或开始训练，也没有记录实际耗时，不能据此宣布达到
+1h 目标。用户随后已启动 0.214 的 all-native 基模流程，实际阶段/指标尚未返回。
 
 ## 0.214 2026-11-11 直接阿文自动标注入口，另建英阿 IPA v1.1（待工区运行）
 

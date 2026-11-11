@@ -500,7 +500,14 @@ def combine_caches(parts: list[DiskFeatureCache], output: Path) -> DiskFeatureCa
     )
 
 
-def train_stage(output: Path, gpu: int, english: Path | None, *, vocab_path: Path = VOCAB) -> None:
+def train_stage(
+    output: Path,
+    gpu: int,
+    english: Path | None,
+    *,
+    vocab_path: Path = VOCAB,
+    resume: bool = False,
+) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     import torch
@@ -585,6 +592,7 @@ def train_stage(output: Path, gpu: int, english: Path | None, *, vocab_path: Pat
             validation_sample_groups=groups,
             early_stopping_metric="validation_macro_per",
             checkpoint_selection_metric="validation_macro_per",
+            resume=resume,
         )
 
 
