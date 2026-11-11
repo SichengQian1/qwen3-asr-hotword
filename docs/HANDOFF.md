@@ -1,5 +1,60 @@
 # 工作交接记录
 
+## 0.214 2026-11-11 直接阿文自动标注入口，另建英阿 IPA v1.1（待工区运行）
+
+用户确认允许改用直接阿文前端和独立阿语 IPA 标签，保留已完成英语 ID 与 Encoder
+特征。原 GlobalPhone 路线缺官方阿文转写对照，手写罗马化样例不能当批量转换器。
+本节点只交付全量阿语标注；新标签完成后还需做 480h 选样及新旧缓存兼容接入。
+
+此前英语缓存用户回传 pass，目录
+`outputs/en_ar_english_encoder_20261110_173957`，train 323,382 条、632 片、
+46,199,037,336 字节，validation 2,361 条、5 片、385,107,681 字节，
+Encoder 冻结 317,477,504 参数。未读取 test，训练尚未开始。
+这是用户终端报告，本机尚未取得该目录的 label_report 与逐文件 SHA。
+
+前端采用 CAMeL Tools 1.6.0，固定 CALIMA EGY/ MSA r13 的 morphology.db 和 MLE
+model.json。所有来源、包版本、四个归档 SHA 及文件 SHA 固定在
+`configs/arabic_native_frontend.workzone.json`。用独立 venv 共享现有 ASR Python
+的基础包，只安装形态分析组件所需依赖，不修改现有 Qwen 或 aligner Conda 环境。
+官方数据分别约 67/40/27/89 MB，首次 setup 需要下载约 224 MB。
+数据包 LICENSE 一并保存。
+
+EGY 用最高分词级分析的 diac，通过明确的词内音素规则生成 IPA；采用开罗常见
+`ج→ɡ、ق→ʔ` 默认，逐词例外及跨词连读未建模。MSA 使用模型原生 CAPHI 并映射
+到 IPA。MLE 是逐词统计分析，不是上下文神经消歧。任何无分析、未知 CAPHI 或 IPA、
+数字、混合文字、控制符、参考冲突和估算 CTC 不可行句子整句进入 review；
+没有按字母拼读的无分析回退。此版本是自动候选标签，不声称通过人工发音审核。
+原始 `ar_msa` 是用户补样目录分组，未认证其中每条均为标准阿语。
+
+新表 `configs/phonemes/en_ar_native_ipa_vocab.v1.1.json` 共 167 类。
+0–71 完整保留英阿 v1.0 的 blank/unk 和英语 ID，72–166 为独立 `ar_ipa:` 单位，
+沿用已核查中英阿 IPA 表的 95 个阿语单位。旧 114 类表保留。新表 SHA256
+`b337255bf239fdec3b4bdb0770bf39941fee74246336774c7ece8741d4534bf2`。
+
+分支 `codex/g2p-coverage-scan`。在工区原 Qwen Conda 环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/label_arabic_native.py setup
+python -B scripts/label_arabic_native.py label --output-dir outputs/arabic_native_labels_v1
+```
+
+默认完整扫描已有 `5bda8943` 的四批 EGY 和 `7987bde0` 的阿语补样盘点，复用
+音频头元数据，不读 WAV、不加载 Qwen、不占 GPU。每 2000 行写一块，实际条数、
+耗时及 10 秒活动日志可见。输出 `parts/{group}/*/labels.jsonl`、`review.jsonl`、
+完成标记和最终聚合 `labels.jsonl`。失败行保留来源与原因，没有静默删词。
+`report.json` 给出分来源就绪条数、小时数和拒收原因。
+
+新任务目录必须不存在。中断后同一 label 命令加 `--resume`，核验输入/代码/
+词表身份与已完成块 SHA 后复用。setup 可重跑，只复用 SHA 正确的模型。
+运行进程用系统文件锁隔离，进程退出后释放。回传本次 `report.json` 即可。
+标注完成不等于冻结了 480h 或已经缓存/训练阿语。
+
+本地最小验证为两个已提供文本的真实 CALIMA 分析、音素/ID 完整输出及块恢复，
+加相关输入/ID/回归测试。没有以频谱代替发音听审，没有本地加载完整 Qwen。
+
 ## 0.213 2026-11-10 英阿候选打标至训练入口（先交付英语 Top1）
 
 参考 0.197–0.198 的英西葡 v0.3 100 类训练。新入口使用 0.211 英阿 114 类表、

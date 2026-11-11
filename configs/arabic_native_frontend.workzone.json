@@ -1,0 +1,86 @@
+{
+  "version": "1.0",
+  "backend": "CAMeL Tools MLE top1, Egyptian diacritized phonemic rules / MSA native CAPHI",
+  "camel_tools_version": "1.6.0",
+  "runtime": "models/arabic_native_v1/runtime",
+  "assets": "models/arabic_native_v1/data",
+  "data_dir_environment": "CAMELTOOLS_DATA",
+  "packages": {
+    "morphology-db-egy-r13": {
+      "url": "https://github.com/CAMeL-Lab/camel-tools-data/releases/download/2022.03.21/morphology_db_calima-egy-r13-0.2.0.zip",
+      "destination": "morphology_db/calima-egy-r13",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "7a71f85f07e46759dcc1c16dba64352d9932447759cf71ca3deae3729d85d23e",
+          "size": 16919
+        },
+        {
+          "path": "morphology.db",
+          "sha256": "9b4efa76bc81e2ae1ce84518d381903f4fd15cf4afd892cd3654bc06d26e2181",
+          "size": 67238788
+        }
+      ],
+      "license": "GPL v2",
+      "version": "0.2.0",
+      "archive_sha256": "eb8a2d3a115cad819a808931e7fb941d54344096e563643ba742708892e862ac"
+    },
+    "morphology-db-msa-r13": {
+      "url": "https://github.com/CAMeL-Lab/camel-tools-data/releases/download/2022.03.21/morphology_db_calima-msa-r13-0.4.0.zip",
+      "destination": "morphology_db/calima-msa-r13",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "7a71f85f07e46759dcc1c16dba64352d9932447759cf71ca3deae3729d85d23e",
+          "size": 16919
+        },
+        {
+          "path": "morphology.db",
+          "sha256": "195bc25a333237a2126470da888d7936b59ed3729f9210e0a4194ba43497dd70",
+          "size": 40471399
+        }
+      ],
+      "license": "GPL v2",
+      "version": "0.4.0",
+      "archive_sha256": "fe6531250c5529307627cc63ed56447cbb9968020d6ea3ab867e6ad9af94c738"
+    },
+    "disambig-mle-calima-egy-r13": {
+      "url": "https://github.com/CAMeL-Lab/camel-tools-data/releases/download/2022.03.21/disambig_mle_calima-egy-r13-0.1.0.zip",
+      "destination": "disambig_mle/calima-egy-r13",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "7a71f85f07e46759dcc1c16dba64352d9932447759cf71ca3deae3729d85d23e",
+          "size": 16919
+        },
+        {
+          "path": "model.json",
+          "sha256": "7db85a3adcf47b0f75c8daa5af51b03a68dc75a9a644cf85928ca8f79c9011c1",
+          "size": 27170485
+        }
+      ],
+      "license": "GPL v2",
+      "version": "0.1.0",
+      "archive_sha256": "be845b7949cd87cae548af3b51b09713cbe32d946fa66033a0f7146941904d6b"
+    },
+    "disambig-mle-calima-msa-r13": {
+      "url": "https://github.com/CAMeL-Lab/camel-tools-data/releases/download/2022.03.21/disambig_mle_calima-msa-r13-0.2.5.zip",
+      "destination": "disambig_mle/calima-msa-r13",
+      "files": [
+        {
+          "path": "LICENSE",
+          "sha256": "7a71f85f07e46759dcc1c16dba64352d9932447759cf71ca3deae3729d85d23e",
+          "size": 16919
+        },
+        {
+          "path": "model.json",
+          "sha256": "e7d79e7744101b6933f9a4b41063d4b9934488fc8c8b6130a24467e0f0dfe9af",
+          "size": 88707692
+        }
+      ],
+      "license": "GPL v2",
+      "version": "0.2.5",
+      "archive_sha256": "3173935ba752f842da20b8e95fea068cfb60218591a907552779c7a65ff42b3a"
+    }
+  }
+}
