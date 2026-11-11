@@ -199,6 +199,21 @@ The work zone may use Docker containers and mounted shared storage. Prefer
 mounting large datasets directly into containers instead of copying millions of
 small files between shared filesystems.
 
+### Work-Zone Installation And Download TLS Policy
+
+The work-zone network uses a self-signed certificate chain that repeatedly fails
+certificate verification. On 2026-11-11 the user explicitly authorized skipping
+TLS/SSL certificate verification for work-zone package installation and asset
+downloads. Apply this by default to applicable work-zone commands and scripts;
+do not repeatedly ask the user or block on the same certificate error.
+
+Use scoped installer/download options, such as pip `--trusted-host` for the
+actual package hosts, curl `--insecure`, or an explicit urllib SSL context.
+Preserve pinned SHA256 verification of downloaded model/assets before use, and
+reuse only verified completed files. Keep the bypass scoped to these operations;
+do not change system trust, global Git/pip configuration, or the interpreter's
+global HTTPS context.
+
 Known project paths used in the work zone:
 
 ```text

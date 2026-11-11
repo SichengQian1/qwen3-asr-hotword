@@ -5,6 +5,10 @@
   "runtime": "models/arabic_native_v1/runtime",
   "assets": "models/arabic_native_v1/data",
   "data_dir_environment": "CAMELTOOLS_DATA",
+  "installation": {
+    "verify_ssl": false,
+    "pip_trusted_hosts": ["pypi.org", "files.pythonhosted.org"]
+  },
   "packages": {
     "morphology-db-egy-r13": {
       "url": "https://github.com/CAMeL-Lab/camel-tools-data/releases/download/2022.03.21/morphology_db_calima-egy-r13-0.2.0.zip",

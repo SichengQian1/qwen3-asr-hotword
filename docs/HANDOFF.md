@@ -20,6 +20,15 @@ model.json。所有来源、包版本、四个归档 SHA 及文件 SHA 固定在
 官方数据分别约 67/40/27/89 MB，首次 setup 需要下载约 224 MB。
 数据包 LICENSE 一并保存。
 
+工区首次 setup 已完成 pip 阶段，随后在下载首个 CALIMA 包时遇到自签证书错误，
+`&&` 后的 label 尚未启动。用户已授权工区安装/下载默认跳过 SSL 证书校验，规则写入
+`AGENTS.md`；本入口通过配置的局部 urllib SSL context 和 pip trusted hosts 实施，
+不改全局网络配置，仍校验归档及解压文件 SHA256。pull 修复后重跑下方 setup/label
+命令即可：复用已安装的独立运行环境及 SHA 正确的完整包；本次不加 `--resume`。
+`setup_completed.json` 记录安装策略。此修复尚待工区重跑确认下载通过。
+本地 10 项相关测试、Ruff、Mypy 和 diff whitespace 检查通过，覆盖局部 SSL 策略、
+完整文件复用及绕过证书校验后仍拒绝 SHA 不符下载。
+
 EGY 用最高分词级分析的 diac，通过明确的词内音素规则生成 IPA；采用开罗常见
 `ج→ɡ、ق→ʔ` 默认，逐词例外及跨词连读未建模。MSA 使用模型原生 CAPHI 并映射
 到 IPA。MLE 是逐词统计分析，不是上下文神经消歧。任何无分析、未知 CAPHI 或 IPA、

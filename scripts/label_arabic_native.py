@@ -8,6 +8,7 @@ import fcntl
 import importlib.metadata
 import json
 import os
+import ssl
 import subprocess
 import sys
 import urllib.request
@@ -73,6 +74,19 @@ def setup(config: dict[str, Any]) -> None:
     runtime = ROOT / config["runtime"]
     runtime.parent.mkdir(parents=True, exist_ok=True)
     python = runtime / "bin/python"
+    installation = config["installation"]
+    context = ssl.create_default_context()
+    pip_install = [str(python), "-m", "pip", "install"]
+    if not installation["verify_ssl"]:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        for host in installation["pip_trusted_hosts"]:
+            pip_install.extend(["--trusted-host", host])
+        print(
+            "Work-zone installation: SSL certificate verification disabled; "
+            "pinned model SHA256 checks retained",
+            flush=True,
+        )
     with stage_progress("Prepare isolated Arabic morphology Python"):
         if not python.is_file():
             if runtime.exists():
@@ -80,10 +94,8 @@ def setup(config: dict[str, Any]) -> None:
             subprocess.run(
                 [sys.executable, "-m", "venv", "--system-site-packages", str(runtime)], check=True
             )
-        subprocess.run(
-            [str(python), "-m", "pip", "install", "--no-deps", "camel-tools==1.6.0"], check=True
-        )
-        subprocess.run([str(python), "-m", "pip", "install", *DEPENDENCIES], check=True)
+        subprocess.run([*pip_install, "--no-deps", "camel-tools==1.6.0"], check=True)
+        subprocess.run([*pip_install, *DEPENDENCIES], check=True)
     assets = ROOT / config["assets"]
     assets.mkdir(parents=True, exist_ok=True)
     # Direct DB paths are used, so an empty local catalogue prevents implicit network access.
@@ -102,7 +114,7 @@ def setup(config: dict[str, Any]) -> None:
             if not archive.exists():
                 pending = archive.with_suffix(".pending")
                 with (
-                    urllib.request.urlopen(spec["url"], timeout=90) as response,
+                    urllib.request.urlopen(spec["url"], timeout=90, context=context) as response,
                     pending.open("wb") as target,
                 ):
                     while chunk := response.read(1024 * 1024):
@@ -135,6 +147,7 @@ def setup(config: dict[str, Any]) -> None:
         {
             "config_sha256": sha(CONFIG),
             "backend_version": "1.6.0",
+            "installation": installation,
             "existing_conda_environments_modified": False,
         },
     )
