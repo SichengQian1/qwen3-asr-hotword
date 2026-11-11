@@ -73,7 +73,9 @@ CAPHI = {
     "aa": "aː",
     "ii": "iː",
     "uu": "uː",
-    **{c: c for c in "abdfhiklmnqrs tuwvyz".replace(" ", "")},
+    # CAPHI y is the palatal glide (Arabic ي), not IPA's front rounded vowel y.
+    "y": "j",
+    **{c: c for c in "abdfhiklmnqrs tuwvz".replace(" ", "")},
 }
 
 

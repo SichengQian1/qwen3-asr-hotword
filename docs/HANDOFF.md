@@ -1,5 +1,58 @@
 # 工作交接记录
 
+## 0.215 2026-11-11 阿语全量自动标注返回及 CAPHI-y 定向恢复（待工区运行）
+
+用户回传 `outputs/arabic_native_labels_v1/report.json` 的终端 JSON，状态
+`automatic_labels_completed`。源码、配置和词表 SHA 与本地实际文件逐项一致；
+聚合标签 SHA 由用户报告为
+`b914438236bf849d7ae5a76656239959042f2b3f78f1fccf49d64c6b85df5057`，
+本机尚未独立取得大文件。原任务没有读 WAV、提阿语 Encoder 或开始训练。
+
+| 分组 | 源记录 | 标签就绪记录 | 标签就绪小时 | review 记录 |
+| --- | ---: | ---: | ---: | ---: |
+| 埃及阿语 | 78,839 | 42,517 | 114.372347 | 36,322 |
+| 阿语补样池 | 821,625 | 112,335 | 84.350883 | 709,290 |
+| 合计 | 900,464 | 154,852 | 198.723229 | 745,612 |
+
+当前就绪时长尚未去重或留验证集，不能启动原定 480h 阿语训练。补样池首次拒收中
+514,599 条为 `phone_OOV`。查到明确实现错误：CAPHI `y` 被直接当作 IPA `y`，
+应映射到表中已有的 `j`，双辅音为 `jː`。修复前 `بيت` 的官方模型输出
+`b_a_y_t` 触发 `phone_OOV:'ar_ipa:y'`，修复后成为 `b a j t`、ID
+`[74,72,91,116]`。参考 [CAMeL 官方 CAPHI 指南](https://camel-guidelines.readthedocs.io/en/latest/phonology/)。
+相同固定 CALIMA 文件下本地真实词/句验证复现错误并确认修复，另检查全部已支持
+CAPHI 单位及其双辅音均能进入 167 类表。词表、英语 ID、英语缓存及模型均不改。
+没有将不支持的 CAPHI 标记、词法无分析或其他未知音素强行归一。
+
+新增 CPU 定向恢复入口，只重试原 `ar_msa` review 中精确记录为 `ar_ipa:y/yː`
+的 OOV 行。原合格标签复用，其他 review 保留，重试后仍经过完整词表和 CTC 长度
+检查。不会提前认定 514,599 条全部可恢复。恢复可能揭示后续拒收原因；报告给出
+实际重试、恢复行数/小时和新失败原因。
+
+分支 `codex/g2p-coverage-scan`，工区现有 Qwen 环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/repair_arabic_native_labels.py \
+  --source-dir outputs/arabic_native_labels_v1 \
+  --output-dir outputs/arabic_native_labels_caphi_y_v2
+```
+
+新目录必须不存在；中断后同一命令加 `--resume`，核验修复契约、原报告/契约、
+原标签与每片 SHA，跳过已完成片。原目录只读，不覆盖原标签、review 或完成标记。
+使用已安装的独立 CAMeL runtime，不重复 setup、下载模型、读 WAV 或占 GPU。
+每片显示处理/恢复行数、总数和耗时，静默阶段保留活动提示。只需返回新目录的
+`report.json` 或终端最终 JSON，无需上传大标签文件。
+本地 13 项相关单元/回归测试、Ruff、Mypy、diff whitespace 检查通过；另用已固定
+的真实 CALIMA 文件复现三个词/句的新旧差异，并验证小样本定向恢复和 resume
+标签 SHA 不变。这些本地结果不替代工区全量恢复的实测小时数。
+
+以新报告确认可用总小时和来源比例后，后续入口沿用 0.214 的 `all-native`，
+将 `--arabic-native-labels` 指向 `outputs/arabic_native_labels_caphi_y_v2`。
+仍须通过去重、阿语各 2h 验证和有效 train 480h 检查才提 Encoder。当前埃及
+候选仅 114.37h，其余拒收尚未查明，不能宣称恢复了原计划全部埃及语料或质量已认证。
+
 ## 0.214 2026-11-11 直接阿文自动标注入口，另建英阿 IPA v1.1（待工区运行）
 
 用户确认允许改用直接阿文前端和独立阿语 IPA 标签，保留已完成英语 ID 与 Encoder
