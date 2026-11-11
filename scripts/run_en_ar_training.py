@@ -10,13 +10,14 @@ import json
 import math
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
 import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Set
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,8 @@ VOCAB = ROOT / "configs/phonemes/en_ar_mfa_g2p_vocab.v1.0.json"
 MAPPING = ROOT / "configs/phonemes/en_ar_mfa_g2p_mapping.v1.0.tsv"
 VOCAB_SHA = "888881b84d0b2d2a1a2591baa1e160be82395fd21e6753246c80f9b9a12b55df"
 MAPPING_SHA = "69814cb775c51af2dd491188c77ecd6867b1f2652d9aa83b3a17fa338f7e594a"
+NATIVE_VOCAB = ROOT / "configs/phonemes/en_ar_native_ipa_vocab.v1.1.json"
+NATIVE_VOCAB_SHA = "b337255bf239fdec3b4bdb0770bf39941fee74246336774c7ece8741d4534bf2"
 FOUNDATION = ROOT / "configs/mfa_v03_foundation.workzone.json"
 ASSETS = ROOT / "models/mfa/hf_g2p_20261029_v03"
 AUDITS = {
@@ -206,6 +209,8 @@ def freeze(
     train_hours: float,
     *,
     protected_audio: Set[str] = frozenset(),
+    native_index: sqlite3.Connection | None = None,
+    vocab_path: Path = VOCAB,
 ) -> dict[str, Any]:
     from qwen_hotword.training.mfa_round_common import read, words
     from qwen_hotword.training.mfa_round_labels import top1_tokens
@@ -221,12 +226,14 @@ def freeze(
         ):
             raise ValueError("English G2P is not from this source inventory and vocabulary")
     ar: dict[tuple[str, int], dict[str, Any]] = {}
-    if arabic is not None:
+    if arabic is not None and native_index is None:
         for row in iter_jsonl(arabic):
             key = (row["source"], row["row"])
             if key in ar:
                 raise ValueError("duplicate source/row in Arabic romanization input")
             ar[key] = row
+    target_tokens = read(vocab_path)["tokens"]
+    target_sha = sha(vocab_path)
     languages = [lang for lang, path in (("en", english), ("ar", arabic)) if path is not None]
     if not languages:
         raise ValueError("at least one language is required")
@@ -263,7 +270,14 @@ def freeze(
                 if any(type(t) is not int or not 2 <= t < 72 for t in token_ids):
                     raise ValueError("invalid English token IDs")
             else:
-                label = ar.get((row["source"], row["row"]))
+                if native_index is not None:
+                    found = native_index.execute(
+                        "SELECT payload FROM labels WHERE source = ? AND row_number = ?",
+                        (row["source"], row["row"]),
+                    ).fetchone()
+                    label = json.loads(found[0]) if found else None
+                else:
+                    label = ar.get((row["source"], row["row"]))
                 if label is None:
                     rejections[group + ":no_romanization"] += 1
                     continue
@@ -272,12 +286,13 @@ def freeze(
                         f"Arabic romanization text/source identity mismatch: {label['row']}"
                     )
                 native_words, issues = words(row["text"])
-                token_ids = (
-                    label["ids"]
-                    if not issues and len(native_words) == len(label["romanized"].split())
-                    else []
+                aligned = (
+                    native_words == label.get("words") and label.get("vocab_sha256") == target_sha
+                    if native_index is not None
+                    else len(native_words) == len(label["romanized"].split())
                 )
-                if any(type(t) is not int or not 72 <= t < 114 for t in token_ids):
+                token_ids = label["ids"] if not issues and aligned else []
+                if any(type(t) is not int or not 72 <= t < len(target_tokens) for t in token_ids):
                     raise ValueError("invalid Arabic token IDs")
             if not token_ids:
                 rejections[group + ":incomplete_label"] += 1
@@ -330,7 +345,7 @@ def freeze(
     return {
         "status": "labels_complete" if capacity else "insufficient_labeled_hours",
         "languages": languages,
-        "vocab_sha256": VOCAB_SHA,
+        "vocab_sha256": target_sha,
         "train_target_hours_per_language": train_hours,
         "validation_target_hours": validation_hours,
         "hours": {"/".join(key): value for key, value in hours.items()},
@@ -340,7 +355,11 @@ def freeze(
         "train_manifest_sha256": sha(output / "train.jsonl"),
         "validation_manifest_sha256": sha(output / "validation.jsonl"),
         "arabic_label_policy": (
-            "externally_supplied_romanizations_official_mfa_top1" if arabic is not None else None
+            "CALIMA_native_IPA"
+            if native_index is not None
+            else "externally_supplied_romanizations_official_mfa_top1"
+            if arabic is not None
+            else None
         ),
         "split_identity": "exact_file_sha256",
         "speaker_disjoint_verified": False,
@@ -391,13 +410,24 @@ def frozen_english_audio(output: Path, train_hours: float) -> set[str]:
             pin(manifest, report[f"{split}_manifest_sha256"])
             for row in iter_jsonl(manifest):
                 identity = row["audio_sha256"]
-                if row["language"] != "en" or row["split"] != split or identity in seen:
+                if (
+                    row["language"] != "en"
+                    or row["split"] != split
+                    or identity in seen
+                    or not row["phoneme_token_ids"]
+                    or any(
+                        type(value) is not int or not 2 <= value < 72
+                        for value in row["phoneme_token_ids"]
+                    )
+                ):
                     raise ValueError("invalid or duplicate frozen English audio identity")
                 seen.add(identity)
     return seen
 
 
-def cache_stage(output: Path, gpu: int, report: dict[str, Any]) -> None:
+def cache_stage(
+    output: Path, gpu: int, report: dict[str, Any], *, vocab_path: Path = VOCAB
+) -> None:
     cache = output / "cache"
     if not cache.exists():
         estimated = sum(report["estimated_encoder_frames"].values()) * 1024 * 2
@@ -419,7 +449,7 @@ def cache_stage(output: Path, gpu: int, report: dict[str, Any]) -> None:
         "--validation-manifest",
         str(output / "validation.jsonl"),
         "--vocab",
-        str(VOCAB),
+        str(vocab_path),
         "--output-dir",
         str(cache),
         "--prevalidated-audio-paths",
@@ -470,7 +500,7 @@ def combine_caches(parts: list[DiskFeatureCache], output: Path) -> DiskFeatureCa
     )
 
 
-def train_stage(output: Path, gpu: int, english: Path | None) -> None:
+def train_stage(output: Path, gpu: int, english: Path | None, *, vocab_path: Path = VOCAB) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     import torch
@@ -486,6 +516,9 @@ def train_stage(output: Path, gpu: int, english: Path | None) -> None:
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is unavailable on the requested physical GPU")
+    target_vocab = load_phoneme_vocab(vocab_path)
+    if english is not None and target_vocab.tokens[:72] != load_phoneme_vocab(VOCAB).tokens[:72]:
+        raise ValueError("new vocabulary changed frozen English token IDs")
     roots = [output] if english is None else [english, output]
     views = {}
     groups: dict[str, str] = {}
@@ -506,7 +539,10 @@ def train_stage(output: Path, gpu: int, english: Path | None) -> None:
                     )
                 encoder_identity = current
                 part = load_disk_feature_cache(
-                    cache, expected_split=split, source_manifest_path=manifest, vocab_path=VOCAB
+                    cache,
+                    expected_split=split,
+                    source_manifest_path=manifest,
+                    vocab_path=VOCAB if root == english else vocab_path,
                 )
                 parts.append(part)
                 if split == "validation":
@@ -524,16 +560,22 @@ def train_stage(output: Path, gpu: int, english: Path | None) -> None:
             "train_fingerprint": views["train"].fingerprint,
             "validation_fingerprint": views["validation"].fingerprint,
             "encoder_identity": encoder_identity,
+            "target_vocab_sha256": sha(vocab_path),
+            "reused_english_vocab_sha256": VOCAB_SHA if english else None,
+            "english_prefix_ids_unchanged": True,
         },
     )
     head = output / "head"
-    with exclusive_training_run(head), stage_progress("Train new 114-class Head"):
+    with (
+        exclusive_training_run(head),
+        stage_progress(f"Train new {len(target_vocab.tokens)}-class Head"),
+    ):
         train_sharded_ctc_head(
             views["train"],
             views["validation"],
-            load_phoneme_vocab(VOCAB),
+            target_vocab,
             head,
-            vocab_path=VOCAB,
+            vocab_path=vocab_path,
             device="cuda:0",
             head_type="temporal_upsample",
             epochs=40,
@@ -546,9 +588,84 @@ def train_stage(output: Path, gpu: int, english: Path | None) -> None:
         )
 
 
+def index_native_labels(
+    directory: Path, connection: sqlite3.Connection, inventories: dict[str, Path]
+) -> Path:
+    report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    if (
+        report.get("status") != "automatic_labels_completed"
+        or report.get("vocab_sha256") != NATIVE_VOCAB_SHA
+        or report.get("num_classes") != 167
+    ):
+        raise ValueError("native Arabic labels are incomplete or use a different vocabulary")
+    manifest = directory / "labels.jsonl"
+    with stage_progress("Verify native Arabic label and inventory identities"):
+        pin(manifest, report["labels_sha256"])
+        for group in ("ar_egy", "ar_msa"):
+            pin(inventories[group], report["identity"]["inventories"][group])
+    connection.execute(
+        "CREATE TABLE labels (source TEXT, row_number INTEGER, payload TEXT, "
+        "PRIMARY KEY (source, row_number))"
+    )
+    expected = sum(group["ready_rows"] for group in report["by_group"].values())
+    with stage_progress("Index native Arabic labels on disk", total=expected) as tick:
+        count = 0
+        for count, row in enumerate(iter_jsonl(manifest), 1):
+            if row.get("vocab_sha256") != NATIVE_VOCAB_SHA or row.get("group") not in {
+                "ar_egy",
+                "ar_msa",
+            }:
+                raise ValueError("incompatible row in native Arabic labels")
+            payload = {
+                key: row[key] for key in ("row", "text", "group", "ids", "words", "vocab_sha256")
+            }
+            try:
+                connection.execute(
+                    "INSERT INTO labels VALUES (?, ?, ?)",
+                    (row["source"], row["row"], json.dumps(payload, ensure_ascii=False)),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError("duplicate source/row in native Arabic labels") from error
+            tick(count)
+        if count != expected:
+            raise ValueError("native Arabic ready-row count differs from report")
+    connection.commit()
+    return manifest
+
+
+def all_native(output: Path, english: Path, labels: Path, gpu: int, train_hours: float) -> int:
+    pin(NATIVE_VOCAB, NATIVE_VOCAB_SHA)
+    protected = frozen_english_audio(english, train_hours)
+    cache_report = english / "cache/feature_cache_report.json"
+    if json.loads(cache_report.read_text()).get("status") != "pass":
+        raise ValueError("English feature cache is incomplete")
+    inventories = inventory_paths(ROOT)
+    with closing(sqlite3.connect(output / "native_arabic_index.sqlite")) as connection, connection:
+        manifest = index_native_labels(labels, connection, inventories)
+        report = freeze(
+            output,
+            inventories,
+            None,
+            manifest,
+            train_hours,
+            protected_audio=protected,
+            native_index=connection,
+            vocab_path=NATIVE_VOCAB,
+        )
+    write_json(output / "label_report.json", report)
+    print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+    if report["status"] != "labels_complete":
+        return 2
+    cache_stage(output, gpu, report, vocab_path=NATIVE_VOCAB)
+    train_stage(output, gpu, english, vocab_path=NATIVE_VOCAB)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare-en", "cache-en", "all", "_arabic-worker"))
+    parser.add_argument(
+        "action", choices=("prepare-en", "cache-en", "all", "all-native", "_arabic-worker")
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--english-g2p", type=Path)
@@ -556,6 +673,7 @@ def main() -> int:
     parser.add_argument("--wait-for-english-pid", type=int)
     parser.add_argument("--resume", action="store_true", help="resume existing cache-en shards")
     parser.add_argument("--arabic-romanizations", type=Path)
+    parser.add_argument("--arabic-native-labels", type=Path)
     parser.add_argument("--arabic-model", type=Path, default=ROOT / "models/mfa/g2p/arabic_g2p.zip")
     parser.add_argument("--train-hours", type=float, default=480)
     args = parser.parse_args()
@@ -564,7 +682,7 @@ def main() -> int:
         args.arabic_romanizations is None or not args.arabic_romanizations.is_file()
     ):
         parser.error("an Arabic romanization JSONL is required")
-    if args.action in {"all", "cache-en"} and (
+    if args.action in {"all", "all-native", "cache-en"} and (
         args.gpu is None
         or args.gpu < 0
         or not math.isfinite(args.train_hours)
@@ -580,14 +698,28 @@ def main() -> int:
         or args.resume
     ):
         parser.error("waiting requires new cache-en, --english-g2p and a positive PID")
-    if args.english_cache is not None and (args.action != "all" or args.english_g2p is not None):
+    if args.english_cache is not None and (
+        args.action not in {"all", "all-native"} or args.english_g2p is not None
+    ):
         parser.error("--english-cache is for all and replaces --english-g2p")
+    if args.action == "all-native" and (
+        args.english_cache is None or args.arabic_native_labels is None
+    ):
+        parser.error("all-native requires --english-cache and --arabic-native-labels")
     try:
         pin(VOCAB, VOCAB_SHA)
         pin(MAPPING, MAPPING_SHA)
         if not args.resume:
             output.mkdir(parents=True, exist_ok=False)
         print(f"Output directory: {output}", flush=True)
+        if args.action == "all-native":
+            return all_native(
+                output,
+                args.english_cache.resolve(),
+                args.arabic_native_labels.resolve(),
+                args.gpu,
+                args.train_hours,
+            )
         if args.action == "_arabic-worker":
             arabic_g2p(args.arabic_model, args.arabic_romanizations, output)
             return 0

@@ -4,7 +4,8 @@
 
 用户确认允许改用直接阿文前端和独立阿语 IPA 标签，保留已完成英语 ID 与 Encoder
 特征。原 GlobalPhone 路线缺官方阿文转写对照，手写罗马化样例不能当批量转换器。
-本节点只交付全量阿语标注；新标签完成后还需做 480h 选样及新旧缓存兼容接入。
+本节点交付全量阿语标注及后续原英语缓存复用入口。新标签完成后仍按实际可用
+时长选样，容量不足时停止在 GPU 阶段之前。
 
 此前英语缓存用户回传 pass，目录
 `outputs/en_ar_english_encoder_20261110_173957`，train 323,382 条、632 片、
@@ -52,8 +53,30 @@ python -B scripts/label_arabic_native.py label --output-dir outputs/arabic_nativ
 运行进程用系统文件锁隔离，进程退出后释放。回传本次 `report.json` 即可。
 标注完成不等于冻结了 480h 或已经缓存/训练阿语。
 
+标注成功后可自动接 480h 阿语选样、阿语 Encoder 缓存、双语新 Head：
+
+```bash
+python -B scripts/run_en_ar_training.py all-native --gpu 4 \
+  --arabic-native-labels outputs/arabic_native_labels_v1 \
+  --english-cache outputs/en_ar_english_encoder_20261110_173957 \
+  --output-dir outputs/en_ar_native_ctc_v1
+```
+
+`all-native` 核验 label report、聚合标签 SHA 和原始盘点身份，按 source/row 在
+SQLite 中索引原文、词序列和 ID，逐句与盘点匹配。保留 EGY 优先及 EGY/补样池各 2h
+验证目标，按音频字节去重/划分，排除与英语任一 split 重合的字节指纹，补齐有效
+train 480h。只为新的阿语 train/validation 生成 Encoder 特征。
+英语原缓存按旧 114 类表校验，阿语缓存按新 167 类表校验，并核对两表前 72 项
+逐项一致和冻结英语标签全部处于 2–71；分片 SHA 及 Encoder config/权重索引、
+tap/dtype/hidden 契约一致后，以引用合并特征。原英语分片和元数据不改写。
+`cache_sources.json` 记录兼容接入的两套词表 SHA 和合并缓存身份。
+新 Head 为 167 类，从头初始化，原训练超参数沿用 0.213，以英阿 macro PER 选点。
+原始输入条件沿用，未加入 70% 混噪。完成后回传新目录 `label_report.json`、
+`cache_sources.json` 和 `head/report.json`。该封装要求新目录，暂无整条续跑。
+
 本地最小验证为两个已提供文本的真实 CALIMA 分析、音素/ID 完整输出及块恢复，
-加相关输入/ID/回归测试。没有以频谱代替发音听审，没有本地加载完整 Qwen。
+加相关输入/ID/冻结清单、native SQLite、缓存和训练器回归测试。没有以频谱代替
+发音听审，没有本地加载完整 Qwen。
 
 ## 0.213 2026-11-10 英阿候选打标至训练入口（先交付英语 Top1）
 

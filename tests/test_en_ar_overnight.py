@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import wave
 from dataclasses import replace
 from pathlib import Path
@@ -114,6 +115,45 @@ def test_freeze_gates_audio_and_reuses_english_g2p(
         for split in ("train", "validation")
         for row in iter_jsonl(ar_output / f"{split}.jsonl")
     )
+
+    native_labels = tmp_path / "native_labels"
+    native_labels.mkdir()
+    native_manifest = native_labels / "labels.jsonl"
+    native_rows = [
+        {**row, "words": ["مش"], "ids": [99, 89, 154], "vocab_sha256": run.NATIVE_VOCAB_SHA}
+        for row in arabic
+    ]
+    native_manifest.write_text(
+        "".join(json.dumps(row) + "\n" for row in native_rows), encoding="utf-8"
+    )
+    write_json(
+        native_labels / "report.json",
+        {
+            "status": "automatic_labels_completed",
+            "vocab_sha256": run.NATIVE_VOCAB_SHA,
+            "num_classes": 167,
+            "labels_sha256": sha(native_manifest),
+            "identity": {"inventories": {"ar_egy": sha(inventory), "ar_msa": sha(inventory)}},
+            "by_group": {"ar_egy": {"ready_rows": 2}, "ar_msa": {"ready_rows": 1}},
+        },
+    )
+    native_output = tmp_path / "native_release"
+    native_output.mkdir()
+    with sqlite3.connect(":memory:") as connection:
+        run.index_native_labels(native_labels, connection, inputs)
+        native_report = run.freeze(
+            native_output,
+            inputs,
+            None,
+            native_manifest,
+            0.0002,
+            protected_audio=protected,
+            native_index=connection,
+            vocab_path=run.NATIVE_VOCAB,
+        )
+    assert native_report["status"] == "labels_complete"
+    assert native_report["vocab_sha256"] == run.NATIVE_VOCAB_SHA
+    assert list(iter_jsonl(native_output / "train.jsonl"))[0]["phoneme_token_ids"] == [99, 89, 154]
 
     ar.write_text("", encoding="utf-8")
     blocked = tmp_path / "blocked"
