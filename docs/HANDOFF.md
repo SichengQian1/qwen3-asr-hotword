@@ -123,6 +123,8 @@ CALIMA EGY/MSA 前端需单独适配，通用 Anchor/评分核心不因加语言
 
 ## 0.215 2026-11-11 阿语全量自动标注返回及 CAPHI-y 定向恢复（已返回）
 
+完整的数据制作说明见 [阿语打标与 Manifest 制作交接（2026-11-12）](ARABIC_NATIVE_LABELING_HANDOFF_2026-11-12.md)：记录原始 Swift JSON、盘点、CALIMA 两条发音分支、历史 y 修复、最终去重/划分及逐步原因，并区分已返回结果和当前实现边界。
+
 用户回传 `outputs/arabic_native_labels_v1/report.json` 的终端 JSON，状态
 `automatic_labels_completed`。源码、配置和词表 SHA 与本地实际文件逐项一致；
 聚合标签 SHA 由用户报告为
