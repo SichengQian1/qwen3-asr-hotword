@@ -1,6 +1,6 @@
 # 工作交接记录
 
-## 0.216 2026-11-11 英阿 r15 merged Encoder 对照训练入口（待工区运行）
+## 0.216 2026-11-11 英阿 r15 merged Encoder 对照训练入口（11-12 已返回）
 
 用户确认本轮另需基于已增训且 **Encoder 已改变** 的 Qwen 模型训练 CTC，使用物理
 GPU 4 单卡。已启动的基模实验保留。新源完整目录为
@@ -59,6 +59,45 @@ python -B scripts/run_en_ar_merged.py run --gpu 4 \
 错误缓存拒收、GPU 等待和续跑，以及原缓存/训练器回归；没有声称已取得新模型实测。
 本地该组 32 项测试、Ruff、Mypy、git diff --check 均通过；小 BF16 safetensors 的
 头部读取也验证通过。完整 r15 模型未在本地加载或下载。
+
+2026-11-12 用户回传最终终端 JSON，`outputs/en_ar_r15_5100_ctc_v1` 完成。
+报告记录物理 GPU 4、新 r15/5100 merged 整权重 SHA
+`7dd3d4da16d9fef24c38feaa649b4aaca467a2499e48fceb5968611d98aa5443`，两语 Encoder
+均重提、未复用基模 hidden states，特征 SHA 校验通过，test 未使用。
+该交付代码为 `594b75825a0688ce5beba18c12f2151d2c99f041`；尚未取得工区
+plan.json、完整模型/缓存或 Head SHA 进行独立文件身份复核。
+
+| epoch38 最佳验证 | 样本 | 音素错误 / 参考音素 | PER |
+| --- | ---: | ---: | ---: |
+| 英语 | 2,361 | 2,771 / 58,742 | 4.717238% |
+| 阿语 | 1,456 | 33,454 / 190,095 | 17.598569% |
+| 两语等权 macro | 3,817 | 各语 PER 的算术平均 | 11.157904% |
+| 全部音素加权 | 3,817 | 36,225 / 248,837 | 14.557723% |
+
+训练共 496,959 样本、972 个特征分片；验证 3,817 样本、8 片。冻结 Encoder
+317,477,504 参数，仅训练 878,247 参数的 167 类 temporal-upsample Head。
+训练 38/40 轮，`best_epoch=38` 且 `early_stopped=true`；最佳/末轮验证相同，
+val loss 0.412940，train loss 0.374326、在线 train PER 14.408444%。Head 记录的
+训练耗时 12,684.66s（约 3h31m，不含两语提特征），结束 LR 1.875e-5，尚高于
+5e-6 下限。保存最佳按 macro/worst-group/loss 字典序接纳任意改善；早停按相对
+patience 参考点超过 0.0005 的改善重置，6 轮未重置可与末轮仍创最佳同时出现。
+仅末轮摘要不能证明波动模式、完全收敛或排除过拟合，需要完整/末段 metrics。
+
+报告中的四份配对清单 SHA：
+
+```text
+en/train       240c06bd2c9e7362c9b37a4d79e6e3bfcc04ddcfe81b09226004c17d760d7d1b
+en/validation  cd8cc771a3ed157e965f0dc767b41040e0c03fb833c90b2a1b5d76b075fd80a1
+ar/train       37500a4a09ad0f532357b829d5b34a7b1febf47eaee9a5b53562d77f91037274
+ar/validation  eb9c34496a1e7d7b0cf71537ac7a7fc0f0e0c39c97c72d4f9477e35c7c24b77b
+```
+
+当前阶段性结论：新 Encoder + CTC 训练已完成，阿语为当前自动标签下主要误差
+来源；基模 `outputs/en_ar_native_ctc_v1/head/report.json` 尚未返回，不能判断
+r15 相对基模提升/退化。CTC PER 不等于热词召回或最终 ASR WER。下一步先返回
+基模 Head 摘要、r15 末几轮 metrics；再按埃及/补样池分组诊断阿语，后续检索必须
+使用 r15 Encoder + 本次最佳 Head + 167 类表及相应索引。r15 先前训练是否见过本轮
+验证音频仍未知，不能将当前验证表现直接宣布为严格未见数据泛化。
 
 ## 0.215 2026-11-11 阿语全量自动标注返回及 CAPHI-y 定向恢复（已返回）
 
