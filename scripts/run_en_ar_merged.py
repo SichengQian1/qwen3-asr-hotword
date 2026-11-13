@@ -24,6 +24,106 @@ from scripts.run_en_ar_training import NATIVE_VOCAB, NATIVE_VOCAB_SHA, VOCAB, VO
 CONFIG = ROOT / "configs/en_ar_merged_r15.workzone.json"
 
 
+def retrain_head(source: Path, output: Path, factor: int, gpu: int, resume: bool) -> dict[str, Any]:
+    from qwen_hotword.phonemes.coverage import load_phoneme_vocab
+    from qwen_hotword.phonemes.mfa_v03_assets import sha
+    from qwen_hotword.training.sharded_ctc import exclusive_training_run, train_sharded_ctc_head
+    from scripts.arabic_diagnostic_common import (
+        completed_run,
+        load_cache,
+        manifest_rows,
+        protect_output,
+        protected_run_directories,
+        read,
+        recheck,
+        training_options,
+    )
+
+    if factor < 2:
+        raise ValueError("upsampling factor must be >= 2")
+    if output.exists() and not resume:
+        raise FileExistsError("comparison output exists; use --resume for the same contract")
+    if resume and not (output / "contract.json").is_file():
+        raise ValueError("resume requires complete comparison contract")
+    run = completed_run(source)
+    protect_output(output, protected_run_directories(run))
+    options = training_options(run["head"], factor)
+    vocab_path = Path(run["plan"]["vocabularies"]["ar"]["path"])
+    code_files = [
+        Path(__file__),
+        ROOT / "scripts/arabic_diagnostic_common.py",
+        ROOT / "scripts/run_en_ar_training.py",
+        ROOT / "src/qwen_hotword/training/sharded_ctc.py",
+        ROOT / "src/qwen_hotword/modeling/ctc_head.py",
+    ]
+    contract = {
+        "source_identity": run["identity"],
+        "training_options": options,
+        "vocab_sha256": sha(vocab_path),
+        "encoder_recomputed": False,
+        "initialization": "fresh_random_head",
+        "test_set_used": False,
+        "code": {str(path): sha(path) for path in code_files},
+    }
+    if resume:
+        if read(output / "contract.json") != contract:
+            raise ValueError("resume source, options or code changed")
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+        write_json(output / "contract.json", contract)
+    train = load_cache(run, "train", output)
+    validation = load_cache(run, "validation", output)
+    groups = {r["id"]: r["language"] for r in manifest_rows(run, "validation", ("en", "ar"))}
+    train_ids = {value for shard in train.shards for value in shard.sample_ids}
+    if train_ids.intersection(groups) or set(groups.values()) != {"en", "ar"}:
+        raise ValueError("train/validation isolation or language coverage failed")
+    write_json(
+        output / "cache_sources.json",
+        {
+            **run["caches"],
+            "source_run": str(source.resolve()),
+            "encoder_recomputed": False,
+            "head_time_upsampling_factor": factor,
+        },
+    )
+    head = output / "head"
+    state = head / "training_state_latest.pt"
+    if not state.exists() and any(
+        (head / name).exists() for name in ("metrics.jsonl", "ctc_head_best.pt")
+    ):
+        raise ValueError("partial Head artifacts without resumable state; preserve and inspect")
+    wait_for_gpu(gpu, 20)
+    with (
+        exclusive_training_run(head),
+        stage_progress(f"Train paired Head x{factor} (cached Encoder)"),
+    ):
+        train_sharded_ctc_head(
+            train,
+            validation,
+            load_phoneme_vocab(vocab_path),
+            head,
+            vocab_path=vocab_path,
+            device="cuda:0",
+            validation_sample_groups=groups,
+            resume=state.exists(),
+            **options,
+        )
+    recheck(run)
+    report = {
+        "status": "completed",
+        "source_identity": run["identity"],
+        "source_run": str(source.resolve()),
+        "physical_gpu": gpu,
+        "head_time_upsampling_factor": factor,
+        "encoder_recomputed": False,
+        "contract_sha256": sha(output / "contract.json"),
+        "head": read(head / "report.json"),
+        "test_set_used": False,
+    }
+    write_json(output / "report.json", report)
+    return report
+
+
 def wait_for_manifests(config_path: Path) -> None:
     config = json.loads(config_path.read_text())
     paths = [
@@ -185,14 +285,18 @@ def execute(output: Path, plan: dict[str, Any], gpu: int, minimum_gib: float) ->
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "run"))
+    parser.add_argument("action", choices=("prepare", "run", "retrain-head"))
+    parser.add_argument("--source-run", type=Path)
+    parser.add_argument("--head-time-upsampling-factor", type=int, default=2)
     parser.add_argument("--config", type=Path, default=CONFIG)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
-    if args.action == "run" and (args.gpu is None or args.gpu < 0):
-        parser.error("run requires --gpu N")
+    if args.action in ("run", "retrain-head") and (args.gpu is None or args.gpu < 0):
+        parser.error("run/retrain-head requires --gpu N")
+    if args.action == "retrain-head" and args.source_run is None:
+        parser.error("retrain-head requires --source-run")
     if args.action == "prepare" and args.resume:
         parser.error("--resume applies to run after a complete plan.json exists")
     output = args.output_dir.resolve()
@@ -201,6 +305,12 @@ def main() -> int:
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     try:
         with exclusive_job(output):
+            if args.action == "retrain-head":
+                report = retrain_head(
+                    args.source_run, output, args.head_time_upsampling_factor, args.gpu, args.resume
+                )
+                print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+                return 0
             pin(VOCAB, VOCAB_SHA)
             pin(NATIVE_VOCAB, NATIVE_VOCAB_SHA)
             if args.resume:

@@ -1,5 +1,142 @@
 # 工作交接记录
 
+## 0.217 2026-11-13 阿语 PER 改进第一轮：标签诊断、文本一致性与 ×3 Head 对照
+
+用户批准按提供的 Markdown 顺序执行。原文存为
+`docs/ARABIC_CTC_PER_ANALYSIS_2026-11-12.md`（保持原文，不把其中推断写成工区实测）。
+本节点交付该文附录 B 的 WP1–WP4；本轮不改 `arabic_native.py`、标签、词表、
+训练/验证划分，不读 test。第二轮前端 v3、全量重标、来源分层/节目留出，待本轮
+返回结果后按文中门槛定稿。这不是已经完成标签优化或取得新的 H200 指标。
+
+### 已实现与复用边界
+
+- WP1：`scripts/diagnose_arabic_labels.py stats` 验证标签 report/contract、聚合标签
+  SHA、各 review 分片 SHA/数量和 inventory SHA。EGY 读 v1，MSA 读 caphi_y_v2；
+  展开首次阻断原因的具体值。按 D6 原规则统计实际入选 train/validation 的标签暴露，
+  用 source+row 对齐清单并核对原文、group、完整 ID 序列；未入选行不计入。
+  输出来源条数、小时、行号范围、原 inventory 行数，以及不超过 200 KB 的汇总。
+- WP2：扩展原 `diagnose_frozen_ctc.py` / `ctc_diagnostics.py`，复用原 CTC 解码和
+  编辑统计，增加重复 `--grouping NAME=FIELD`、逐样本参考/假设/pressure、p50/p90/p99、
+  高 PER 比例和分组 Top 错误。F1/F2/F3 分别合并元音长短、辅音长短、删除 ʔ，
+  对参考和假设同时操作，只作用于 `ar_ipa:` 单位；保留原精确 PER 和折叠后分母。
+  `--source-run` 从完成运行的 plan/cache_sources/head report 解析两语验证缓存与
+  最佳 Head，检查缓存 SHA、Encoder/词表身份、拼接 fingerprint，复现原报告的
+  best epoch 和各语言错误数。一次解码后输出分组和逐样本结果。
+  `review-sheet` 导出每个阿语组最高 PER 50 条，加排除重复后按 audio_sha256
+  排序的 50 条；不足时保留实际数量。CSV 含音频路径、原文、diac、参考/预测音素。
+- WP3：`check_arabic_text_agreement.py` 调用已有 `casablanca_wer.load_qwen`，默认模型
+  从 `configs/480h_cache.workzone.yaml` 读取（原始 Qwen3-ASR-1.7B），固定 Arabic，
+  无热词。全阿语验证集＋每个实际训练来源按音频 SHA 排序前 300 条；D3 规范化
+  保持原文规则。输出逐句 CER/WER 和每 split/group/source 中位 CER、平均句级
+  WER、语料级 WER、高 CER 占比。可关联 WP2 验证 PER，输出分桶均值和 Pearson。
+  每批原子保存，身份相同的 `--resume` 跳过完成批；部分 pending 文件不当完成结果。
+- WP4：`run_en_ar_merged.py retrain-head` 只引用 r15 已完成缓存。复用原
+  `combine_caches`、`load_disk_feature_cache`、`train_sharded_ctc_head`，不重提或复制
+  Encoder 特征。除上采样倍数外，超参数/seed/早停/选模从源 head/report.json 读取。
+  新初始化 Head；清单 factor=2 作为可行性下限，factor<2 拒绝，factor>=2 可运行。
+  原 train_stage 和原标签/特征提取流程未改。
+
+### 工区命令：按顺序执行
+
+分支 `codex/g2p-coverage-scan`，使用现有 qwen3-asr-hotword Python 环境；无需安装依赖。
+下列命令在仓库根目录执行，GPU 4 指物理单卡。WP2/3/4 顺序运行，避免同卡同时争用。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+```
+
+WP1（CPU，读 JSON/标签，绝不读 WAV；耗时取决于文件盘速）：
+
+```bash
+python -B scripts/diagnose_arabic_labels.py stats \
+  --output-dir outputs/arabic_per_diag_v1/labels
+```
+
+WP2（GPU 4，只有轻量 Head，读取约 0.77 GB 验证特征；通常分钟级）：
+
+```bash
+python -B scripts/diagnose_frozen_ctc.py \
+  --source-run outputs/en_ar_r15_5100_ctc_v1 --gpu 4 \
+  --grouping source_group=source_group --grouping source=source \
+  --output outputs/arabic_per_diag_v1/val_diagnostics.json \
+  --per-sample-output outputs/arabic_per_diag_v1/val_per_sample.jsonl
+```
+
+听审表只制作，不自动更改标签：
+
+```bash
+python -B scripts/diagnose_arabic_labels.py review-sheet \
+  --per-sample outputs/arabic_per_diag_v1/val_per_sample.jsonl \
+  --output-dir outputs/arabic_per_diag_v1/listening
+```
+
+WP3（GPU 4，加载完整原基模；读取选中的 WAV，规划约一小时，非实测承诺）：
+
+```bash
+python -B scripts/check_arabic_text_agreement.py --gpu 4 \
+  --per-sample outputs/arabic_per_diag_v1/val_per_sample.jsonl \
+  --output-dir outputs/arabic_per_diag_v1/text_agreement
+```
+
+WP4（GPU 4，Head 训练；先校验约 92 GB 缓存，规划数小时，视磁盘/收敛情况）：
+
+```bash
+python -B scripts/run_en_ar_merged.py retrain-head --gpu 4 \
+  --source-run outputs/en_ar_r15_5100_ctc_v1 \
+  --head-time-upsampling-factor 3 \
+  --output-dir outputs/en_ar_r15_5100_head_up3_v1
+```
+
+### 续跑、核验与回传
+
+WP1 和听审表目录必须新建；WP2 两个输出文件不得已存在。已失败或完成的产物保留，
+需要重做时使用新目录/文件名。WP3 中断后原命令加 `--resume`；模型文件 SHA、选择集、
+源报告、推理设置、代码及可选 PER 文件一致才跳过完成批。WP4 原命令加 `--resume`，
+校验源运行与新契约、重查缓存，再从自己的训练状态继续。均不改任何原训练/标签目录。
+若初始化还没生成完整 contract，保留部分目录并换新目录；不自动删除或重新构建旧输出。
+WP4 使用源运行记录中的缓存身份，不要求历史 orchestration 脚本等于今天的新脚本，
+但自己的 resume 契约严格绑定当前代码。不要用本次新脚本去续跑已完成的旧 `run` 动作。
+
+最少返回四份 JSON（无需音频、权重、缓存、逐样本大文件）：
+
+1. `outputs/arabic_per_diag_v1/labels/labels_report.json`
+2. `outputs/arabic_per_diag_v1/val_diagnostics.json`
+3. `outputs/arabic_per_diag_v1/text_agreement/summary.json`
+4. `outputs/en_ar_r15_5100_head_up3_v1/head/report.json`（最好同时附顶层 report.json）
+
+完成核验：
+
+```bash
+jq '{status,matched_rows,source_distribution}' outputs/arabic_per_diag_v1/labels/labels_report.json
+jq '{status,validation_samples,per_sample_sha256}' outputs/arabic_per_diag_v1/val_diagnostics.json
+jq '{status,samples,validation_PER_agreement}' outputs/arabic_per_diag_v1/text_agreement/summary.json
+jq '{status,best_epoch,best_validation_by_group,head_config}' outputs/en_ar_r15_5100_head_up3_v1/head/report.json
+```
+
+### 发现的问题与解释边界
+
+- 原 r15 的 cache_views 是组合引用，不能当作普通 cache_index 目录直接加载。
+  新入口按 plan 的两语清单位置加载原始缓存，再使用已有组合函数验证 fingerprint。
+- D6 的规则暴露是重叠启发式计数，并非实测错误贡献；review 原因是首个阻断项，
+  一个词/句可能还有其他问题。文中有关 `_` 和实际补样来源的猜测尚需 WP1 返回确认。
+- “音素/秒”是当前标签密度，不是真实测得语速；折叠 PER 改变评价单位与分母，
+  不能直接把下降量解释为某条发音规则造成的错误。
+- WP3 用原基模做筛查，模型本身也会犯错；CER 高不自动删除样本。训练集按来源
+  等额抽样，与验证集分开汇总，不把混合样本平均当作全训练集错误率。
+- ×3 会增加 Head 中间计算及输出帧数；能否改善召回、是否保留，等对照结果决定。
+  当前交付没有修改热词表，也没有给出最终 ASR WER 或新的检索召回率。
+
+本地用小合成清单/缓存验证标签关联、只计入选行、review SHA、三种折叠口径、
+真实小 Head 的 ×3 训练与恢复、诊断输出、ASR 完成批续跑、源目录不变及已有输出拒收。
+没有加载/下载完整 Qwen 或运行 H200。全量 pytest 已通过（1 项跳过）；最终定向
+26 项、相关 Ruff、git diff --check 通过。相关 7 个代码文件以实际 Python 3.12
+运行 Mypy（`MYPYPATH=src --explicit-package-bases --python-version 3.12
+--follow-imports=silent`）通过。原项目 `mypy src` 仍被已有的 qwen_asr/vllm 类型依赖
+及 NumPy stub 的 Python 3.12 语法与项目 3.10 配置冲突阻断；没有扩大修改该环境。
+仓库原有 7 份未知测试修改与未跟踪资料保持原样，不纳入本次提交。
+
 ## 0.216 2026-11-11 英阿 r15 merged Encoder 对照训练入口（11-12 已返回）
 
 用户确认本轮另需基于已增训且 **Encoder 已改变** 的 Qwen 模型训练 CTC，使用物理

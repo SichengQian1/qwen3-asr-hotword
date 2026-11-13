@@ -11,6 +11,7 @@ from qwen_hotword.phonemes.coverage import PhonemeVocab
 from qwen_hotword.training.ctc_overfit import CachedSample, collapse_ctc_ids
 from qwen_hotword.training.edit_distance import sequence_editops
 from qwen_hotword.training.sharded_ctc import DiskFeatureCache, load_feature_shard
+from qwen_hotword.training.stage_progress import stage_progress
 
 
 @dataclass
@@ -113,7 +114,12 @@ def diagnose_ctc_checkpoint(
         "minimum_ratio_gt_0_90": ErrorAccumulator(),
     }
     loss_sum = 0.0
-    with torch.no_grad():
+    with (
+        torch.no_grad(),
+        stage_progress(
+            "Decode frozen validation cache", total=len(selected_ids), every=batch_size
+        ) as tick,
+    ):
         for descriptor in cache.shards:
             samples = load_feature_shard(descriptor, num_classes=len(vocab.tokens))
             samples = [sample for sample in samples if sample.sample_id in selected_ids]
@@ -165,9 +171,19 @@ def diagnose_ctc_checkpoint(
                         sample_metrics.append(
                             {
                                 "sample_id": sample.sample_id,
+                                "reference": [vocab.tokens[t] for t in sample.token_ids],
+                                "hypothesis": [vocab.tokens[t] for t in hypothesis],
+                                "ctc_pressure_bucket": ctc_pressure_bucket(
+                                    sample.token_ids, input_length=input_length
+                                ),
+                                "groups": {
+                                    name: groups[sample.sample_id]
+                                    for name, groups in normalized_groupings.items()
+                                },
                                 **sample_accumulator.to_dict(),
                             }
                         )
+                tick(detailed.totals.sample_count)
             del samples
 
     total = detailed.totals
