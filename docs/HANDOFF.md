@@ -1,5 +1,59 @@
 # 工作交接记录
 
+## 0.219 2026-11-13 中英183类全量新标签、70%加噪及随机Head训练入口
+
+用户授权直接全量推进；随后明确**暂不做热词表、检索、delivery及最终ASR**，
+本次只到训练完成及验证PER。没有独立小样本训练环节。
+完整方案与产物见 [中英训练说明](ZH_EN_TRAINING_V1.md)，配置
+`configs/zh_en_noise70.workzone.json`，入口 `scripts/run_zh_en_training.py`。
+
+已返回的基础检查：183类及中/美/英MFA身份通过；中文观察到207个未压缩tar，
+抽样同名txt/wav配对；英语JSON正文为response/assistant包装文本。
+用户后续检查 `/home_92 → /host_home` 前缀映射后US 8/8、UK 8/8找到文件。
+这些是格式与抽样事实，不是全量时长、口音纯度或说话人隔离验证。
+
+实现：原始Qwen3-ASR-1.7B冻结，不继承英阿Encoder或旧Head；
+中文mandarin_china_mfa 3.0.0，美/英english_{us,uk}_mfa 3.3.0，固定183类。
+中文先经固定pypinyin上下文读音、jieba词边界转带调拼音，再调用真实MFA Top1；
+没有直接输入汉字或丢弃未知字符。词组词典可能含变调读法，未另加变调或儿化规则，
+自动标签不能视作人工真实发音。纯Python前端依赖在独立输出目录按SHA取得，
+不更改原Conda环境；G2P复用只读aligner 3.4.0/3.4.3。
+
+数据默认目标中文480h、US336h、UK144h；验证分别10/5/5h并制作相同音频10dB配对。
+每个训练来源按条数固定70%加10dB噪声，替换原声而非重复扩样。
+源组按元数据或未核实文件名族切分，精确PCM重复合并隔离；留出test不标注/缓存/选模。
+实际可用不足训练目标90%或验证目标50%则记录报告并停在准备阶段；不从test补足。
+这些是工程保护线，口音配比和噪声比例效果尚待实际验证。
+新Head为原temporal_upsample ×2结构、183输出、随机初始化，最多40轮。
+四组zh/en ×原声/带噪宏平均PER选模，最佳Head另报zh/us/uk共六组结果。
+
+分支 `codex/g2p-coverage-scan`；只在H200工区执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_zh_en_training.py all --gpu 4
+```
+
+默认输出 `outputs/zh_en_183_noise70_scratch_v1`；保留全部历史outputs。
+同命令自动续跑，不需--resume：准备与特征按完成批核验复用，Head从本轮已完成epoch恢复
+优化器/调度器；当前未完成epoch可能重跑。完成训练不重训。代码/配置变更拒用原目录。
+目录级并发锁防止同一实验同时写入，不影响英阿历史目录。
+
+状态核验（CPU，无模型加载）：
+
+```bash
+python -B scripts/run_zh_en_training.py status
+```
+
+返回本目录 `return_bundle.zip`，包含report、label/g2p统计、split边界、模型身份、
+head/report与metrics、validation_per。最佳权重 `head/ctc_head_best.pt`；不回传大缓存。
+本地已检查前端真实拼音/词边界与文件SHA、合成WAV/tar读取、重复冲突隔离、70%配比、
+验证配对、完整标签失败、恢复身份及训练入口参数；**没有本地加载Qwen或声称H200训练通过**。
+本轮相关测试60项通过，13项Torch相关既有回归因本地未安装Torch跳过；
+新入口ruff、format、mypy及git diff --check通过，工区端到端结果待返回。
+
 ## 0.218 2026-11-13 中英183类表确认、中文/英式MFA随Git交付及语料格式预检
 
 用户确认中文 `mandarin_china_mfa` 3.0.0＋美式/英式G2P 3.3.0，共183类；

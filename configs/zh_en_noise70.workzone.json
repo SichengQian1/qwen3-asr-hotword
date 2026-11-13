@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "output": "outputs/zh_en_183_noise70_scratch_v1",
+  "foundation_config": "configs/zh_en_foundation.workzone.json",
+  "model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "noise_root": "/data/h00911716/data_noise/musan/noise",
+  "audio_fallbacks": {"/home_92": "/host_home"},
+  "num_classes": 183,
+  "encoder_frozen": true,
+  "head_initialization": "random",
+  "noise_percent": 70,
+  "snr_db": 10,
+  "seed": 20261113,
+  "mfa_environment": "aligner",
+  "cpu_workers": 8,
+  "g2p_workers": 4,
+  "part_records": 512,
+  "encoder_batch_size": 1,
+  "minimum_free_gpu_gib": 35,
+  "hours": {
+    "train": {"zh": 480, "us": 336, "uk": 144},
+    "validation": {"zh": 10, "us": 5, "uk": 5}
+  },
+  "minimum_hours": {
+    "train": {"zh": 432, "us": 302.4, "uk": 129.6},
+    "validation": {"zh": 5, "us": 2.5, "uk": 2.5}
+  },
+  "head": {"type": "temporal_upsample", "hidden_dimension": 512, "kernel_size": 5, "dropout": 0.1, "time_upsampling_factor": 2},
+  "training": {"epochs": 40, "batch_size": 256, "learning_rate": 0.0003},
+  "frontend_policy": "context_pypinyin_dictionary_tones_no_additional_sandhi; jieba_HMM_false; digits_and_unknown_symbols_quarantined; uppercase_readings_quarantined; Chinese_Latin_spans_use_US",
+  "frontend_packages": [
+    {
+      "package": "pypinyin", "version": "0.55.0",
+      "url": "https://files.pythonhosted.org/packages/b9/7b/4cabc76fcc21c3c7d5c671d8783984d30ac9d3bb387c4ba784fca3cdfa3a/pypinyin-0.55.0-py2.py3-none-any.whl",
+      "filename": "pypinyin-0.55.0-py2.py3-none-any.whl",
+      "sha256": "d53b1e8ad2cdb815fb2cb604ed3123372f5a28c6f447571244aca36fc62a286f"
+    },
+    {
+      "package": "jieba", "version": "0.42.1",
+      "url": "https://files.pythonhosted.org/packages/c6/cb/18eeb235f833b726522d7ebed54f2278ce28ba9438e3135ab0278d9792a2/jieba-0.42.1.tar.gz",
+      "filename": "jieba-0.42.1.tar.gz",
+      "sha256": "055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2"
+    }
+  ]
+}
