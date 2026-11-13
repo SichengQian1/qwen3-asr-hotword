@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "vocab": "configs/phonemes/zh_en_mfa_g2p_vocab.v1.0.json",
+  "vocab_sha256": "ef5a411afbdb238a400302da2d871fe64f8f94e8d065fdf045b8bf5f39a2b5cb",
+  "base_model": "/glusterfs_103/models/Qwen3-ASR-1.7B",
+  "num_classes": 183,
+  "models": {
+    "zh": {
+      "directory": "models/mfa/hf_g2p_20261113_zh_en/zh/g2p/mandarin_china_mfa",
+      "name": "mandarin_china_mfa",
+      "g2p_version": "3.0.0",
+      "repo": "mandarin_mfa",
+      "revision": "cfbee14002d514fcf411c16676877a96b7afe6ff",
+      "files_sha256": {
+        "graphemes.sym": "3e126f7181eed93954436c064f67882746a93c9edf1616b52193456b62ea70f4",
+        "graphemes.txt": "3e126f7181eed93954436c064f67882746a93c9edf1616b52193456b62ea70f4",
+        "phones.sym": "8aa4509e58ec36366fc119d4508d6583bec122d5d07bd1889ab9a8ec4591ea6a",
+        "phones.txt": "8aa4509e58ec36366fc119d4508d6583bec122d5d07bd1889ab9a8ec4591ea6a",
+        "model.fst": "9d25686b7deb7e127585283f30f66fd240461338f4c79911cf0e583a892e1b63",
+        "meta.json": "e934d6e99c1ef60a94435a7f437e01b829e38039c926e3715276b57d5e5fcb2d"
+      },
+      "delivery": "committed_at_user_request",
+      "runtime_symbols": "txt"
+    },
+    "us": {
+      "directory": "models/mfa/hf_g2p_20261029_v03/en/g2p/english_us_mfa",
+      "name": "english_us_mfa",
+      "g2p_version": "3.3.0",
+      "repo": "english_mfa",
+      "revision": "1009e3c6c689f10875146a5e4e5c2233f8eaf922",
+      "files_sha256": {
+        "graphemes.txt": "90348cd8a4af8132165dcb353d107911474ebb356f7364a9dfdcc7dec65e8ce8",
+        "phones.txt": "3ebfd662dc1e0337fb0637e60a2ea538eac90d6d4e827d6ca2ca6100dbf02b25",
+        "model.fst": "001bc21fe1934f3b1e86ae006aca9673c6be60de33698101396bec8545b3f7f3",
+        "meta.json": "d24cc919c996be77742c0299bbd35dd2b22f88ca0b3cbdd4d4cb6f04c0e6d365"
+      },
+      "delivery": "reuse_existing_verified_model",
+      "runtime_symbols": "txt"
+    },
+    "uk": {
+      "directory": "models/mfa/hf_g2p_20261113_zh_en/uk/g2p/english_uk_mfa",
+      "name": "english_uk_mfa",
+      "g2p_version": "3.3.0",
+      "repo": "english_mfa",
+      "revision": "1009e3c6c689f10875146a5e4e5c2233f8eaf922",
+      "files_sha256": {
+        "graphemes.sym": "2d451d6d68b3d85ff02499fc4eacef568c5a47544cc6fb2598954f54e421dd19",
+        "graphemes.txt": "2d451d6d68b3d85ff02499fc4eacef568c5a47544cc6fb2598954f54e421dd19",
+        "phones.sym": "24b7c397f7960c0a72469a505d7bd9bcb4170b56d7b2ad433a5ddcdeb1e4d003",
+        "phones.txt": "24b7c397f7960c0a72469a505d7bd9bcb4170b56d7b2ad433a5ddcdeb1e4d003",
+        "model.fst": "a03541d2c2fde7d84514ff812f8d082be214fcb722d442e248d379ca016df1bb",
+        "meta.json": "43c9dd301037493021cbd97e3a4c2b8f3b3549e1268cf35672cece4f7395a079"
+      },
+      "delivery": "committed_at_user_request",
+      "runtime_symbols": "txt"
+    }
+  },
+  "english_sources": {
+    "us": "/host_home/z00841352/27A/data/en/json/swift_en_美式英语.json",
+    "uk": "/host_home/z00841352/27A/data/en/json/swift_en_英国.json"
+  },
+  "chinese_root": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0025-noah_carrec230-000500H_shards",
+  "english_scope_note": "US source historically also contained AU/CN tags; inspect original metadata before sampling or routing. Filename alone does not certify accent.",
+  "phase": "assets_and_bounded_source_schema_inspection",
+  "training_ratio_status": "not_frozen",
+  "chinese_text_frontend_status": "pending_schema_inspection"
+}

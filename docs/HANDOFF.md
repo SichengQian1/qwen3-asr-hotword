@@ -1,5 +1,45 @@
 # 工作交接记录
 
+## 0.218 2026-11-13 中英183类表确认、中文/英式MFA随Git交付及语料格式预检
+
+用户确认中文 `mandarin_china_mfa` 3.0.0＋美式/英式G2P 3.3.0，共183类；
+本轮基模为原始 Qwen3-ASR-1.7B，不继承英阿r15 Encoder或Head。
+完整资源路径、来源说明和运行步骤见 [中英基础资源说明](ZH_EN_FOUNDATION_V1.md)。
+新增 `configs/phonemes/zh_en_mfa_g2p_vocab.v1.0.json` 及逐来源映射TSV，保留
+完整带调/带修饰单位；中美177类加 `fʷ vʷ əw ɛː ɜ ɜː` 六类。没有重标或训练。
+
+用户要求新MFA可通过git pull取得；本次明确按其要求将小型中文、英式FST及元数据
+纳入Git（不包含Qwen或语料）。位于 `models/mfa/hf_g2p_20261113_zh_en/{zh,uk}`；
+美式复用已部署的 `models/mfa/hf_g2p_20261029_v03/en`。全部模型和符号表SHA固定于
+`configs/zh_en_foundation.workzone.json`。新包 `.sym/.txt` 均由FST内嵌符号表导出，
+避免官方英式 `.sym` 编号错位；源FST及meta不改，附许可和修改说明。
+
+用户提供美式/英式JSON分别为 `/host_home/z00841352/27A/data/en/json/` 下的
+`swift_en_美式英语.json`、`swift_en_英国.json`；中文根目录为
+`/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0025-noah_carrec230-000500H_shards`。
+中文实际容器格式、字段和音频关联待工区检查。原美式JSON历史上还含AU/CN标签，
+仅文件名不作为完整美式范围证明。数据时长、口音比例、噪声和划分尚未冻结。
+
+分支 `codex/g2p-coverage-scan`，工区现有Qwen环境运行CPU检查：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/inspect_zh_en_foundation.py
+```
+
+每份英语JSON读至多8行；中文最多观察10,000文件，检查最多12个文件的小样；
+tar流式看至多64成员，不解包或加载音频。保留未知格式、原字段、配对线索和错误；
+不能把文件布局抽样当成全语料可用性/时长/口音或split验证。
+默认每次新建 `outputs/zh_en_foundation_probe_<随机ID>`，指定目录须不存在；
+短时检查中断后重复命令生成新目录，无resume，不覆盖旧产物。返回其中
+`return_bundle.zip`（report.json/config.json）。`--assets-only` 可先独立核对资源。
+
+本地真实三分支资产、SHA、183类和NFC/NFD映射通过；相关21项单元/音素回归通过。
+本次不访问工区语料、不加载Qwen、不安装MFA运行环境、不运行批量G2P。
+等待中文实际结构返回后再完成适配及标注入口；没有把汉字直接送入拼音G2P。
+
 ## 0.217 2026-11-13 阿语 PER 改进第一轮：标签诊断、文本一致性与 ×3 Head 对照
 
 用户批准按提供的 Markdown 顺序执行。原文存为
