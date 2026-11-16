@@ -9,18 +9,17 @@ from __future__ import annotations
 import json
 import math
 import re
-import sqlite3
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from qwen_hotword.phonemes.mfa_v03_assets import pin, sha, write_json
-from qwen_hotword.training.arabic_refresh import prefetch_hashes, rank, recording_key
+from qwen_hotword.training.arabic_refresh import rank, recording_key
 from qwen_hotword.training.egyptian_source_audit import comparison_key
 from qwen_hotword.training.en_ar_source_audit import iter_jsonl, transcript_key
 from qwen_hotword.training.stage_progress import stage_progress
+from qwen_hotword.training.verified_audio_hashes import fingerprint
 
 AGREED = {"exact", "punctuation_or_spacing_only", "arabic_spelling_normalization_equivalent"}
 BUCKETS = ("open_source", "gaoshan_train", "coarse_train")
@@ -110,7 +109,9 @@ def capacity(english: float, arabic: dict[str, float], ratios: dict[str, float])
     return min(english, *(arabic[k] / ratios[k] for k in ratios))
 
 
-def select_seconds(rows: list[dict[str, Any]], seconds: float, seed: int) -> list[dict[str, Any]]:
+def select_seconds(
+    rows: list[dict[str, Any]], seconds: float, seed: int, *, ceiling: bool = False
+) -> list[dict[str, Any]]:
     """Nearest deterministic prefix; error <= one recording, no slicing or repetition."""
     ordered = sorted(rows, key=lambda r: rank(r["audio_sha256"], seed))
     selected: list[dict[str, Any]] = []
@@ -119,6 +120,8 @@ def select_seconds(rows: list[dict[str, Any]], seconds: float, seed: int) -> lis
         length = row["duration_seconds"]
         if used >= seconds:
             break
+        if ceiling and used + length > seconds:
+            continue
         if selected and used + length > seconds and seconds - used < used + length - seconds:
             break
         selected.append(row)
@@ -152,25 +155,6 @@ def manifest(row: dict[str, Any], split: str) -> dict[str, Any]:
         "split": split,
         "experiment": "full-ctc-v1",
     }
-
-
-def fingerprint(rows: list[dict[str, Any]], output: Path, workers: int) -> None:
-    """Persist each completed audio hash, including across interrupted runs."""
-    with sqlite3.connect(output / "audio_hashes.sqlite") as db, ThreadPoolExecutor(workers) as pool:
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS hashes(path TEXT PRIMARY KEY,size INT,mtime INT,sha TEXT)"
-        )
-        with stage_progress(
-            "Fingerprint eligible/protected audio; durable per-file cache", total=len(rows)
-        ) as tick:
-            for start in range(0, len(rows), 512):
-                batch = rows[start : start + 512]
-                prefetch_hashes(batch, db, pool)
-                for row in batch:
-                    row["audio_sha256"] = db.execute(
-                        "SELECT sha FROM hashes WHERE path=?", (row["audio_path"],)
-                    ).fetchone()[0]
-                tick(start + len(batch))
 
 
 def prepare_inputs(root: Path, cfg: dict[str, Any], output: Path, source: dict[str, Any]) -> None:
@@ -336,6 +320,10 @@ def prepare_english(root: Path, cfg: dict[str, Any], output: Path) -> None:
 
 
 def freeze(root: Path, cfg: dict[str, Any], output: Path, workers: int) -> dict[str, Any]:
+    maximum_hours = cfg.get("maximum_hours_per_language")
+    if maximum_hours is not None and (not math.isfinite(maximum_hours) or maximum_hours <= 0):
+        raise ValueError("maximum hours must be positive and finite")
+    seal(output / "selection_contract.json", {"maximum_hours_per_language": maximum_hours})
     marker = output / "prepare_report.json"
     if marker.exists():
         report = read(marker)
@@ -367,6 +355,16 @@ def freeze(root: Path, cfg: dict[str, Any], output: Path, workers: int) -> dict[
     all_rows = [*protected, *en_val, *english, *ar]
     fingerprint(all_rows, output, workers)
     protected_sha = {r["audio_sha256"] for r in protected}
+    protected_sha.update(
+        r["expected_audio_sha256"] for r in protected if r.get("expected_audio_sha256")
+    )
+    # Bad training rows are quarantined; protection records still protect their bytes/groups.
+    audio_review = [r for r in [*english, *ar] if r.get("audio_review_issue")]
+    save_rows(output / "audio_review.jsonl", audio_review)
+    english = [r for r in english if not r.get("audio_review_issue")]
+    ar = [r for r in ar if not r.get("audio_review_issue")]
+    en_val = [r for r in en_val if not r.get("audio_review_issue")]
+
     protected_groups = {group_key(r)[0] for r in protected}
     # Conflicting labels for byte-identical audio quarantine the WHOLE group.
     label_by_sha: dict[str, set[str]] = defaultdict(set)
@@ -423,20 +421,38 @@ def freeze(root: Path, cfg: dict[str, Any], output: Path, workers: int) -> dict[
         "excluded_counts": reasons,
         "conflicting_audio_groups": len(conflicts),
         "minimum_training_hours": None,
+        "maximum_hours_per_language": maximum_hours,
+        "audio_review_rows": len(audio_review),
     }
     write_json(output / "capacity_report.json", capacity_report)
     seconds = capacity(english_capacity, arabic_capacity, cfg["ratios"])
+    if maximum_hours is not None:
+        seconds = min(seconds, maximum_hours * 3600)
     selected = []
     # Retain Egyptian-accent English first, then US supplementation.
     egy = pools["train/en_egy"]
-    first = select_seconds(egy, min(seconds, sum(r["duration_seconds"] for r in egy)), cfg["seed"])
+    first = select_seconds(
+        egy,
+        min(seconds, sum(r["duration_seconds"] for r in egy)),
+        cfg["seed"],
+        ceiling=maximum_hours is not None,
+    )
     selected.extend(first)
     rest = seconds - sum(r["duration_seconds"] for r in first)
     if rest > 0:
-        selected.extend(select_seconds(pools["train/en_us"], rest, cfg["seed"]))
+        selected.extend(
+            select_seconds(
+                pools["train/en_us"], rest, cfg["seed"], ceiling=maximum_hours is not None
+            )
+        )
     for bucket in BUCKETS:
         selected.extend(
-            select_seconds(pools["train/" + bucket], seconds * cfg["ratios"][bucket], cfg["seed"])
+            select_seconds(
+                pools["train/" + bucket],
+                seconds * cfg["ratios"][bucket],
+                cfg["seed"],
+                ceiling=maximum_hours is not None,
+            )
         )
     # Validation uses only heldout EGY records, spreading the cap across available buckets.
     ar_val = []

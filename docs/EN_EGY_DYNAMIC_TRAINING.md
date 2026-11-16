@@ -1,5 +1,41 @@
 # 英语＋纯埃及方言：动态等时长的一条龙训练
 
+## 最新接续方式：每语最多480小时，GPU5
+
+用户已将本轮上限改为480:480h。原动态run已完成标签，在音频指纹阶段因时长比较失败。
+旧manifest可能把秒数四舍五入到6位小数，而原检查容差为1e-8秒，精度不匹配；
+用户报错未给具体差值，尚不能断定该WAV确实变更或一定只是舍入。
+
+本次使用 `scripts/run_en_egy_480.py` 接续；不再运行下面的旧all命令。
+它校验并引用 `outputs/en_egy_dynamic_ctc_v1/labels`，不重新打阿语标签。
+英语直接引用r15轮已使用的en/train与en/validation，不扩大英语池、不重新跑英语G2P。
+保留纯EGY、8:1:1和英阿1:1；每语H取合格容量与480h的较小值，整段选择向下取，
+不会为了凑时长超出480h；不设置最低小时门槛。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/run_en_egy_480.py --gpu 5
+```
+
+新输出 `outputs/en_egy_480_ctc_v1`；同命令自动续跑。通过SQLite backup复制旧指纹进度，
+原标签与指纹库不修改。旧hash通过size/mtime核验后只补读音频头，不再完整读取同一WAV。
+新增头元数据也持久化。只有已知cbae06e版本的数据准备模块允许兼容升级，
+其他旧输入/标注代码SHA必须一致，不任意跳过合同检查。
+
+时长舍入容差为0.5微秒（加浮点计算余量），选样采用实测头时长。
+更大时长差、已记录的音频SHA变化、实际长度CTC不可行，写入新目录的
+`audio_review.jsonl` 并隔离对应候选；保护集仍保留原/现音频hash及录音组，防止回流训练。
+无法读取或读取过程中变更仍报明确错误，不能把未知内容计作训练小时。
+`audio_duration_report.json`含实际/原时长、差值、分类计数（每类最多20个例子）。
+若English validation中发现真实异常，会隔离并记录，不能再无条件宣称原验证集完全一致。
+
+冻结后自动接相同r15 Encoder缓存复用/补提和Head训练。完成回传
+`outputs/en_egy_480_ctc_v1/return_summary.zip`。未完成时可先回传
+`audio_duration_report.json`、`capacity_report.json`、`prepare_report.json`。
+
+以下保留首次动态方案及机制说明，480h接续策略以上述为准。
+
 ## 本轮已确认策略
 
 固定使用 r15/checkpoint-5100-merged 的 Encoder（不再用基模）；冻结 Encoder，

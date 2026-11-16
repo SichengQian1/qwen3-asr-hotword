@@ -140,7 +140,8 @@ def test_label_worker_quarantines_incomplete_and_candidate_exception(tmp_path, m
         entry.label_job(job)
 
 
-def test_freeze_auto_shrinks_protects_duplicates_and_reuses_cache_order(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cap", [None, 0.01])
+def test_freeze_auto_shrinks_protects_duplicates_and_reuses_cache_order(tmp_path, monkeypatch, cap):
     out = tmp_path / "new"
     out.mkdir()
     cfg = {
@@ -152,6 +153,8 @@ def test_freeze_auto_shrinks_protects_duplicates_and_reuses_cache_order(tmp_path
         "vocab_sha256": "x",
         "ratios": dict(zip(pipeline.BUCKETS, (0.8, 0.1, 0.1), strict=True)),
     }
+    if cap is not None:
+        cfg["maximum_hours_per_language"] = cap
     ar = []
     for b in pipeline.BUCKETS:
         for i in range(100):
@@ -187,6 +190,8 @@ def test_freeze_auto_shrinks_protects_duplicates_and_reuses_cache_order(tmp_path
     def fingerprint(rows, *_):
         for row in rows:
             row["audio_sha256"] = hashlib.sha256(row["audio_path"].encode()).hexdigest()
+            if row["audio_path"] in {ar[2]["audio_path"], english[1]["audio_path"]}:
+                row["audio_review_issue"] = "audio_duration_mismatch"
 
     monkeypatch.setattr(pipeline, "fingerprint", fingerprint)
     old_records = [
@@ -210,6 +215,10 @@ def test_freeze_auto_shrinks_protects_duplicates_and_reuses_cache_order(tmp_path
         not in {"/conflict.wav", protected[0]["audio_path"], protected[1]["audio_path"]}
         for r in train
     )
+    assert all(
+        r["audio_path"] not in {ar[2]["audio_path"], english[1]["audio_path"]}
+        for r in train + validation + test
+    )
     assert len({r["id"] for r in train + validation + test}) == len(train + validation + test)
     en_order = [r["id"] for r in train if r["language"] == "en"]
     expected = [r["id"] for r in old_records if r["id"] in set(en_order)]
@@ -217,6 +226,8 @@ def test_freeze_auto_shrinks_protects_duplicates_and_reuses_cache_order(tmp_path
     en_hours = sum(r["duration_seconds"] for r in train if r["language"] == "en")
     ar_hours = sum(r["duration_seconds"] for r in train if r["language"] == "ar")
     assert abs(en_hours - ar_hours) <= 20
+    if cap is not None:
+        assert en_hours <= cap * 3600 and ar_hours <= cap * 3600
     fingerprint_spy = Mock(side_effect=AssertionError("must skip completed freeze"))
     monkeypatch.setattr(pipeline, "fingerprint", fingerprint_spy)
     assert pipeline.freeze(tmp_path, cfg, out, 2) == result
@@ -265,10 +276,10 @@ def test_real_audit_normalized_warning_is_admitted_but_content_difference_is_not
 def test_durable_audio_fingerprints_resume_without_reread(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    from qwen_hotword.training import arabic_refresh
+    from qwen_hotword.training import verified_audio_hashes
 
     metadata = Mock(return_value=SimpleNamespace(duration_seconds=5.0))
-    monkeypatch.setattr(arabic_refresh, "read_audio_metadata", metadata)
+    monkeypatch.setattr(verified_audio_hashes, "read_audio_metadata", metadata)
     path = tmp_path / "audio.wav"
     path.write_bytes(b"first")
     row = candidate(audio_path=str(path))

@@ -1,6 +1,30 @@
 # 工作交接记录
 
-## 0.224 2026-11-16 英语＋纯EGY动态等时长一条龙（工区待执行）
+## 0.224 2026-11-16 英语＋纯EGY一条龙：标签完成后改为480h上限接续
+
+**最新状态/命令：** 用户返回指纹阶段2048/984703后报英语WAV时长变化；完整阿语标签已组装，
+尚未进入Encoder/Head。代码发现旧清单6位小数与1e-8秒容差不一致；单条实测差值尚未返回，
+不宣称该WAV已损坏，也不宣称该条一定只是舍入。用户改为英阿各最多480h，GPU5，不再扩英语。
+新增 `scripts/run_en_egy_480.py`：核验已完成标签并只读引用，旧指纹库做SQLite backup到新目录；
+只用r15原en/train（约480h）和原en/validation，零英语G2P重跑、零阿语重打标。
+三类阿语8:1:1不变，`H=min(480h,E,O/0.8,G/0.1,C/0.1)`，整音频向下选，不超上限、不设下限。
+时长接受6位小数舍入（0.5微秒＋浮点余量），使用实际header秒数；更大差异/已知SHA变化/CTC不可行
+记录并隔离候选，保护集仍保留原/现SHA与录音组。读取失败/文件并发变更仍明确报错。
+新目录 `outputs/en_egy_480_ctc_v1`，原动态目录不覆盖；同命令自动恢复标签引用、指纹、缓存、Head。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/run_en_egy_480.py --gpu 5
+```
+
+接续命令替代下文初始all命令。新增 `audio_duration_report.json`（含原/实测/差值）、
+`audio_review.jsonl` 和 `import_report.json`；完成回传新目录 `return_summary.zip`。
+本次64项定向测试通过，改动文件Ruff/Mypy通过；全量1073 passed/67 skipped，
+仍14 failed/7 errors为已有Torch/soundfile依赖缺失，未修改无关测试。
+工区新实测结果待返回。详细恢复策略和输出见 [EN_EGY_DYNAMIC_TRAINING.md](EN_EGY_DYNAMIC_TRAINING.md)。
+
+以下是首次动态版本的实施记录：
 
 用户确认不再设480h或最低小时门槛；先打标，按实际合格容量缩量，英阿按时长1:1；
 阿语open_source:gaoshan_train:coarse_train=8:1:1，完全不使用MSA补充。
