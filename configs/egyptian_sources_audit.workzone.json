@@ -1,0 +1,23 @@
+{
+  "root": "/data/h00911716/code/ms-swift/self_test/datalist/ar_with_punc/egy/egy_all_without_langtag",
+  "output_dir": "outputs/egyptian_sources_audit_v1",
+  "audio_fallbacks": {"/home_92": "/host_home"},
+  "groups": {
+    "open_source": {
+      "directory": "open-source", "role": "train_pool", "priority": 1,
+      "expected": ["egyptian_sd_dialect.json", "part_0000.jsonl", "part_0001.jsonl", "part_0002.jsonl"]
+    },
+    "gaoshan_train": {
+      "directory": "gaoshan/train", "role": "train_pool", "priority": 2,
+      "expected": ["swift-egy-gaoshan-100-0903.json", "swift-egy-gaoshan-40h-0909.json", "swift-egy-gaoshan-44h-0914.json", "swift-egy-gaoshan-62h-0922.json"]
+    },
+    "gaoshan_test": {
+      "directory": "gaoshan/test", "role": "original_test", "priority": 2,
+      "expected": ["swift-egy-gaoshan-100-0903.json"]
+    },
+    "coarse_train": {
+      "directory": "coarse/train", "role": "train_pool", "priority": 2,
+      "expected": ["swift-coarse-shard_asr1_1027_remake_part001.egy.json", "swift-coarse-shard_asr1_1027_remake_part002.egy.json", "swift-coarse-shard_asr1_1027_remake_part003.egy.json", "swift-coarse-shard_asr1_1027_remake_part004.egy.json", "swift-coarse-shard_asr1_1027_remake_part005.egy.json"]
+    }
+  }
+}

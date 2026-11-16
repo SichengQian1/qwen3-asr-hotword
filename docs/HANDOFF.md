@@ -1,5 +1,46 @@
 # 工作交接记录
 
+## 0.223 2026-11-16 阿语目标改为纯埃及方言：新增全来源小时审计
+
+用户新增open-source四文件、coarse五文件、gaoshan/test一文件；加原gaoshan/train四文件共14份。
+open-source优先，其余两池补充；训练和验证都用埃及方言，不再MSA补样。
+用户当前只要求核实全部小时数、确认后再选480h。本节点不打标/冻结/缓存/训练，
+0.222的旧EGY+MSA命令不作为新目标入口，原标签和输出不动。
+167类表及英语ID仍保持；已修改的是发音转换规则，工区修正后发音质量尚未核验。
+
+新增 `scripts/audit_egyptian_sources.py` 和
+`configs/egyptian_sources_audit.workzone.json`；详见 [EGYPTIAN_SOURCE_AUDIT.md](EGYPTIAN_SOURCE_AUDIT.md)。
+支持JSON数组、JSONL、带语言tag和不带tag的response；保留response/assistant两份文本，
+分类标点/空格、阿文归一化和内容差异，不直接据归一化结果生成音素。
+音频头测时长，文件名小时和lengths字段均不作时长依据。MSA目录未加入。
+输出逐文件/组的毛时长、去路径重复总时长、扣原test后的候选净时长；跨来源归属open-source优先。
+不宣称字节去重、方言准确率或音文一致性已验证。
+
+分支 `codex/g2p-coverage-scan`，容器原qwen环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -u -B scripts/audit_egyptian_sources.py --workers 32
+```
+
+新输出 `outputs/egyptian_sources_audit_v1`；首次拒绝覆盖，中断同命令加`--resume`。
+每1024行封存、核验后跳过已完成音频头读取；源JSON/配置/代码变化拒绝混合续跑。
+后续修复挂载或变更源文件后若需重新测量，指定新的`--output-dir`，不复用旧快照。
+读取阶段有来源序号/实际行数/10秒心跳，无GPU和全WAV指纹扫描。
+缺目录/文件、坏JSON返回review及明细；汇总可能不完整，需修复后重新审计。
+
+回传 `outputs/egyptian_sources_audit_v1/return_summary.zip`，或：
+
+```bash
+jq '{status,by_group,totals,path_unique_train_pool_attribution}' outputs/egyptian_sources_audit_v1/report.json
+```
+
+本地相关45项测试通过，新增Ruff/Mypy通过；全量pytest为1051通过67跳过14失败7错误，
+失败/错误仍为缺Torch/soundfile；全仓Ruff17项、Mypy11项在既有未改文件中，未覆盖他人修改。
+本机无工区数据，尚无新来源小时结果。确认容量后再接新清单打标和纯埃及训练。
+
 ## 0.222 2026-11-16 阿语发音修正、独立重标/划分/r15重训入口
 
 用户明确最终目标为降低阿语PER；发音前端与下游规范是当前地基，后续必须重训英阿看效果。
