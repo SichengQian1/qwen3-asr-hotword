@@ -1,0 +1,21 @@
+{
+  "output_dir": "outputs/en_egy_dynamic_ctc_v1",
+  "arabic_inventory": "outputs/egyptian_sources_audit_v1/source_inventory.jsonl",
+  "arabic_inventory_sha256": "55168bdb3db46a76d38861a4877bd979f5d0d890797ff7c072227193ad66d034",
+  "english_inventory": "outputs/en_ar_training_source_audit_7987bde0/source_inventory.jsonl",
+  "english_pool_config": "configs/en_pt_480h_plan.workzone.json",
+  "english_g2p": "outputs/en_ar_english_g2p_20261110_172826/english_g2p.json",
+  "source_run": "outputs/en_ar_r15_5100_ctc_v1",
+  "vocab": "configs/phonemes/en_ar_native_ipa_vocab.v1.1.json",
+  "vocab_sha256": "b337255bf239fdec3b4bdb0770bf39941fee74246336774c7ece8741d4534bf2",
+  "pronunciation_policy": "configs/arabic_pronunciation_policy.json",
+  "arabic_frontend_config": "configs/arabic_native_frontend.workzone.json",
+  "seed": 20261116,
+  "validation_percent": 3,
+  "test_percent": 2,
+  "arabic_validation_hours": 4,
+  "minimum_gpu_free_gib": 40,
+  "ratios": {"open_source": 0.8, "gaoshan_train": 0.1, "coarse_train": 0.1},
+  "minimum_training_hours": null,
+  "head_time_upsampling_factor": 2
+}

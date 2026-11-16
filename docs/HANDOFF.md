@@ -1,5 +1,44 @@
 # 工作交接记录
 
+## 0.224 2026-11-16 英语＋纯EGY动态等时长一条龙（工区待执行）
+
+用户确认不再设480h或最低小时门槛；先打标，按实际合格容量缩量，英阿按时长1:1；
+阿语open_source:gaoshan_train:coarse_train=8:1:1，完全不使用MSA补充。
+open_source只接收用户指定的拼写归一化等价子集（审计591.857h），另外两池接收三种文本一致类别；
+优先保留assistant正字法，双方原文本保留。EGY方言来源未经人工确认，不把文本等价当作质量认证。
+
+新增 `scripts/run_en_egy_dynamic.py`、`configs/en_egy_dynamic.workzone.json` 及独立数据/训练模块；
+不修改0.222旧入口、旧输出或×3对照身份。详见 [EN_EGY_DYNAMIC_TRAINING.md](EN_EGY_DYNAMIC_TRAINING.md)。
+英语池改为全部已审计EGY英语＋完整已释放US train（487.628442h），不止旧480h抽样。
+自动先保护原test/validation与已知录音组，字节去重、冲突标签整组隔离，再计算
+`H=min(E,O/0.8,G/0.1,C/0.1)`；整数音频时长允许每桶一条以内舍入误差。不存在最低小时门槛。
+未知录音命名仅文件/字节隔离，在报告中披露，不声称全体说话人隔离。
+
+使用修正后的EGY发音前端＋不变167类表；命中未审核词例的记录留review。
+只复用身份一致的r15 Encoder特征，按旧分片顺序读取，缺失音频才补提。
+完整新train/validation缓存完成后自动训练随机初始化×2 Head；40epochs等参数沿用r15已记录设置。
+阿语验证全部为EGY来源；与旧EGY+MSA PER不作直接配对提升归因。
+
+分支 `codex/g2p-coverage-scan`，容器原qwen环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/run_en_egy_dynamic.py all --gpu 4 --workers 32
+```
+
+默认新目录 `outputs/en_egy_dynamic_ctc_v1`；同命令自动续跑，拒绝输入/代码改变后混用。
+单卡物理GPU4，若有其他compute任务则等待；不停止别人的进程。
+标签1000行一分片；音频指纹每文件落SQLite，可调`--io-workers`；Encoder512条一分片；Head按epoch恢复。
+每个长阶段均显示计数或心跳。后台nohup和查看日志命令见上面的专项文档。
+返回 `outputs/en_egy_dynamic_ctc_v1/return_summary.zip`，含准入/标签/容量/清单/Head小报告。
+核验最终 `report.json.status=completed`、`prepare_report.json.by_split_source`、
+`head/report.json.best_validation_by_group`、manifest/vocab/model SHA；不回传大文件。
+本节点仅完成本地实现和测试，未声明H200训练结果。
+验证：55项相关测试通过（含13项本轮准入/容量/隔离/续跑/自动训练测试）；改动文件Ruff、Mypy通过，git diff --check通过。
+全量pytest为1063 passed/67 skipped/14 failed/7 errors，失败为既有Torch/soundfile缺失；
+全仓Ruff仍17项、Mypy仍11项历史/环境问题，均在本次范围外。随后新增的自动缓存转训练模拟测试也单独通过。
+
 ## 0.223 2026-11-16 阿语目标改为纯埃及方言：新增全来源小时审计
 
 用户新增open-source四文件、coarse五文件、gaoshan/test一文件；加原gaoshan/train四文件共14份。
