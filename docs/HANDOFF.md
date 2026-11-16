@@ -1,5 +1,55 @@
 # 工作交接记录
 
+## 0.221 2026-11-16 中英补中文480h、CPU上限64、双H200自动选择Encoder并发
+
+用户确认新增KingASR059中文源、中文480h与英语480h（US336/UK144）匹配，70%记录10dB噪声不变；
+两张已分配物理H200为4和5。做到183类随机Head训练与验证PER，不做检索/热词/最终ASR。
+新增入口 `scripts/run_zh_en_dual.py`、配置 `configs/zh_en_noise70_dual.workzone.json`，
+详细说明 [ZH_EN_DUAL_V2.md](ZH_EN_DUAL_V2.md)。原zh_en实现和旧v1输出不改。
+
+旧失败run `outputs/zh_en_183_noise70_scratch_v1` 作为只读来源，固定contract SHA
+`2824ccdba79972f85b812c28be6c4eea64988c5a52056944c5e84abe0a1c3073`。
+复用已完成旧三来源标签、PCM指纹和唯一词G2P；新增中文源
+`/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0007-KingASR059-000620H_shards`。
+新旧PCM精确去重，保留旧验证/test隔离；重复关联不兼容划分或转写冲突在新视图隔离。
+先检查可用音频小时，再检查完整标签小时，三组训练下限现在严格为480/336/144h。
+CPU并行上限64，遵从容器CPU配额及可用RAM，底层数值库线程设1；资源减少不改变标签身份。
+
+两卡共享分片队列，比较每卡1/2/4进程（总2/4/8模型实例）。同一分层训练音频队列，两轮相反顺序，
+剔除加载/预热时间，用包含读取/混音/推理/写入的墙钟吞吐选择两轮均成功的最快档；显存不足/OOM
+排除该档，非资源错误停止。获胜轮特征复用到正式缓存；正式OOM降并发并只补缺失分片。
+Encoder保持逐样本forward，加有界音频预取，未改变真实batch计算路径。
+Head单卡4训练，batch256/原学习率保持，5卡释放；没有实现或宣称双卡DDP训练加速。
+四组macro PER选模，额外给出中/美/英×原声/带噪六组PER。
+
+同一分支 `codex/g2p-coverage-scan`，原qwen环境执行（建议在tmux中）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -B scripts/run_zh_en_dual.py all --gpus 4 5
+```
+
+独立新输出：`outputs/zh_en_183_noise70_dual_v2`。旧v1输出和数据不覆盖，不启动旧入口。
+相同命令自动续跑，无需--resume；已完成标注/特征核验后复用，未完成测速轮重计，训练从最近完整epoch
+恢复优化器/模型状态，未保存epoch会重跑。CPU元数据扫描和SHA核验仍会运行，不等于重新生成标签。
+存在未退出的旧工作进程或代码/配置身份不一致时停止，不自行停止其它任务。
+
+验证/观察命令：
+
+```bash
+python -B scripts/run_zh_en_dual.py status
+```
+
+进程日志 `gpu_runs/<轮次>/worker-*.log`，训练日志 `logs/train.log`，epoch指标 `head/metrics.jsonl`。
+返回新目录 `return_bundle.zip`，含可用小时/噪声分配、旧标签复用数、测速概要、正式档位、训练指标与
+`validation_per.json`（完成时），不含大模型/特征。最佳Head为新目录 `head/ctc_head_best.pt`。
+
+本地相关回归76通过、10跳过（缺少Torch/可选依赖的测试）；新增16项覆盖旧源只读/身份、重复隔离、
+完整时长检查、增量G2P、固定测速队列、事务领取、真实模拟子进程启动/清理和特征复用顺序。
+ruff、mypy和空白检查通过。没有本轮H200实测，不能据此承诺速度提升或PER。
+
 ## 0.220 2026-11-16 中英准备阶段时长下限失败：真实返回与只读诊断
 
 用户返回 `return_bundle(20261116-011508).zip`。包内全部sha256清单通过，
