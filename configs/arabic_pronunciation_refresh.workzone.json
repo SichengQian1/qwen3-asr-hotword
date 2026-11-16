@@ -1,0 +1,14 @@
+{
+  "source_run": "outputs/en_ar_r15_5100_ctc_v1",
+  "labels_dir": "outputs/arabic_pronunciation_repaired",
+  "output_dir": "outputs/en_ar_pronunciation_repaired",
+  "train_hours": 480,
+  "heldout_hours_per_group": 2,
+  "test_hours_per_group": 2,
+  "seed": 20261116,
+  "metadata_workers": 16,
+  "validation_percent": 10,
+  "test_percent": 5,
+  "quality_exclusions": null,
+  "minimum_gpu_free_gib": 40
+}

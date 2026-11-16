@@ -1,5 +1,65 @@
 # 工作交接记录
 
+## 0.222 2026-11-16 阿语发音修正、独立重标/划分/r15重训入口
+
+用户明确最终目标为降低阿语PER；发音前端与下游规范是当前地基，后续必须重训英阿看效果。
+新增 `scripts/run_arabic_pronunciation_refresh.py`，详细规则、限制和交付见
+[ARABIC_PRONUNCIATION_REFRESH.md](ARABIC_PRONUNCIATION_REFRESH.md)。
+保留历史 `arabic_native.py`、×3实验绑定代码、全部旧labels/cache/Head。
+本地原有7个英语测试修改和无关未跟踪文件不在本次提交范围。
+
+167类音素表与英语ID不变；新增前端修正EGY连接符、MSA终端i_y/u_w及可配置EGY发音规则，
+保留逐词diac/CAPHI、旧新IPA、规则、边界、词汇例外审核状态。
+句中冠词与MSA停顿词尾已实现为可检查候选，默认未启用；不能全局删除喉塞音/词尾元音。
+ثورة/ده/عشان例外仍待听审，对应未批准样本冻结时隔离。word-based MLE消歧限制仍存在。
+同一前端提供sentence/isolated/linked查询，不自动替换生产热词表。
+
+全量标注spawn并行、有界分片、SHA续跑，输出两组top300及随机/改动/规则听审，
+已填写审核文件不覆盖。未知CAPHI/无分析仍保留待审核原因，不静默猜读音。
+重新冻结阿语480h，保留合格EGY，MSA四来源等时长分配并按不足容量调整；
+两组各2h验证和2h封存test，按原录音分组、候选字节去重/冲突隔离、旧验证录音保护。
+英语原清单字节保持。审核过的排除项可输入独立JSONL，未把CER直接视为标注错误。
+文件指纹仅选样候选及有限预取读取WAV，16线程、逐文件SQLite持久化，非全量900k重新读音频。
+
+训练复用同r15相同音频的隐藏状态，新阿语分片重写目标，仅新增音频跑Encoder；
+英语直接引用原r15缓存。物理GPU4空闲后开始，随机Head沿用40轮等原参数，默认×2。
+最终输出分语种/方言/来源精确和折叠PER，另用相同修正参考、相同旧验证音频对比旧新Head。
+主验证集已改，不能直接比较两个主报告的PER；配对自动参考也不等于人工标准。
+
+同分支 `codex/g2p-coverage-scan`，原qwen环境仓库根目录：
+
+```bash
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -u -B scripts/run_arabic_pronunciation_refresh.py label --workers 32
+```
+
+回传标签小包，检查来源容量/实际变化/剩余问题并完成必要听审后：
+
+```bash
+python -u -B scripts/run_arabic_pronunciation_refresh.py freeze
+python -u -B scripts/run_arabic_pronunciation_refresh.py run --gpu 4 --factor 2
+```
+
+label/freeze中断使用相同命令加`--resume`；run同命令自动恢复。
+配置/规则/代码改变拒绝混用续跑，须新目录；不自动停止占卡任务。
+输出：`outputs/arabic_pronunciation_repaired`（标签）与
+`outputs/en_ar_pronunciation_repaired`（新manifest/cache/head_up2/评测）。
+前者回传`return_summary.zip`；后者回传`return_summary.zip`和必要时`prepare_report.json`。
+验证命令：
+
+```bash
+jq '{status,by_group,num_classes,human_pronunciation_review_completed}' outputs/arabic_pronunciation_repaired/report.json
+jq '{status,selected_hours,rejections,recording_disjoint}' outputs/en_ar_pronunciation_repaired/prepare_report.json
+jq '{best_epoch,best_validation_by_group}' outputs/en_ar_pronunciation_repaired/head_up2/report.json
+```
+
+本地新增/相关测试44通过3跳过，新增文件Ruff/Mypy通过。
+全量pytest尝试受本机Python3.14缺Torch/soundfile限制；5文件收集失败，排除它们后
+1041通过67跳过14失败2错误（均缺依赖）。全仓Ruff17项/Mypy11项在未修改文件中，保留原状。
+未在本地加载模型或宣称工区新结果。×3仍只有用户此前回传epoch0，是否已恢复无新证据；
+本次不等待×3才进行CPU标注。人工发音核对、新训练PER、最终热词召回仍未闭环。
+
 ## 0.221 2026-11-16 中英补中文480h、CPU上限64、双H200自动选择Encoder并发
 
 用户确认新增KingASR059中文源、中文480h与英语480h（US336/UK144）匹配，70%记录10dB噪声不变；

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "arabic_pronunciation_repair_20261116",
+  "rules": {
+    "egy_clitic_boundary": true,
+    "msa_final_long_vowel": true,
+    "egy_monophthong": true,
+    "egy_restore_surface_consonant": true,
+    "egy_interdentals": true,
+    "egy_final_shortening": true,
+    "egy_pronominal_h": true,
+    "linked_article": false,
+    "msa_pause_endings": false
+  },
+  "exceptions": [
+    {"group": "ar_egy", "surface": "ثورة", "diac": "ثَورَة", "phones": ["s", "a", "w", "r", "a"], "status": "candidate", "evidence": "ARABIC_CTC_PER_ANALYSIS_2026-11-12 section 3; listening pending"},
+    {"group": "ar_egy", "surface": "ده", "diac": "دَه", "phones": ["d", "a"], "status": "candidate", "evidence": "ARABIC_CTC_PER_ANALYSIS_2026-11-12 section 3; listening pending"},
+    {"group": "ar_egy", "surface": "عشان", "diac": "عَشَأْن", "phones": ["ʕ", "a", "ʃ", "aː", "n"], "status": "candidate", "evidence": "ARABIC_CTC_PER_ANALYSIS_2026-11-12 section 3; listening pending"}
+  ],
+  "review_required": [
+    "Cairo broad rules are automatic candidates, not human-verified pronunciations",
+    "Word-based MLE homographs need contextual review; never force all بين to one reading",
+    "linked_article and msa_pause_endings require targeted boundary listening before enabling",
+    "Unapproved lexical exceptions must be reviewed, never silently applied"
+  ],
+  "sources": [
+    "https://camel-guidelines.readthedocs.io/en/latest/orthography/",
+    "https://camel-guidelines.readthedocs.io/en/latest/phonology/",
+    "https://camel-tools.readthedocs.io/en/stable/reference/camel_morphology_features.html",
+    "docs/ARABIC_CTC_PER_ANALYSIS_2026-11-12.md"
+  ]
+}
