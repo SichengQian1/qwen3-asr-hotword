@@ -2,6 +2,40 @@
 
 ## 0.225 2026-11-16 新纯EGY训练/验证集的×3 Head配对入口
 
+**当前执行入口修正：不再等待新×2完整训练。** 工区运行Head-only入口时没有
+`en_egy_480_ctc_v1/report.json`。先前要求完成整轮×2属于不必要的编排限制；用户已在同轮
+跑过Encoder分片000000–000510，证明标签与冻结选样已完成，不应要求再标注或等×2。
+新增独立 `scripts/run_en_egy_up3.py`：只读新×2的contract/prepare_report/train/validation，
+不读取/等待新×2的head/report或总report。仍以旧已完成r15源记录核实Encoder身份和40轮参数。
+将相同清单字节复制到 `outputs/en_egy_480_up3_standalone_v1`，仅Head倍数设为3，
+仍保留×2可行性选样，不扩大分母。独立锁/缓存/训练状态，不取得×2运行锁。
+对×2已原子发布的metadata+pt分片核验模型、清单、vocab、大小和SHA，采用硬链接复用
+pt且独立复制metadata；跨文件系统才复制文件。未完成分片忽略，自己的cache阶段补提。
+原Encoder缓存生成器再次验证张量/标签及SHA，之后自动训练×3。不存在source cache summary
+也能起跑；旧×2/旧×3和已有产物均不覆盖。仅新增脚本，不改变×2被封存的运行代码。
+源冻结数据本身必须存在（本次已确认）；该入口不重新启动CAMeL/MFA标注。
+
+工区物理GPU4后台执行（不要再使用下文的Head-only命令）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+LOG="outputs/en_egy_up3_$(date +%Y%m%d_%H%M%S).log"
+nohup python -u -B scripts/run_en_egy_up3.py --gpu 4 > "$LOG" 2>&1 &
+echo "PID=$! LOG=$LOG"
+tail -n 30 "$LOG"
+```
+
+同命令自动续跑自己的缓存和Head；GPU4有任务会显示等待，不停止其他进程。
+新报告为 `outputs/en_egy_480_up3_standalone_v1/report.json`、`head/report.json`，
+另有 `standalone_contract.json`、`cache_snapshot.json`；回传前两份小报告即可。
+6项专项测试覆盖×2无报告/有运行锁仍继续、活动Head变化不影响×3、完整分片快照、
+未完成分片排除、坏缓存拒绝、冻结标签变化拒绝。
+相关回归74 passed/3 skipped，改动Ruff/Mypy与git diff --check通过；全量1090 passed/
+67 skipped/14 failed/7 errors，失败仍是已有Torch/soundfile缺失。实际H200结果待返回。
+
+以下保留最初Head-only接口与用户回传旧×3结果说明：
+
 用户要求在刚完成的新纯EGY语料、纯EGY验证集上跑×3。其同时回传的JSON实际来自旧
 `outputs/en_ar_r15_5100_head_up3_v1`：旧英阿/EGY+MSA数据，best epoch24、完成30轮早停，
 阿语PER0.1642389332、英语0.0494194954、macro0.1068292143；仅据终端回传，未独立收文件。

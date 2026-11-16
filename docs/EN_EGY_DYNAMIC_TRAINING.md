@@ -161,17 +161,21 @@ Encoder分片；Head从training_state_latest.pt续训。workers/io-workers可调
 只需回传 `return_summary.zip`（含小报告，不含音频、模型、标签全集、特征）。
 若尚在运行，可先贴 `capacity_report.json` 与 `prepare_report.json`。
 
-## 新纯EGY数据上的×3配对实验
+## 新纯EGY数据上的×3独立实验（不等×2完成）
 
-新×2 `outputs/en_egy_480_ctc_v1` 完成后：
+本次已进入Encoder分片阶段，标注和冻结清单已完成。使用以下独立入口，
+不再要求新×2有总report，也不必重做标签：
 
 ```bash
-python -u -B scripts/run_en_egy_head.py --gpu 5
+python -u -B scripts/run_en_egy_up3.py --gpu 4
 ```
 
-默认只读取这次新×2的train/validation与Encoder缓存，新初始化×3 Head，其他训练参数
-从新×2 head/report.json自动继承；不重提Encoder、不重打标、不重新选样。
-新结果在 `outputs/en_egy_480_head_up3_v1`；同命令自动恢复。
-可用 `--source-run` / `--output-dir` 指定另一份相同结构的完成运行及独立输出。
-启动核验缓存SHA时CPU/磁盘忙、GPU尚未启动属于正常过程，日志会显示分片进度。
-用于这次对比的是上述新源目录，不能用旧 `en_ar_r15_5100_head_up3_v1` 的验证PER替代。
+源为 `outputs/en_egy_480_ctc_v1`；新输出为 `outputs/en_egy_480_up3_standalone_v1`。
+复制相同的train/validation清单（SHA不变），只改变Head为×3；复用已完成的缓存分片，
+未完成的由自己的Encoder缓存任务补提，之后自动训练40轮上限的随机新Head。
+同一文件系统以硬链接共享完整pt数据、metadata独立保存；不覆盖或修改×2数据，不等待×2锁。
+缓存快照会显示进度，训练沿用源r15参数与同批新EGY标签，最低LR5e-6、早停delta0.0005。
+同命令自动恢复；结果回传新目录的report.json和head/report.json。
+GPU4被占用时会明确等待，不会结束其他进程。
+
+旧 `run_en_egy_head.py` 只用于×2整轮已完成后的纯Head对照；当前未完成×2的情况应使用上方入口。
