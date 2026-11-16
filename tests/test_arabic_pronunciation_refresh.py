@@ -396,3 +396,51 @@ def test_freeze_stratifies_resumes_and_preserves_english(
     write_json(config_path, config)
     with pytest.raises(ValueError, match="identity changed"):
         m.freeze(tmp_path, config_path, labels, output, True)
+
+
+def test_feature_reuse_byte_verified_alias_and_rejection(tmp_path, monkeypatch):
+    from qwen_hotword.training import arabic_refresh_train as m
+
+    audio = tmp_path / "selected.wav"
+    audio.write_bytes(b"same recording")
+    digest = sha(audio)
+    sample_id = "en-ar-v1-" + digest
+    path = tmp_path / "shard.pt"
+    path.write_bytes(b"fixture")
+    descriptor = FeatureShardDescriptor(0, path, path, 1, 4, 1, 7, sha(path), (sample_id,), 2)
+    cache = DiskFeatureCache(
+        "train", tmp_path, 1, 1, 7, 317477504, "fixture", True, 2, (descriptor,)
+    )
+    hidden = SimpleNamespace(shape=(4, 1024))
+    monkeypatch.setattr(
+        m, "load_feature_shard", lambda *a, **kw: [CachedSample(sample_id, hidden, (72,))]
+    )
+    lookup = ReuseOrExtract([cache], {sample_id: str(tmp_path / "old_location.wav")}, None)
+    lookup.audio_hashes = {sample_id: digest}
+    lookup.alias_log = tmp_path / "aliases.jsonl"
+    record = ExperimentRecord(sample_id, audio, "text", "ar", (73, 74), 2, 2)
+    results, _, _ = lookup([record], None)
+    assert results[0].hidden_states is hidden
+    assert results[0].token_ids == (73, 74)
+    assert lookup.wrapper is None and lookup.aliases_verified == 1
+    evidence = json.loads(lookup.alias_log.read_text())
+    assert evidence["source_manifest_audio_sha256"] == evidence["selected_audio_sha256"]
+    # A content-based ID by itself never authorizes reuse.
+    lookup.audio_hashes.clear()
+    with pytest.raises(ValueError, match="path identity"):
+        lookup([record], None)
+    lookup.audio_hashes[sample_id] = digest
+    audio.write_bytes(b"changed audio")
+    with pytest.raises(ValueError, match="bytes mismatch.*expected=.*actual="):
+        lookup([record], None)
+    assert len(lookup.alias_log.read_text().splitlines()) == 1
+
+
+def test_alias_id_must_match_frozen_source_hash(tmp_path):
+    audio = tmp_path / "selected.wav"
+    audio.write_bytes(b"audio")
+    lookup = ReuseOrExtract([], {"wrong-id": "/old.wav"}, None)
+    lookup.audio_hashes = {"wrong-id": sha(audio)}
+    lookup.alias_log = tmp_path / "aliases.jsonl"
+    with pytest.raises(ValueError, match="path identity"):
+        lookup.verify_alias(ExperimentRecord("wrong-id", audio, "text", "ar", (73,), 1, 2))

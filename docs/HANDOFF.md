@@ -24,6 +24,23 @@ python -u -B scripts/run_en_egy_480.py --gpu 5
 仍14 failed/7 errors为已有Torch/soundfile依赖缺失，未修改无关测试。
 工区新实测结果待返回。详细恢复策略和输出见 [EN_EGY_DYNAMIC_TRAINING.md](EN_EGY_DYNAMIC_TRAINING.md)。
 
+**同节点缓存路径修复：** 后续用户日志显示train分片000000–000510已完成，在下一分片报
+`reused feature audio path identity changed`。定位为复用器对同ID的路径要求完全相同；
+当前ID由音频SHA构成，跨来源去重可保留另一路径。日志未给具体样本，尚未独立确认该对WAV相同。
+修复仅在源manifest有完整audio_sha256且ID一致时，对新路径WAV重新计算SHA并核对，
+记录 `feature_path_aliases.jsonl` 后复用经SHA验证的旧分片；不一致仍报两路径、ID、期望/实际SHA。
+旧调用默认仍严格路径核验。数据、词表、标签、选样、模型、Head参数均不改变。
+480入口精确识别846efec版本的三个运行代码SHA，仅此升级可同目录续跑，
+原 `contract.json` / `training_contract.json` 原封不动；另写 `*.compatibility.*.json` 审计，
+执行前后核对本次有效代码身份。源数据/模型/配置变化不会借兼容放行。
+仍执行上方GPU5命令，不删除旧输出、不重跑labels/freeze；已完成分片逐个SHA核验，
+打印 `resumed train feature shard=...`，继续未完成分片，随后补齐验证缓存并自动训练Head。
+完成回传 `outputs/en_egy_480_ctc_v1/return_summary.zip`（含兼容审计和feature_reuse计数）。
+验证：67项相关测试通过、3项Torch测试跳过；改动文件Ruff/Mypy通过，git diff --check通过。
+全量1078 passed/67 skipped/14 failed/7 errors，失败仍为已有Torch/soundfile缺失；
+全仓Ruff（含未跟踪PPT脚本）19项、Mypy13项均在未改动文件，未修改无关项。
+H200续跑结果待用户返回。
+
 以下是首次动态版本的实施记录：
 
 用户确认不再设480h或最低小时门槛；先打标，按实际合格容量缩量，英阿按时长1:1；

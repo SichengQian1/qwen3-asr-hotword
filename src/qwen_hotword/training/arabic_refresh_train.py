@@ -50,6 +50,43 @@ class ReuseOrExtract:
         self.loaded: OrderedDict[Path, dict[str, CachedSample]] = OrderedDict()
         self.verified: set[Path] = set()
         self.reused = self.extracted = 0
+        # Opt-in only for content-addressed manifests verified against the old cache.
+        self.audio_hashes: dict[str, str] = {}
+        self.alias_log: Path | None = None
+        self.aliases_verified = 0
+
+    def verify_alias(self, record: ExperimentRecord) -> None:
+        old = self.audio[record.sample_id]
+        expected = self.audio_hashes.get(record.sample_id, "")
+        detail = f"sample={record.sample_id}; cached={old}; selected={record.audio_path}"
+        if (
+            len(expected) != 64
+            or any(c not in "0123456789abcdef" for c in expected)
+            or record.sample_id != "en-ar-v1-" + expected
+            or self.alias_log is None
+        ):
+            raise ValueError("reused feature audio path identity changed; " + detail)
+        before = record.audio_path.stat()
+        actual = sha(record.audio_path)
+        after = record.audio_path.stat()
+        fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, key) != getattr(after, key) for key in fields) or actual != expected:
+            raise ValueError(
+                f"reused feature audio bytes mismatch; {detail}; "
+                f"expected={expected}; actual={actual}"
+            )
+        evidence = {
+            "sample_id": record.sample_id,
+            "cached_audio_path": old,
+            "selected_audio_path": str(record.audio_path),
+            "source_manifest_audio_sha256": expected,
+            "selected_audio_sha256": actual,
+            "status": "byte_verified_path_alias",
+        }
+        with self.alias_log.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(evidence, ensure_ascii=False) + "\n")
+        self.aliases_verified += 1
+        print(f"Verified cached audio path alias: {detail}", flush=True)
 
     def __call__(
         self, batch: list[ExperimentRecord], wrapper: Any, **kwargs: Any
@@ -62,7 +99,7 @@ class ReuseOrExtract:
                 missing.append(record)
                 continue
             if record.audio_path.resolve() != Path(self.audio[record.sample_id]).resolve():
-                raise ValueError("reused feature audio path identity changed")
+                self.verify_alias(record)
             path = shard.feature_path
             if path not in self.loaded:
                 if path not in self.verified:

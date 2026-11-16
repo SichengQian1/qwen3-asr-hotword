@@ -141,3 +141,51 @@ def test_unreviewed_old_code_rejected_before_import(tmp_path):
     write_json(previous / "contract.json", {"files": {str(path): "unknown-version"}})
     with pytest.raises(ValueError, match="unreviewed"):
         recovery.verify_previous(tmp_path, previous)
+
+
+def test_reviewed_runtime_upgrade_preserves_contract_and_resumes(tmp_path):
+    key = "src/qwen_hotword/training/en_egy_dynamic_train.py"
+    path = tmp_path / key
+    path.parent.mkdir(parents=True)
+    path.write_text("reviewed fixed runtime")
+    contract = tmp_path / "contract.json"
+    old = {
+        "files": {str(path): recovery.REVIEWED_RUNTIME[key], "/data.wav": "data-hash"},
+        "configuration": {"maximum_hours_per_language": 480},
+    }
+    write_json(contract, old)
+    original = sha(contract)
+    current = {**old, "files": {**old["files"], str(path): sha(path)}}
+    recovery.seal_runtime_upgrade(tmp_path, contract, current)
+    recovery.seal_runtime_upgrade(tmp_path, contract, current)
+    assert sha(contract) == original
+    audits = list(tmp_path.glob("contract.compatibility.*.json"))
+    assert len(audits) == 1
+    assert read(audits[0])["effective_identity"] == current
+    changed = {**current, "files": {**current["files"], "/data.wav": "modified"}}
+    with pytest.raises(ValueError, match="unreviewed"):
+        recovery.seal_runtime_upgrade(tmp_path, contract, changed)
+    with pytest.raises(ValueError, match="sealed data/model/options"):
+        recovery.seal_runtime_upgrade(tmp_path, contract, {**current, "configuration": {}})
+
+
+def test_training_runtime_upgrade_cannot_change_options(tmp_path):
+    key = "src/qwen_hotword/training/en_egy_dynamic_train.py"
+    contract = tmp_path / "training_contract.json"
+    old = {"code_sha256": recovery.REVIEWED_RUNTIME[key], "options": {"epochs": 40}}
+    write_json(contract, old)
+    current = {**old, "code_sha256": "new-code"}
+    recovery.seal_runtime_upgrade(tmp_path, contract, current)
+    assert read(contract) == old
+    with pytest.raises(ValueError, match="sealed data/model/options"):
+        recovery.seal_runtime_upgrade(tmp_path, contract, {**current, "options": {"epochs": 1}})
+
+
+def test_effective_recheck_detects_midrun_modification(tmp_path):
+    path = tmp_path / "code.py"
+    path.write_text("reviewed runtime")
+    identity = {"files": {str(path): sha(path)}, "source_identity": {}}
+    recovery.recheck(identity)
+    path.write_text("changed after admission")
+    with pytest.raises(ValueError, match="changed pinned input"):
+        recovery.recheck(identity)

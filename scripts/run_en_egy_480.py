@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
+import json
 import os
 import sqlite3
 import sys
@@ -20,7 +23,6 @@ from qwen_hotword.training.en_egy_dynamic import freeze, read, save_rows, seal
 from qwen_hotword.training.stage_progress import stage_progress
 from scripts.arabic_diagnostic_common import completed_run
 from scripts.label_arabic_native import exclusive_job
-from scripts.run_en_egy_dynamic import recheck
 
 REVIEWED_ORIGINAL = {
     "src/qwen_hotword/training/en_egy_dynamic.py": (
@@ -28,14 +30,71 @@ REVIEWED_ORIGINAL = {
     ),
 }
 
+REVIEWED_RUNTIME = {
+    "src/qwen_hotword/training/arabic_refresh_train.py": (
+        "9c2093314e15d8b988e686138ff455f9ab"
+        "4562a843ceac66999019086be99f00"
+    ),
+    "src/qwen_hotword/training/en_egy_dynamic_train.py": (
+        "1ee0cbb3b2afb891e09d3770567f585746"
+        "31d23f8f7abf18dc2bd8716f3d6e3d"
+    ),
+    "scripts/run_en_egy_480.py": "e982608b476dfe81d100110c9b7d6fd51453d69bd70d87437a2ecb1c9d0d6ecb",
+}
+
+
+def seal_runtime_upgrade(root: Path, path: Path, current: dict[str, Any]) -> None:
+    """Retain old seals; permit only reviewed cache-path runtime changes, no data changes."""
+    if not path.exists() or read(path) == current:
+        seal(path, current)
+        return
+    old = read(path)
+    adjusted = copy.deepcopy(old)
+    changes = {}
+    if path.name == "contract.json":
+        for name, checksum in old["files"].items():
+            if current["files"].get(name) == checksum:
+                continue
+            relative = str(Path(name).relative_to(root)) if Path(name).is_relative_to(root) else ""
+            if REVIEWED_RUNTIME.get(relative) != checksum:
+                raise ValueError("unreviewed runtime/input change: " + name)
+            adjusted["files"][name] = current["files"].get(name)
+            changes[name] = {"before": checksum, "after": current["files"].get(name)}
+    elif path.name == "training_contract.json":
+        key = "src/qwen_hotword/training/en_egy_dynamic_train.py"
+        if old["code_sha256"] != REVIEWED_RUNTIME[key]:
+            raise ValueError("unreviewed training runtime change")
+        adjusted["code_sha256"] = current["code_sha256"]
+        changes[key] = {"before": old["code_sha256"], "after": current["code_sha256"]}
+    if adjusted != current or not changes:
+        raise ValueError("sealed data/model/options changed: " + str(path))
+    audit = {
+        "original_contract_sha256": sha(path),
+        "code_changes": changes,
+        "effective_identity": current,
+        "reason": "Byte-verified path aliases only; data, labels, model and training unchanged",
+    }
+    digest = hashlib.sha256(json.dumps(audit, sort_keys=True).encode()).hexdigest()[:16]
+    target = path.with_name(path.stem + ".compatibility." + digest + ".json")
+    seal(target, audit)
+    print(f"Reviewed cache-path runtime upgrade: {target}", flush=True)
+
+
+def recheck(identity: dict[str, Any]) -> None:
+    with stage_progress("Recheck effective sealed inputs and reviewed runtime identities"):
+        for name, checksum in identity["files"].items():
+            pin(Path(name), checksum)
+        for value in identity["source_identity"].values():
+            pin(Path(value["path"]), value["sha256"])
+
 
 def verify_previous(root: Path, previous: Path) -> dict[str, Any]:
     contract = read(previous / "contract.json")
     for name, checksum in contract["files"].items():
         path = Path(name)
         relative = str(path.relative_to(root)) if path.is_relative_to(root) else ""
-        if relative in REVIEWED_ORIGINAL:
-            if checksum != REVIEWED_ORIGINAL[relative]:
+        if relative in (reviewed := {**REVIEWED_ORIGINAL, **REVIEWED_RUNTIME}):
+            if checksum != reviewed[relative] and (not path.exists() or checksum != sha(path)):
                 raise ValueError("unreviewed source preparation code: " + name)
         else:
             pin(path, checksum)
@@ -98,7 +157,8 @@ def prepare(root: Path, previous: Path, output: Path) -> tuple[dict[str, Any], d
         if output.exists() and not (output / "contract.json").exists():
             raise ValueError("existing unsealed output; choose a new directory")
         output.mkdir(parents=True, exist_ok=True)
-        seal(output / "contract.json", identity)
+        seal_runtime_upgrade(root, output / "contract.json", identity)
+        source["_runtime_identity"] = identity
     marker = output / "import_report.json"
     if marker.exists():
         for name, checksum in read(marker)["files"].items():
@@ -198,13 +258,13 @@ def main() -> int:
             with exclusive_job(previous):
                 cfg, source = prepare(ROOT, previous, output)
             prepared = freeze(ROOT, cfg, output, args.io_workers)
-            recheck(output)
+            recheck(source["_runtime_identity"])
             print(__import__("json").dumps(prepared, ensure_ascii=False, indent=2), flush=True)
             if not args.prepare_only:
                 from qwen_hotword.training.en_egy_dynamic_train import run
 
                 run(ROOT, cfg, output, source, args.gpu)
-                recheck(output)
+                recheck(source["_runtime_identity"])
             with zipfile.ZipFile(
                 output / "return_summary.zip", "w", zipfile.ZIP_DEFLATED
             ) as archive:
@@ -222,6 +282,8 @@ def main() -> int:
                 ):
                     if (output / name).exists():
                         archive.write(output / name, name)
+                for audit in sorted(output.glob("*.compatibility.*.json")):
+                    archive.write(audit, audit.name)
                 summary = read(output / "labels/report.json")
                 summary.pop("pieces")
                 write_json(output / "arabic_labels_summary.json", summary)

@@ -39,7 +39,16 @@ def run(
     vocab_path = root / cfg["vocab"]
     pin(vocab_path, cfg["vocab_sha256"])
     options = training_options(source["head"], cfg["head_time_upsampling_factor"])
-    seal(
+
+    def seal_training(path: Path, value: Any) -> None:
+        if "_runtime_identity" in source:
+            from scripts.run_en_egy_480 import seal_runtime_upgrade
+
+            seal_runtime_upgrade(root, path, value)
+        else:
+            seal(path, value)
+
+    seal_training(
         output / "training_contract.json",
         {
             "prepare_report_sha256": sha(output / "prepare_report.json"),
@@ -79,15 +88,22 @@ def run(
             time.sleep(10)
     wait_for_gpu(gpu, cfg["minimum_gpu_free_gib"])
     old = [load_cache(source, split, output) for split in ("train", "validation")]
-    audio = {
-        row["id"]: row["audio_path"]
-        for item in source["plan"]["manifests"].values()
-        for row in iter_jsonl(Path(item["path"]))
-    }
+    audio: dict[str, str] = {}
+    audio_hashes: dict[str, str] = {}
+    for item in source["plan"]["manifests"].values():
+        for row in iter_jsonl(Path(item["path"])):
+            sample_id = row["id"]
+            digest = row.get("audio_sha256", "")
+            if sample_id in audio_hashes and audio_hashes[sample_id] != digest:
+                raise ValueError("conflicting source audio hashes: " + sample_id)
+            audio[sample_id] = row["audio_path"]
+            audio_hashes[sample_id] = digest
     zone = load_workzone_config(source["plan"]["cache_config"]["path"], require_existing_model=True)
     if str(zone.model.path) != model["view"] or zone.model.dtype != "bfloat16":
         raise ValueError("cache extraction model/config differs from r15")
     lookup = ReuseOrExtract(old, audio, zone.model)
+    lookup.audio_hashes = audio_hashes
+    lookup.alias_log = output / "feature_path_aliases.jsonl"
     expected = sum(
         r["duration_seconds"] * 13 * 2048
         for split in ("train", "validation")
@@ -140,6 +156,8 @@ def run(
         {
             "reused_this_invocation": lookup.reused,
             "extracted_this_invocation": lookup.extracted,
+            "byte_verified_aliases_this_invocation": getattr(lookup, "aliases_verified", 0),
+            "path_alias_evidence": str(lookup.alias_log),
             "resumed_shards_not_counted_here": True,
             "old_caches_unchanged": True,
             "new_labels_in_new_shards": True,

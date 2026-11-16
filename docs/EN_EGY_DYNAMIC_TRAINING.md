@@ -20,8 +20,16 @@ python -u -B scripts/run_en_egy_480.py --gpu 5
 
 新输出 `outputs/en_egy_480_ctc_v1`；同命令自动续跑。通过SQLite backup复制旧指纹进度，
 原标签与指纹库不修改。旧hash通过size/mtime核验后只补读音频头，不再完整读取同一WAV。
-新增头元数据也持久化。只有已知cbae06e版本的数据准备模块允许兼容升级，
+新增头元数据也持久化。仅已知cbae06e数据准备升级及846efec缓存路径修复允许兼容，
 其他旧输入/标注代码SHA必须一致，不任意跳过合同检查。
+
+如果在复用特征时报 `reused feature audio path identity changed`，更新后仍用上方同命令。
+同一个内容SHA对应的音频可能在去重后采用另一来源路径；只有新WAV字节SHA等于旧缓存源
+manifest的audio_sha256，且样本ID也匹配，才允许跨路径复用，证据追加到
+`feature_path_aliases.jsonl`；真正的内容变化仍停止并打印完整身份。
+旧contract保持不变，兼容记录另存 `*.compatibility.*.json`；已有缓存分片校验后跳过，
+终端打印 `resumed train feature shard=...`，失败分片重新执行。无需清理输出或重打标。
+`feature_reuse.json`新增本次字节核验路径别名数；其复用/提取计数不包含此前完成并跳过的分片。
 
 时长舍入容差为0.5微秒（加浮点计算余量），选样采用实测头时长。
 更大时长差、已记录的音频SHA变化、实际长度CTC不可行，写入新目录的
