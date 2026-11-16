@@ -160,3 +160,18 @@ Encoder分片；Head从training_state_latest.pt续训。workers/io-workers可调
 
 只需回传 `return_summary.zip`（含小报告，不含音频、模型、标签全集、特征）。
 若尚在运行，可先贴 `capacity_report.json` 与 `prepare_report.json`。
+
+## 新纯EGY数据上的×3配对实验
+
+新×2 `outputs/en_egy_480_ctc_v1` 完成后：
+
+```bash
+python -u -B scripts/run_en_egy_head.py --gpu 5
+```
+
+默认只读取这次新×2的train/validation与Encoder缓存，新初始化×3 Head，其他训练参数
+从新×2 head/report.json自动继承；不重提Encoder、不重打标、不重新选样。
+新结果在 `outputs/en_egy_480_head_up3_v1`；同命令自动恢复。
+可用 `--source-run` / `--output-dir` 指定另一份相同结构的完成运行及独立输出。
+启动核验缓存SHA时CPU/磁盘忙、GPU尚未启动属于正常过程，日志会显示分片进度。
+用于这次对比的是上述新源目录，不能用旧 `en_ar_r15_5100_head_up3_v1` 的验证PER替代。

@@ -1,5 +1,40 @@
 # 工作交接记录
 
+## 0.225 2026-11-16 新纯EGY训练/验证集的×3 Head配对入口
+
+用户要求在刚完成的新纯EGY语料、纯EGY验证集上跑×3。其同时回传的JSON实际来自旧
+`outputs/en_ar_r15_5100_head_up3_v1`：旧英阿/EGY+MSA数据，best epoch24、完成30轮早停，
+阿语PER0.1642389332、英语0.0494194954、macro0.1068292143；仅据终端回传，未独立收文件。
+这些结果不属于新纯EGY验证集。新×2报告尚未回传文件，新入口在工区检查完成状态与身份。
+
+新增 `scripts/run_en_egy_head.py`，默认源 `outputs/en_egy_480_ctc_v1`，
+输出 `outputs/en_egy_480_head_up3_v1`，GPU5。确认源report/head/prepare一致、MSA未使用，
+仅核验train/validation清单与缓存（不读test、不读取WAV、不加载或重跑Encoder）。
+验证缓存属于该源r15模型并逐片SHA校验；随机新Head，仅上采样从×2改×3，其他配置
+逐字段继承源Head：40轮上限、最低LR5e-6、早停delta0.0005等，不手工重拼参数。
+不增加×3新可容纳样本，不改变新×2选样，保证配对对照。
+同命令验证合同后自动从training_state_latest.pt继续，完成后重复执行只核验并返回结果。
+拒绝源目录或其上下级作为输出；旧×2/旧×3结果不覆盖。
+
+分支 `codex/g2p-coverage-scan`，工区命令：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/run_en_egy_head.py --gpu 5
+```
+
+启动先显示新纯EGY源身份及缓存SHA验证进度，之后逐shard/epoch训练；无需重新prepare。
+完成后回传以下小报告，以同一新纯EGY验证集比较×2/×3：
+- `outputs/en_egy_480_ctc_v1/head/report.json`
+- `outputs/en_egy_480_head_up3_v1/report.json`
+- `outputs/en_egy_480_head_up3_v1/head/report.json`
+核验新×3的source_run、paired_manifest_sha256与源清单一致、encoder_recomputed=false。
+本地6项专项测试通过，覆盖相同数据/参数、缓存引用、中断恢复、完成重入和错误源拒绝。
+相关回归68 passed/3 skipped，改动Ruff/Mypy及git diff --check通过。
+全量1084 passed/67 skipped/14 failed/7 errors，失败项仍为既有Torch/soundfile依赖缺失。
+H200新×3结果待返回。
+
 ## 0.224 2026-11-16 英语＋纯EGY一条龙：标签完成后改为480h上限接续
 
 **最新状态/命令：** 用户返回指纹阶段2048/984703后报英语WAV时长变化；完整阿语标签已组装，
