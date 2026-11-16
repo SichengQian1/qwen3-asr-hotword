@@ -1,5 +1,52 @@
 # 工作交接记录
 
+## 0.220 2026-11-16 中英准备阶段时长下限失败：真实返回与只读诊断
+
+用户返回 `return_bundle(20261116-011508).zip`。包内全部sha256清单通过，
+identity提交为 `825a8b4463517994c908e520c8b95cdf2d6bf4ee`，配置与仓库一致；
+工区aligner的MFA运行时3.4.0。prepare约14769.2秒后，在manifests中文时长检查失败：
+`insufficient usable train/zh: 232.317h; minimum 432h`。
+432h是480h训练目标的90%工程下限，不是模型最低要求。
+没有进入Encoder特征提取、加噪缓存或Head训练。
+
+已核验包内数据：US389738行，UK1198417行，ZH207000行，源文件209个（207中文tar＋2英语JSON）。
+ZH训练划分197755行，完整可用标签197200行/232.31694859375676h，行保留率99.7193%；
+平均可用音频4.24108秒。ZH train＋validation隔离563行，其中train隔离555行；
+G2P问题累计599次不是599条不同音频。中文独立拼音请求57980个，57979个ok、1个
+unsupported_graphemes；这是运行/映射覆盖，不是人工读音正确率。
+US非test隔离3980行、UK30325行；原因含全大写策略、G2P、重复PCM或转写冲突。
+这些不构成本次停止原因，但应在后续标签改进中单独分析。
+
+当前返回包没有全源时长或其它五组可用时长：旧代码遇到第一组shortfall即抛错。
+因此暂不能把目录名500H当成真实时长，也不能把232.317h说成整个中文源的总时长，
+或仅凭行保留率断言被隔离的音频总时长很小。原始时长/声道/采样率仍需现存metadata
+与少量原始WAV头核对。此次不降低下限，不改原数据划分/配置/标签，不启动训练。
+
+新增独立只读诊断 `scripts/inspect_zh_en_preparation.py`，遍历已完成标签并核验各批SHA、
+行数、G2P身份和全源行数；汇总三来源全部原始已知时长、各split可用/隔离小时及原因、
+六组目标/下限是否满足。默认每来源只读3个非test、有效音频文件头，比对原始frames/rate
+与保存秒数，不做波形解码、G2P、Encoder或训练。抽样不能证明全量头信息一致。
+只读test登记元数据统计原始总量，不读取test音频、生成test标签或参与选模。
+
+同一分支 `codex/g2p-coverage-scan`，在原qwen环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -B scripts/inspect_zh_en_preparation.py
+```
+
+新输出 `outputs/zh_en_preparation_inspection_<随机ID>/return_bundle.zip`，返回这个小包。
+源 `outputs/zh_en_183_noise70_scratch_v1` 的任何文件不修改。诊断中断可重复该命令，
+新建诊断目录并重新读元数据，绝不重做旧四小时准备；无需GPU，也无需--resume。
+`--headers-per-group 0` 可仅查保存metadata（届时没有原音频头核验）。
+诊断独立模块不落在原流程哈希glob内，不改变训练contract所固定的源文件，
+但原all命令的432h下限仍然存在，**现在不要重复all或直接改配置重跑**。
+确认实际数据规模后再决定补中文源或以现有小时数调整训练配比，并实施有身份核验的复用。
+
+本地新增5项诊断测试通过，覆盖时长/排除口径、SHA损坏、分片缺失、源目录只读、
+test音频不读取及音频头差异报告；ruff/mypy/空白检查通过。不把本地合成数据当成工区实测。
+
 ## 0.219 2026-11-13 中英183类全量新标签、70%加噪及随机Head训练入口
 
 用户授权直接全量推进；随后明确**暂不做热词表、检索、delivery及最终ASR**，
