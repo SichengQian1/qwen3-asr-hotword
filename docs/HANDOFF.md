@@ -1,5 +1,45 @@
 # 工作交接记录
 
+## 0.229 2026-11-17 美英／英英与四批中文原始时长盘点
+
+用户要求统计两份英语JSON和现有两批＋新增两批中文的原始总量，非本轮480小时
+训练抽样。新增只读入口 `scripts/audit_zh_en_source_hours.py`，路径固定在
+`configs/zh_en_source_hours.workzone.json`，不改变训练配置。
+英语为 `swift_en_美式英语.json`、`swift_en_英国.json`；中文为0025、0007、
+新增0009-KingASR216、0059-KingASR408四批shards。目录名500H/620H/650H/1000H
+仅为来源名称，不能当作实测时长。英语文件名也不证明每条音频的实际口音。
+
+统计英语每行audios指向的音频头，缺失路径按既有 `/home_92` → `/host_home`
+映射；中文递归读取tar/tar.gz/tgz内部音频头，不展开整批音频到磁盘。
+按帧数／采样率计算秒数，不要求文本、MFA或训练标签合格，不进行训练筛选，
+包含来源中的保留集。英语另报同一来源内按解析后路径去重的小时数；合计仍按
+音频引用相加，未做跨来源或内容去重，不能当作去重后可训练小时数。
+无法读取、格式异常、非预期散装音频或扫描异常时标记incomplete，known_hours
+仅表示已读部分。压缩tar仍可能产生较多读取／解压工作；不做完整音频解码校验。
+
+分支 `codex/g2p-coverage-scan`，工区原有环境执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -u -B scripts/audit_zh_en_source_hours.py --workers 16
+```
+
+只用CPU，英语最多16并发、中文最多4个tar并发；不占GPU，不加载模型，不跑MFA，
+不修改原始数据或训练结果。每批有进度／心跳，六批顺序汇总。
+每次创建全新 `outputs/zh_en_source_hours_<随机后缀>/`，开头和结尾打印绝对路径。
+保存report.json、config.json、sources.json及各中文来源archive_details.jsonl。
+回传终端最后return_bundle字段指向的小包（仅含report.json和config.json）。
+本入口没有断点续跑，重复运行会重新读音频头并写新目录，不覆盖之前结果；中断时
+保存已完成来源的汇总，未完成来源不得认定统计完整。
+
+核验report.status=completed、六个by_source.status=complete，以及english_total
+和chinese_total的complete均为true；核对known_hours、failed_references、invalid_rows
+及重复路径数，有异常则先报告已知时长和缺口。本机无法读取工区来源，本条不记录
+任何实测语料小时数。局部21项测试通过，相关ruff/mypy检查通过；合成WAV/tar的
+完整命令测试通过，仅证明统计逻辑，不代表工区实测。
+
 ## 0.228 2026-11-17 AISHELL原始2012词／630目标词新评测入口
 
 用户要求再跑原始版本。本次恢复全部2012候选、2135条原始关键词子集音频、630种目标词，

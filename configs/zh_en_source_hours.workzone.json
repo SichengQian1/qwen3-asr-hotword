@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "audio_fallbacks": {
+    "/home_92": "/host_home"
+  },
+  "sources": [
+    {
+      "name": "en_us",
+      "kind": "english_json",
+      "path": "/host_home/z00841352/27A/data/en/json/swift_en_美式英语.json"
+    },
+    {
+      "name": "en_uk",
+      "kind": "english_json",
+      "path": "/host_home/z00841352/27A/data/en/json/swift_en_英国.json"
+    },
+    {
+      "name": "zh_noah_0025",
+      "kind": "chinese_shards",
+      "path": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0025-noah_carrec230-000500H_shards"
+    },
+    {
+      "name": "zh_king_0007",
+      "kind": "chinese_shards",
+      "path": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0007-KingASR059-000620H_shards"
+    },
+    {
+      "name": "zh_king_0009",
+      "kind": "chinese_shards",
+      "path": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0009-KingASR216-000650H_shards"
+    },
+    {
+      "name": "zh_king_0059",
+      "kind": "chinese_shards",
+      "path": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0059-KingASR408-001000H_shards"
+    }
+  ]
+}
