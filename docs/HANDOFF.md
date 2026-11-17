@@ -1,5 +1,96 @@
 # 工作交接记录
 
+## 0.227 2026-11-17 AISHELL中英183类：1054词检索实测完成
+
+用户返回 `return_bundle(2).zip` 及完成日志；已读取包内report、asset_summary、g2p_report、
+selection_summary，逐词统计重新累加与总计一致。包SHA256：
+`972e7d1074456f832ce58d2445ecb4444d38c2d43408a1479db02465b50eb110`。
+这是工区实测结果，不是本地模拟。本地核验了报告间身份一致及词表文件SHA；
+权重和生成索引未包含在小包内，其SHA以工区报告为据，未在本机重新读取完整产物。
+
+### 固定评测口径
+
+- `status=completed`；1054个候选词全部参与统一索引，不是只用271个正例词建库。
+- 1245条原始音频、不额外加噪；271个不同有效目标词，共1489个“音频＋目标词”组合。
+  同句同词重复提及计一个组合。主召回率＝命中的组合数/1489，不是除以271或1245。
+- `raw_top5/7`：CTC解码 → Anchor最多64候选 → 局部重排，取未经置信门限过滤的前5/7。
+  不是全库穷举的理想TopK，也不是最终ASR识别率。
+- `gated_top5/7`：对重排候选先应用score≥0.75、edit ratio≤0.35、posterior≥0.5，
+  再各取前5/7，允许少于K。沿用门限，本次未按测试结果调参。
+- 宏平均召回：先计算每个目标词在其有效音频中的召回率，再对271词等权平均。
+- 数据根目录 `/glusterfs_104/asr-data-Open-Source/zh/aishell`；沿用0.226固定审核政策。
+  参考文本/目标仅用于固定选集与计分，不送入模型或候选排序。
+
+### 实测结果
+
+| 口径 | 命中组合／分母 | 召回率 | 271词宏平均召回 | 目标全部命中的音频数 |
+|---|---:|---:|---:|---:|
+| 门限前 Top5 | 1476/1489 | 99.1269% | 98.1811% | 1232/1245 |
+| 门限前 Top7 | 1477/1489 | 99.1941% | 98.2549% | 1233/1245 |
+| 门限后 Top5 | 1462/1489 | 98.1867% | 96.7865% | 1218/1245 |
+| 门限后 Top7 | 1462/1489 | 98.1867% | 96.7865% | 1218/1245 |
+
+门限前Top7比Top5仅多命中1个组合（约0.0672个百分点）；门限后两者均漏27个组合。
+门限后Top5输出2843个“候选词＋音频”组合，Top7输出2932个，多89个但没有新增有效目标命中。
+因此本批数据支持优先Top5，不能据此宣称所有业务场景Top7都无收益。
+门限后Top5/7分别有1227/1316个入选非目标词未出现在参考全文，另各154个入选非目标词
+在文本中出现但未标注或被审核排除。这些是文本诊断计数，不是经过听审的误报率。
+
+纯检索耗时（1245条）：均值6.6573ms，P50 6.3952ms，P95 9.6187ms，
+P99 10.9811ms，最大26.3311ms；不含音频读取、Encoder和CTC Head。
+`qwen_decoder_used=false`、`training_started=false`；没有最终ASR、PER或新增带噪测试结果。
+
+### 模型、音素表与热词索引身份
+
+- Head：`outputs/zh_en_183_noise70_dual_v2/head/ctc_head_best.pt`，最佳epoch25，183类。
+  SHA256：`955e31483b54040c5fce9da6e9287f604545087cdddf15db434a2ce7557991d1`。
+- 基础模型：`/glusterfs_103/models/Qwen3-ASR-1.7B`。
+- 音素表：`configs/phonemes/zh_en_mfa_g2p_vocab.v1.0.json`；SHA256：
+  `ef5a411afbdb238a400302da2d871fe64f8f94e8d065fdf045b8bf5f39a2b5cb`。
+- 热词索引SHA256：`67b4918cd40d7a1e07e5cce75a71b656054a3a7d2a5ca59315bf9fe4fa9c625e`。
+- plan SHA256：`100a23b8243ba38664e872a5ac05fbbafd7d0ae456f01d540aa52413c75f36fe`。
+- G2P：1054/1054转换成功、失败0，两个同音组分别保留不同词面；覆盖率100%不代表发音正确率100%。
+  中文mandarin_china_mfa3.0.0，US/UK模型均3.3.0，沿用训练前端与Top1。
+- 返回环境：torch2.9.1、qwen-asr0.0.6、transformers4.57.6、numpy2.2.6、soundfile0.13.1、librosa0.11.0。
+
+### 实际热词表及产物位置
+
+工区生成的完整热词表（1054行，每行含surface、pronunciation、phoneme_tokens、token_ids）：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/aishell_zh_en183_1054_top57_v1/phonemes/indexed_pronunciations.jsonl
+```
+
+`configs/aishell_review_1054.v1.json`是审核白名单与排除规则，以上JSONL才是本次生成并用于构建索引的音素热词表。
+同一 `phonemes/` 目录的 `frontend.jsonl` 记录分词和前端输入；
+`audio/audio_manifest.jsonl`、`retrieval_details.jsonl`在本轮输出根目录，分别记录音频/有效目标与逐条检索。
+查看前5个完整条目：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+head -n 5 outputs/aishell_zh_en183_1054_top57_v1/phonemes/indexed_pronunciations.jsonl
+```
+
+报告和回传包分别是本轮输出根目录下的 `report.json`、`return_bundle.zip`。
+本次仅追加结果文档，不改运行配置/源码/模型/热词表、不重跑推理、不覆盖历史outputs。
+分支 `codex/g2p-coverage-scan`；工区同步记录用 `git pull --ff-only origin codex/g2p-coverage-scan`。
+如需续跑核对仍为 `python -u -B scripts/evaluate_aishell_zh_en.py --gpu 5`，同身份复用已完成条目；
+不需要为更新HANDOFF执行评测。回传路径仍是：
+`/host_home/star/q00933266/qwen3-asr-hotword/outputs/aishell_zh_en183_1054_top57_v1/return_bundle.zip`。
+
+### 边界与挂载故障记录
+
+检查了715029条本轮训练/验证元数据，标准化PCM或文件字节重复0、缺失PCM hash 0；
+1245条评测内部重复PCM 0。不能由此推出说话人隔离、近重复隔离或Qwen预训练未见AISHELL。
+词库筛选参考过这批测试文本，且目标未逐条听审；783个非目标候选仅词面初筛，不能认作已认证负例。
+本次为有目标的筛选子集，不能报告总体无目标误报率、带噪泛化或最终ASR WER。
+
+本次首次启动在verify_model因索引不可见失败。宿主机findmnt显示103为GlusterFS，
+新容器6cf9599893f6内却为本地ext4目录；确认是挂载视图不同，而非模型丢失或ls空格问题。
+用户重启容器后，容器103变为 `10.44.168.103:/train_vol`、fuse.glusterfs，模型索引恢复可见；
+随后用户回传本轮completed结果。不能将重启当作运行中任务的无损操作，需先确认容器无重要进程。
+
+
 ## 0.226 2026-11-17 AISHELL1054词／1245条：中英183类检索入口
 
 用户已确认用清理后的1054词建统一索引，在1245条原始音频上评测271个有效目标词。
