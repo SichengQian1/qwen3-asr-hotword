@@ -1,4 +1,4 @@
-"""Independent 1054-word / 1245-audio AISHELL retrieval evaluation, no training or ASR."""
+"""Independent fixed-policy AISHELL retrieval evaluation, no training or ASR."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 
 from qwen_hotword.evaluation.aishell_reviewed import (
     assemble_entries,
+    check_result_counts,
     select_dataset,
     selections,
     summarize,
@@ -96,6 +97,8 @@ def identity(
     marker = read(train / "training_completed.json")
     checkpoint = train / "head/ctc_head_best.pt"
     pin(checkpoint, marker["identity"]["checkpoint_sha256"])
+    if cfg.get("required_checkpoint_sha256"):
+        pin(checkpoint, cfg["required_checkpoint_sha256"])
     pin(train / "head/report.json", marker["identity"]["report_sha256"])
     pin(train / "validation_per.json", marker["validation_per_sha256"])
     import torch
@@ -325,7 +328,9 @@ def pronunciations(
     }
     write_json(output / "g2p_report.json", report)
     if failures or len(entries) != len(surfaces):
-        raise ValueError("hotword G2P incomplete; refusing to shrink the 1054-word table")
+        raise ValueError(
+            f"hotword G2P incomplete; refusing to shrink the {len(surfaces)}-word table"
+        )
     save_rows(index, (e.to_dict() for e in entries))
     finish(
         folder,
@@ -519,7 +524,7 @@ def run(root: Path, config: Path, output: Path, gpu: int) -> dict[str, Any]:
                 root, output, surfaces, train_cfg, foundation, vocab, source_id
             )
             if len(entries) != policy["expected_counts"]["candidates"]:
-                raise ValueError("active index differs from 1054 approved candidates")
+                raise ValueError("active index differs from the fixed candidate count")
             plan = {
                 **plan,
                 "audio_manifest_sha256": sha(output / "audio/audio_manifest.jsonl"),
@@ -529,12 +534,7 @@ def run(root: Path, config: Path, output: Path, gpu: int) -> dict[str, Any]:
             stage = "retrieval"
             details = infer(output, plan, inventory, entries, vocab, gpu)
             result = summarize(details)
-            if (result["sample_count"], result["target_words"], result["target_pairs"]) != (
-                1245,
-                271,
-                1489,
-            ):
-                raise ValueError("evaluation denominator changed")
+            check_result_counts(result, policy["expected_counts"])
             save_rows(output / "retrieval_details.jsonl", details)
             failure_examples = [
                 r for r in details if not set(r["targets"]) <= set(r["selections"]["gated_top7"])
@@ -555,7 +555,10 @@ def run(root: Path, config: Path, output: Path, gpu: int) -> dict[str, Any]:
             result.update(
                 {
                     "status": "completed",
-                    "scope": "AISHELL_reviewed_offline_full_audio_retrieval",
+                    "scope": "AISHELL_"
+                    + policy.get("selection_mode", "reviewed")
+                    + "_offline_full_audio_retrieval",
+                    "selection_mode": policy.get("selection_mode", "reviewed"),
                     "active_surfaces": len(entries),
                     "num_classes": 183,
                     "checkpoint_sha256": plan["checkpoint_sha256"],

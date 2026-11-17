@@ -298,3 +298,70 @@ def test_inference_uses_audio_only_then_reuses_saved_result(
     plan["checkpoint_path"] = "different"
     with pytest.raises(ValueError, match="changed/corrupt"):
         infer(tmp_path, plan, [record], tuple(entries), vocab, 4)
+
+
+def original_policy(tmp_path: Path) -> dict[str, Any]:
+    policy = source(tmp_path)
+    policy.pop("candidate_surfaces")
+    policy.pop("excluded_target_pairs")
+    policy["selection_mode"] = "original"
+    policy["expected_counts"] = {"candidates": 4, "utterances": 3, "targets": 4, "target_pairs": 6}
+    return policy
+
+
+def test_original_preserves_common_words_substrings_and_all_rows(tmp_path: Path) -> None:
+    policy = original_policy(tmp_path)
+    surfaces, records = select_dataset(tmp_path, policy)
+    assert set(surfaces) == {"北京", "上海", "中国", "学习"}
+    assert [r["sample_id"] for r in records] == ["a", "b", "c"]
+    assert records[1]["targets"] == ["中国", "北京", "学习"]
+    assert records[2]["targets"] == ["学习"]
+    assert sum(len(r["targets"]) for r in records) == 6
+
+
+@pytest.mark.parametrize("field", ["candidate_surfaces", "excluded_target_pairs"])
+def test_original_cannot_apply_editorial_filters(tmp_path: Path, field: str) -> None:
+    policy = original_policy(tmp_path)
+    policy[field] = ["北京"] if field == "candidate_surfaces" else [{"utt_id": "b", "word": "中国"}]
+    with pytest.raises(ValueError, match="whitelist or target exclusions"):
+        select_dataset(tmp_path, policy)
+
+
+def test_original_does_not_silently_drop_out_of_table_targets(tmp_path: Path) -> None:
+    policy = original_policy(tmp_path)
+    path = tmp_path / "kw/kw_candidates.tsv"
+    path.write_text(path.read_text().replace("中国\t9\n", ""))
+    policy["source_sha256"]["kw/kw_candidates.tsv"] = sha(path)
+    with pytest.raises(ValueError, match="outside full table"):
+        select_dataset(tmp_path, policy)
+
+
+def test_configured_original_denominator_and_model_identity() -> None:
+    from qwen_hotword.evaluation.aishell_reviewed import check_result_counts
+
+    policy = json.loads((ROOT / "configs/aishell_original_2012.v1.json").read_text())
+    cfg = json.loads((ROOT / "configs/aishell_original_retrieval.workzone.json").read_text())
+    reviewed = json.loads((ROOT / "configs/aishell_retrieval.workzone.json").read_text())
+    expected = {"candidates": 2012, "utterances": 2135, "targets": 630, "target_pairs": 2782}
+    assert policy["expected_counts"] == expected
+    assert policy["selection_mode"] == "original"
+    assert (
+        cfg["required_checkpoint_sha256"]
+        == "955e31483b54040c5fce9da6e9287f604545087cdddf15db434a2ce7557991d1"
+    )
+    for field in (
+        "training_run",
+        "training_config",
+        "vocab_sha256",
+        "num_classes",
+        "dtype",
+        "anchor",
+        "scoring",
+    ):
+        assert cfg[field] == reviewed[field]
+    assert cfg["output"] != reviewed["output"]
+    check_result_counts({"sample_count": 2135, "target_words": 630, "target_pairs": 2782}, expected)
+    with pytest.raises(ValueError, match="denominator changed"):
+        check_result_counts(
+            {"sample_count": 1245, "target_words": 271, "target_pairs": 1489}, expected
+        )

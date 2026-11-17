@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "selection_mode": "original",
+  "review": "User requested original full candidate table and original per-utterance targets; no editorial filtering.",
+  "expected_counts": {
+    "candidates": 2012,
+    "utterances": 2135,
+    "targets": 630,
+    "target_pairs": 2782
+  },
+  "source_sha256": {
+    "kw/kw_candidates.tsv": "9551f2bdc941d22f53104ccd87d088cae0ff9b29fa46c896166cebfbad85063f",
+    "val/kw_subset/kw.jsonl": "4d7efff4ff70e5a0f339dbc4049d0b2d380de525132563abc7387352440f26be"
+  },
+  "limitations": [
+    "沿用原始关键词对应，不应用1054词版的普通词/专名/字串边界筛选，也不补标完整姓名。",
+    "原标注的子串目标在其对应句子中仍按原词面计分；不是完整专名准确率。",
+    "参考标注未逐条听审；不推断原作者标注是否错误。",
+    "相对1054词版同时改变了候选库和测试样本/目标，不能把差值只归因于词库扩大。"
+  ]
+}

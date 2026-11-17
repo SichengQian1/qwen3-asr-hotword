@@ -21,18 +21,26 @@ from qwen_hotword.training.zh_en_common import rows
 
 
 def select_dataset(dataset: Path, policy: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
-    """Rebuild the approved review from hash-pinned originals, never infer extra targets."""
+    """Use reviewed or unchanged original labels, never infer extra targets."""
     for name, expected in policy["source_sha256"].items():
         pin(dataset / name, expected)
-    surfaces = policy["candidate_surfaces"]
-    if len(surfaces) != len(set(surfaces)) or not all(isinstance(w, str) and w for w in surfaces):
-        raise ValueError("duplicate/empty candidate surfaces")
     with (dataset / "kw/kw_candidates.tsv").open(encoding="utf-8") as stream:
         candidates = [r["word"] for r in csv.DictReader(stream, delimiter="\t")]
+    mode = policy.get("selection_mode", "reviewed")
+    if mode not in ("reviewed", "original"):
+        raise ValueError("unknown AISHELL selection mode")
+    if mode == "original" and (
+        "candidate_surfaces" in policy or policy.get("excluded_target_pairs")
+    ):
+        raise ValueError("original evaluation cannot use a whitelist or target exclusions")
+    surfaces = sorted(candidates) if mode == "original" else policy["candidate_surfaces"]
+    if len(surfaces) != len(set(surfaces)) or not all(isinstance(w, str) and w for w in surfaces):
+        raise ValueError("duplicate/empty candidate surfaces")
     if len(candidates) != len(set(candidates)) or not set(surfaces) <= set(candidates):
         raise ValueError("reviewed candidates do not match source table")
-    excluded = {(r["utt_id"], r["word"]) for r in policy["excluded_target_pairs"]}
-    if len(excluded) != len(policy["excluded_target_pairs"]):
+    excluded_rows = policy.get("excluded_target_pairs", [])
+    excluded = {(r["utt_id"], r["word"]) for r in excluded_rows}
+    if len(excluded) != len(excluded_rows):
         raise ValueError("duplicate exclusion decisions")
     seen: set[str] = set()
     observed_exclusions: set[tuple[str, str]] = set()
@@ -46,6 +54,8 @@ def select_dataset(dataset: Path, policy: dict[str, Any]) -> tuple[list[str], li
         words = [k["word"] for k in row["keywords"]]
         if len(words) != len(set(words)) or any(w not in text for w in words):
             raise ValueError(f"invalid original targets: {sid}")
+        if mode == "original" and (not words or not set(words) <= allowed):
+            raise ValueError(f"original row has no targets or targets outside full table: {sid}")
         targets = []
         for word in words:
             if (sid, word) in excluded:
@@ -65,6 +75,13 @@ def select_dataset(dataset: Path, policy: dict[str, Any]) -> tuple[list[str], li
     if counts != policy["expected_counts"]:
         raise ValueError(f"approved denominator changed: {counts}")
     return list(surfaces), selected
+
+
+def check_result_counts(result: dict[str, Any], expected: dict[str, int]) -> None:
+    actual = (result["sample_count"], result["target_words"], result["target_pairs"])
+    required = (expected["utterances"], expected["targets"], expected["target_pairs"])
+    if actual != required:
+        raise ValueError(f"evaluation denominator changed: {actual}; expected {required}")
 
 
 def assemble_entries(

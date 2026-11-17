@@ -1,5 +1,53 @@
 # 工作交接记录
 
+## 0.228 2026-11-17 AISHELL原始2012词／630目标词新评测入口
+
+用户要求再跑原始版本。本次恢复全部2012候选、2135条原始关键词子集音频、630种目标词，
+分母2782个“音频＋目标词”组合。普通词及原始子串目标均保留，不再用1054词白名单，
+也不应用19个逐句排除项；不新增完整人名或补标目标。
+需澄清此前“错误目标标注”的措辞：尚未确认原作者是否有意按字串匹配标注；
+此前剔除的是与严格专名口径不一致的对应，不能一概断言原始转写或关键词标注错误。
+
+新增 `configs/aishell_original_2012.v1.json`、`configs/aishell_original_retrieval.workzone.json`。
+已有脚本按明确selection_mode选择原始/审核版，计分分母由固定policy核验。
+默认仍为1054审核版，本次必须指定original配置。MFA Top1、183词表、Encoder、检索参数不变，
+并额外固定上轮epoch25 Head SHA：
+`955e31483b54040c5fce9da6e9287f604545087cdddf15db434a2ce7557991d1`。
+同一路径若换权重拒绝运行。仅原始音频检索，不训练、不加新噪声、不跑Decoder。
+
+分支 `codex/g2p-coverage-scan`，工区已有环境物理GPU5：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -u -B scripts/evaluate_aishell_zh_en.py --gpu 5 --config configs/aishell_original_retrieval.workzone.json
+```
+
+输出全新目录 `outputs/aishell_zh_en183_original2012_top57_v1`，旧1054结果不覆盖，
+不沿用旧词库的候选排序或检索结果；同一新命令自动验证身份并续跑本次目录，无需resume。
+评测模块有改动，旧运行代码SHA仍保持封存，旧结果直接读取；不要改旧身份强行续跑。
+若需重跑旧口径另指定全新output-dir。训练源码/缓存/模型均未更改。
+
+成功检查：status completed，active_surfaces2012、sample_count2135、target_words630、
+target_pairs2782、num_classes183；scope为AISHELL_original_offline_full_audio_retrieval。
+报raw/gated Top5/7与630词宏平均；门限继续0.75/0.35/0.5，Anchor仍最多64候选。
+两版候选库和测试样本/目标都变了，不能将召回差值仅归因于词库规模。
+原始2135条关键词子集不等于AISHELL全部7176条测试音频；不能报告总体无目标误报率。
+
+热词表在新输出目录 `phonemes/indexed_pronunciations.jsonl`。回传小包完整路径：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/aishell_zh_en183_original2012_top57_v1/return_bundle.zip
+```
+
+本地用前次暂存的原始文件并通过原SHA检查，复现2012/2135/630/2782，
+确认19个上下文排除项全部恢复；旧审核模式仍精确复现1054/1245/271/1489。
+新增5项测试覆盖原始普通词/子串目标保留、禁止筛词、目标不在库时拒绝、固定分母和模型/配置一致；
+相关回归83 passed/6 skipped，Ruff/Mypy/whitespace通过。未在本机加载完整Qwen；H200结果待回传。
+说明见 `docs/AISHELL_ORIGINAL_2012_V1.md`。
+
+
 ## 0.227 2026-11-17 AISHELL中英183类：1054词检索实测完成
 
 用户返回 `return_bundle(2).zip` 及完成日志；已读取包内report、asset_summary、g2p_report、

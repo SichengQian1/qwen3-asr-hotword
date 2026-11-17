@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "output": "outputs/aishell_zh_en183_original2012_top57_v1",
+  "dataset_root": "/glusterfs_104/asr-data-Open-Source/zh/aishell",
+  "training_run": "outputs/zh_en_183_noise70_dual_v2",
+  "training_config": "configs/zh_en_noise70_dual.workzone.json",
+  "review_policy": "configs/aishell_original_2012.v1.json",
+  "num_classes": 183,
+  "vocab_sha256": "ef5a411afbdb238a400302da2d871fe64f8f94e8d065fdf045b8bf5f39a2b5cb",
+  "dtype": "bfloat16",
+  "minimum_free_gpu_gib": 35,
+  "anchor": {
+    "shortlist_size": 64,
+    "start_radius": 2,
+    "ngram_sizes": [
+      2,
+      3,
+      4
+    ],
+    "anchors_per_entry": 24,
+    "offset_tolerance": 1
+  },
+  "scoring": {
+    "score_threshold": 0.75,
+    "top_k": 7,
+    "minimum_phonemes": 1,
+    "maximum_edit_ratio": 0.35,
+    "posterior_weight": 0.25,
+    "minimum_posterior_confidence": 0.5,
+    "minimum_top1_margin": 0.0
+  },
+  "required_checkpoint_sha256": "955e31483b54040c5fce9da6e9287f604545087cdddf15db434a2ce7557991d1"
+}

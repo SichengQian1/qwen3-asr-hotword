@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate approved AISHELL 1054-word Top5/Top7 with the completed Chinese/US/UK Head."""
+"""Evaluate fixed-policy AISHELL Top5/Top7 with the completed Chinese/US/UK Head."""
 
 from __future__ import annotations
 
