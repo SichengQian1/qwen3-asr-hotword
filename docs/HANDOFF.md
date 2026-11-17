@@ -1,5 +1,52 @@
 # 工作交接记录
 
+## 0.226 2026-11-17 AISHELL1054词／1245条：中英183类检索入口
+
+用户已确认用清理后的1054词建统一索引，在1245条原始音频上评测271个有效目标词。
+由上传两包的原始文件重新生成并核验：1489个“音频＋目标词”组合，和前次审核结果一致。
+新增审核配置固定1054词面及19个错误目标组合排除项，不向Git提交测试清单/音频/生成发音。
+入口独立于训练和英阿任务，不修改被训练运行身份封存的源码。
+
+默认核验 `outputs/zh_en_183_noise70_dual_v2/head/ctc_head_best.pt`：完成标记、报告及权重SHA、
+183类ID顺序、Temporal 2x、随机初始化/冻结Encoder，核对训练时保存的原始Qwen1.7B身份。
+词表为 `configs/phonemes/zh_en_mfa_g2p_vocab.v1.0.json`，SHA
+`ef5a411afbdb238a400302da2d871fe64f8f94e8d065fdf045b8bf5f39a2b5cb`。
+若中英训练未完成，明确停止；不会使用旧90/100类或英阿模型替代。
+固定训练前端pypinyin0.55.0/jieba0.42.1与mandarin_china_mfa3.0.0 Top1重建发音，
+同音不同词面不合并；任何发音失败均报错，不能缩小候选库或分母。
+
+工区当前分支 `codex/g2p-coverage-scan`，运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+git rev-parse HEAD
+python -u -B scripts/evaluate_aishell_zh_en.py --gpu 4
+```
+
+仅用指定GPU4（需35GiB空闲，不停其他任务）；已有qwen环境＋aligner环境。
+原始音频不加噪、不训练、不运行Decoder生成；当前复用的Qwen封装仍加载基础模型权重。
+自动按输出身份续跑，同命令即可，不加resume；发音批次及逐条结果校验后复用。
+改配置/模型/相关代码或输入时需另建输出，不混入历史结果。
+先核对测试wav及同名txt，按标准化PCM与本轮选中训练/验证元数据检查重复。
+检索用原有Anchor最多64候选＋局部重排。报告同时提供raw与gated Top5/7，固定分母1489；
+raw是Anchor后未过门限的排名，gated沿用0.75/0.35/0.5门限，未在本测试调参。
+数据只做文本审核，未听审；783个非目标候选不等于已认证负例；不报总体误报率或ASR WER。
+
+输出：`outputs/aishell_zh_en183_1054_top57_v1`。回传完整路径：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/aishell_zh_en183_1054_top57_v1/return_bundle.zip
+```
+
+结果检查：终端须 `status=completed`、active_surfaces1054、sample_count1245、target_words271、
+target_pairs1489、num_classes183。报告带checkpoint/vocab/index SHA；有失败则返回小包定位。
+说明：`docs/AISHELL_ZH_EN_RETRIEVAL_V1.md`。18项新测试覆盖固定分母/错误标注排除、
+同音词保留、Top1失败不截断、不向推理传参考答案、raw/gated区别、183身份、PCM重复、断点续跑与篡改拒绝。
+相关回归合计78 passed/6 skipped（部分需要本地未装的Torch）；新增源码Ruff/Mypy通过。
+这里没有运行H200推理，实际召回待用户回传。
+
+
 ## 0.225 2026-11-16 新纯EGY训练/验证集的×3 Head配对入口
 
 **当前执行入口修正：不再等待新×2完整训练。** 工区运行Head-only入口时没有
