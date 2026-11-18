@@ -17,10 +17,11 @@
 工区分支 `codex/g2p-coverage-scan`。已有训练环境中执行：
 
 ```bash
-cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/run_balanced_zh_en.py
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/run_balanced_zh_en.py --scale-to-us
 ```
 
-默认按530小时目标执行。启动时读取旧美式训练池的完整标签小时数，若已不足530，
+用户已确认本轮使用上方等比缩量命令，输出目录为 `outputs/zh_en_183_balanced530_v1_uscap/`。
+省略开关时按固定530小时目标执行。启动时读取旧美式训练池的完整标签小时数，若已不足530，
 提前报告可用量。显式追加 `--scale-to-us` 可按实际合格的美式时长（上限530）同步
 缩放英式和四批中文训练配额。两种方式各自使用独立输出。验证以20小时为目标，
 若某个原验证池容量不足，则六个来源按同一系数缩小；某来源为空时停止。
