@@ -1,5 +1,81 @@
 # 工作交接记录
 
+## 0.230 2026-11-18 中英六个来源原始时长实测与路径记录
+
+依据用户回传的完整终端JSON记录（非本机重新扫描）；scope为
+`raw_source_audio_header_durations_all_rows_no_training_selection`。
+六个来源均complete、总状态completed，失败引用均0；英语invalid_rows与
+源内重复解析路径均0，中文失败tar、路径别名及未计入散装音频均0。
+已复核秒数÷3600与逐语言求和，六个来源路径与0.229配置一致。
+未收到原始bundle，也没有源文件内容哈希或运行代码SHA，不能声称已独立复核文件身份。
+
+| 来源 | 音频引用数 | 实测小时 | tar数 |
+|---|---:|---:|---:|
+| 美式英语来源 | 389,738 | 549.630328 | — |
+| 英式英语来源 | 1,198,417 | 2109.634152 | — |
+| 中文0025 Noah | 207,000 | 243.581472 | 207 |
+| 中文0007 KingASR059 | 414,000 | 603.972017 | 414 |
+| 中文0009 KingASR216 | 594,000 | 661.680708 | 594 |
+| 中文0059 KingASR408 | 812,000 | 993.212197 | 812 |
+| 英语合计 | 1,588,155 | 2659.264480 | — |
+| 中文合计 | 2,027,000 | 2502.446395 | 2,027 |
+| 中英总计 | 3,615,155 | 5161.710875 | — |
+
+工区完整来源路径（英语为索引JSON，中文为tar分片根目录）：
+
+美式英语来源：
+
+```text
+/host_home/z00841352/27A/data/en/json/swift_en_美式英语.json
+```
+
+英式英语来源：
+
+```text
+/host_home/z00841352/27A/data/en/json/swift_en_英国.json
+```
+
+中文0025 Noah：
+
+```text
+/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0025-noah_carrec230-000500H_shards
+```
+
+中文0007 KingASR059：
+
+```text
+/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0007-KingASR059-000620H_shards
+```
+
+中文0009 KingASR216：
+
+```text
+/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0009-KingASR216-000650H_shards
+```
+
+中文0059 KingASR408：
+
+```text
+/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0059-KingASR408-001000H_shards
+```
+
+本次中文0025实际为243.581472小时，不能按目录名000500H记成500小时；
+这也不同于此前经过训练条件筛选的232.317小时，两者统计口径不同。
+全部时长按音频头帧数／采样率计算，包含来源内保留集，不是完整解码质检、
+标签合格或可训练总量。未做跨来源／音频内容去重；英语源名不保证实际口音。
+本次只统计，不启动新增标注或训练，不更改原中英训练数据选择。
+
+工区结果目录（用户粘贴文本中的Markdown转义已还原为末尾下划线）：
+
+```text
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/zh_en_source_hours_bo7auw0_
+/host_home/star/q00933266/qwen3-asr-hotword/outputs/zh_en_source_hours_bo7auw0_/return_bundle.zip
+```
+
+本节仅追加结果文档，无运行代码变化。分支仍为 `codex/g2p-coverage-scan`；
+工区通过 `git pull --ff-only origin codex/g2p-coverage-scan` 同步记录即可，
+不需要重新统计。复跑命令和输出保留策略见0.229。验证为数值/路径核对及git diff检查。
+
 ## 0.229 2026-11-17 美英／英英与四批中文原始时长盘点
 
 用户要求统计两份英语JSON和现有两批＋新增两批中文的原始总量，非本轮480小时
