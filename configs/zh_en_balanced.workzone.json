@@ -1,0 +1,32 @@
+{
+  "chinese_roots": {
+    "0025": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0025-noah_carrec230-000500H_shards",
+    "0007": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0007-KingASR059-000620H_shards",
+    "0009": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0009-KingASR216-000650H_shards",
+    "0059": "/glusterfs_103/asr-data_imedia_zh-en/zh/ASRCHINESE0059-KingASR408-001000H_shards"
+  },
+  "archive_counts": {
+    "0009": 594,
+    "0059": 812
+  },
+  "previous_run": "outputs/zh_en_183_noise70_dual_v2",
+  "output": "outputs/zh_en_183_balanced530_v1",
+  "quotas": {
+    "train": {
+      "us": 530,
+      "uk": 530,
+      "0025": 106,
+      "0007": 212,
+      "0009": 318,
+      "0059": 424
+    },
+    "validation": {
+      "us": 5,
+      "uk": 5,
+      "0025": 1,
+      "0007": 2,
+      "0009": 3,
+      "0059": 4
+    }
+  }
+}
