@@ -1,0 +1,12 @@
+{
+  "train": "outputs/zh_en_183_balanced530_v1_uscap",
+  "aishell": "/glusterfs_104/asr-data-Open-Source/zh/aishell",
+  "aishell_wav": "/data/z00816262/zh_eval_aishell_test",
+  "previous_subset": "outputs/aishell_zh_en183_original2012_top57_v1/audio/audio_manifest.jsonl",
+  "work": "/host_home/star/zh_en_work",
+  "home_meta": "/data/z00816262/tts_zh_en_v1/meta_16k.jsonl",
+  "en_wav": "/data/z00816262/en_tts_final_zh_en_v2",
+  "en_index": "en_tts_index_step25.jsonl",
+  "en_surface_sha256": "3e82b27a17333840069c522bbefeb240cb7547600a9482e01ea3377dcd59c114",
+  "base_candidates": ["/data_103/models/Qwen3-ASR-1.7B", "/data/models/Qwen3-ASR-1.7B"]
+}

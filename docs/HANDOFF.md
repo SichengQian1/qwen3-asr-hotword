@@ -1,5 +1,25 @@
 # 工作交接记录
 
+## 0.232 2026-11-19 中英2351词联合库流式评测的工区输入定位
+
+工区终端回传 balanced530_uscap 的 best 文件存在，训练完成标记为183类、epoch 16；
+模型SHA待正式入口验证。联合候选库按用户两张TSV保留2351个词面、2352个发音。
+当前评测待补AISHELL主集逐句NER（entities_test_clean.tsv只有entity/type/occ）、
+英文TTS最终WAV与目标实体的对应及583词覆盖、基座可读位置。智慧家庭meta_16k
+已见样例含subset、keywords、wav，首条属于train，须核对八个val桶。
+子集正式文件名是kw.jsonl，也可以从上轮原始2012版audio/audio_manifest.jsonl读取targets。
+
+分支 `codex/g2p-coverage-scan`，在工区容器执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/inspect_zh_en_delivery_inputs.py
+```
+
+只读检查，无输出目录或断点，直接返回终端输出即可。英文两种命名映射分别报告命中最终目录
+的不同WAV数和实际匹配的词面集合是否等于TSV的583词。文件发现只在zh_en_work中有限深度搜索；
+基座检查默认仅列候选路径缺失的文件，可附加 `--model /可读快照路径`，空缺失清单代表文件存在，
+正式运行仍需核对模型哈希。此命令用于确定缺口，正式delivery需另行实现/运行。
+
 ## 0.231 2026-11-18 六来源配比的中英183类训练入口
 
 配额单位为小时，按完整音频选择，末条可略超目标。完整路径见0.230。
