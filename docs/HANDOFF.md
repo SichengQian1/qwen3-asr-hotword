@@ -1,5 +1,24 @@
 # 工作交接记录
 
+## 0.238 英文五组 Context Learning 交付
+
+分支 `codex/g2p-coverage-scan`，工区容器内运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/export_zh_en_group_delivery.py
+```
+
+读取 epoch25、480h 的原计划、音频清单及签名缓存，沿用原 2351 词联合表及 0.237 的词分组。
+按句内真实目标入组，每组每句只出现一次，多目标跨组及 multi 标签允许重叠。
+无目标音频留在原始交付。五组词数/目标对分别核对 13/59、73/355、21/98、525/50306、284/27665。
+按原数据集 key、utterance ID 写入门控后 same-step 全时间线、时长、音频路径，逐句验证两种模式和 2 秒边界。
+各组评分目标与认可别名单独放在 evaluation_targets.jsonl，供下游分组计分。
+
+CPU 打包；重复命令在新目录重建，原缓存及先前 outputs 均保留。仅将成功校验后的
+`outputs/zh_en480_group_delivery_<唯一后缀>/grouped_delivery.zip` 交给下游，末行打印绝对路径。
+外包内含 regular、cross、review、navigation、multi 五个目录，各有可独立使用的标准 delivery.zip。
+校验可执行 `unzip -t <末行打印的完整路径>`；只需回传外包内的小文件 summary.json 复核实际分组句数。
+
 ## 0.237 英文分组复计与跨语言专名后十名原音听审
 
 分支 `codex/g2p-coverage-scan`，工区容器内运行：

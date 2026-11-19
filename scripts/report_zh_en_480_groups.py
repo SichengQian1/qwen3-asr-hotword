@@ -19,6 +19,7 @@ from qwen_hotword.evaluation import zh_en_delivery as base
 from qwen_hotword.evaluation.english_group_recall import (
     GROUPS,
     VIEWS,
+    Label,
     Word,
     policy,
     summary,
@@ -38,7 +39,9 @@ def pct(x: float | None) -> str:
     return "—" if x is None else f"{100 * x:.2f}%"
 
 
-def main() -> None:
+def grouped_inputs() -> tuple[
+    Path, dict[str, Label], list[dict[str, Any]], dict[str, Any], dict[str, Any]
+]:
     source = ROOT / "outputs/zh_en183_480_joint2351_eleven_v1"
     table = ROOT / "configs/zh_en_joint2351.v1.jsonl"
     rules = ROOT / "configs/zh_en_english_eval_groups.v1.tsv"
@@ -68,7 +71,6 @@ def main() -> None:
         )
         if audit != plan["audit"][PROBE] or probe.keys() != manifest[PROBE + "@@en"].keys():
             raise ValueError("TTS index coverage differs from original evaluation")
-        home_meta = {r["id"]: r for r in rows(Path(cfg["home_meta"])) if r["id"].startswith("val_")}
         common = []
         for group, uid, path, ws in base.inputs(cfg):
             s = manifest[group + "@@" + group[:2]][uid]
@@ -79,6 +81,13 @@ def main() -> None:
             raise ValueError("original gold/manifest digest mismatch")
     items = [s for s in common if s["language"] == "en"]
     items.extend({**manifest[PROBE + "@@en"][uid], "targets": gold} for uid, gold in probe.items())
+    return source, labels, items, cfg, report
+
+
+def main() -> None:
+    source, labels, items, cfg, report = grouped_inputs()
+    rules = ROOT / "configs/zh_en_english_eval_groups.v1.tsv"
+    home_meta = {r["id"]: r for r in rows(Path(cfg["home_meta"])) if r["id"].startswith("val_")}
     words: dict[str, Word] = defaultdict(Word)
     totals: dict[str, Word] = defaultdict(Word)
     negatives: dict[str, Counter[str]] = defaultdict(Counter)
