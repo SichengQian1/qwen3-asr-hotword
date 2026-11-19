@@ -1,5 +1,19 @@
 # 工作交接记录
 
+## 0.236 中英 480 小时模型的英文漏召回诊断
+
+分支 `codex/g2p-coverage-scan`。容器内运行下列一条命令，使用原评测的物理 GPU 5。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/diagnose_zh_en_480_english.py --gpu 5
+```
+
+从 `outputs/zh_en183_480_joint2351_eleven_v1` 读取 epoch 25 的报告、计划、delivery 音频清单和签名缓存。en-TTS 目标按原索引和最终 WAV ID 关联，只读末次原始 Top7。以目标的英文登记发音对全部候选发音比较，归一编辑距离 ≤0.20 为近邻。按是否有近邻分组统计召回，每个漏召回句词对区分非金标近邻在榜、仅其他金标近邻在榜、无近邻在榜。前者是占位线索，目标在第八名以后的位置未知。逐句检查 TTS 文本的字面对应、源索引 IPA 与词表分词的一致性；数字口语化或不同音标写法需要复核。英文 583 表为利雅得等地的实体专名集合，309 词含数字。英文智慧家庭表含 107 个词；例如 Ne Zha 2 登记为 n ʒ tʰ ʉː。这些是词表事实，具体音频读音仍待听审。
+
+智慧家庭重建原逐句目标并核对清单哈希、Top7 命中和分母；v1、v2 各取最多四条不同目标的音频，每条只推最后一个前缀。先核对旧排名及门控输出与回放，然后记录目标匹配片段、原始名次、三个门槛实值和所有未过项。样例用于解释个案。工区诊断结果待回传。
+
+新目录 `outputs/zh_en480_english_diagnosis_<身份摘要>/` 与原评测隔离。同一命令复用已完成的 CPU 汇总及逐条回放；CPU 扫描如中断则重新读取已有排名。终端最后打印完整路径，回传 `return_bundle.zip`（仅 cpu.json 和 home.json）。可用 `unzip -t <终端打印的完整路径>` 复核压缩包。
+
 ## 0.235 中英 480h 同卡多进程检索与原地续跑
 
 适用于 0.234 的 11 组评测。若工区已进入 `Package validated same-step Top5/Top7 timelines`，
