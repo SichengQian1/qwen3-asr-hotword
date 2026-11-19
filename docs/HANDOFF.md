@@ -1,5 +1,33 @@
 # 工作交接记录
 
+## 0.235 中英 480h 同卡多进程检索与原地续跑
+
+适用于 0.234 的 11 组评测。若工区已进入 `Package validated same-step Top5/Top7 timelines`，
+GPU 推理已完成，直接等打包。若仍在 `480h retrieval`，在运行终端按一次 Ctrl+C，等返回 shell 提示符；
+原进程结束后，在已分配的 GPU 5 启动：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/run_zh_en_480_eleven.py --gpu 5 --workers 8
+```
+
+沿用 `outputs/zh_en183_480_joint2351_eleven_v1`。首次加速续跑匹配 4488cdc 的原始入口 SHA256，
+重新核对完整计划中其余字段，保留原始 run_config 与逐音频签名。新入口/调度模块身份另存
+`retrieval_runtime.json`。同语言同音频哈希只派发一次；已有缓存、输入身份均照旧验证。
+当既有缓存且仍有工作时，用并发 worker 回放一条已存音频，比较原始 Top7 及每个前缀完整的
+门控候选、分数与排序，完全一致后开始派发。省略 --workers 或设 1 为串行路径。
+中断后重复命令，已由主进程原子写入的音频可以续用。
+
+每进程在同一张卡加载一个独立模型，不跨句合并前缀，沿用基线 Encoder、CTC、
+候选库与门控。同卡并发上限 8（命令可调整），启动数按 CPU 配额、主机可用内存、
+GPU 剩余显存及任务数取较小值。OOM 或 worker 异常退出时减半重试；
+数据、模型或结果一致性错误会报告。进度显示历史已存与剩余唯一音频、
+新写入条数、含启动开销的音频数/分钟和前缀数/秒。工区实际加速倍数待测。
+
+完成后查看 `by_dataset.tsv`，执行
+`unzip -t outputs/zh_en183_480_joint2351_eleven_v1/delivery.zip` 核对交付；
+回传同目录 `return_bundle.zip`。本地 CPU 测试覆盖原运行身份、独立 spawn 调度、
+跨集重复、已有分片复用与交付格式。
+
 ## 0.234 2026-11-19 中英各 480 小时 Head 的 11 组同库检索复测
 
 分支 `codex/g2p-coverage-scan`。复用原 AISHELL 评测的身份校验，指定

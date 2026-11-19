@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from qwen_hotword.evaluation import zh_en_delivery as base
 from qwen_hotword.evaluation import zh_en_eleven as sets
+from qwen_hotword.evaluation import zh_en_parallel as parallel
 from qwen_hotword.evaluation.aishell_run import check_gpu, identity
 from qwen_hotword.inference import external_keyword_retrieval as external
 from qwen_hotword.inference.stream_context_contract import MODES, validate_contexts
@@ -130,7 +131,35 @@ def table(groups: dict[str, list[dict[str, Any]]], metrics: dict[str, Any]) -> s
     return "\n".join(lines) + "\n"
 
 
-def run(out: Path, gpu: int, ner: Path | None) -> None:
+SERIAL_RUNNER_SHA = "cc744c3e8a40c25175f2d68980117b2f64022b08f207b50a996dc429cb13af13"
+
+
+def resume_id(out: Path, plan: dict[str, Any]) -> str:
+    # The original plan hashes this CLI, including its scheduling loop. Preserve the
+    # original ID only for this explicitly reviewed predecessor, with every other
+    # field identical. Keep the original plan on disk so its results remain readable.
+    path = out / "run_config.json"
+    if path.is_file():
+        previous = read(path)
+        if previous["runner_sha256"] == SERIAL_RUNNER_SHA:
+            compatible = {**plan, "runner_sha256": SERIAL_RUNNER_SHA}
+            if previous != compatible:
+                raise ValueError("original evaluation inputs or scoring changed; cannot resume")
+            plan = compatible
+    external._write_or_verify_json(path, plan)
+    run_id = digest(plan)
+    external._write_or_verify_json(
+        out / "retrieval_runtime.json",
+        {
+            "run": run_id,
+            "runner_sha256": sha(Path(__file__)),
+            "parallel_module_sha256": sha(Path(parallel.__file__)),
+        },
+    )
+    return run_id
+
+
+def run(out: Path, gpu: int, ner: Path | None, workers: int = 1) -> None:
     cfg = read(ROOT / "configs/zh_en_stream2351_probe.workzone.json")
     previous_cfg = read(ROOT / "configs/aishell_original_retrieval.workzone.json")
     with stage_progress("Verify original bilingual 480h run / epoch 25 and joint-2351 index"):
@@ -165,8 +194,18 @@ def run(out: Path, gpu: int, ner: Path | None) -> None:
             )
         },
     }
-    external._write_or_verify_json(out / "run_config.json", plan)
-    run_id = digest(plan)
+    run_id = resume_id(out, plan)
+    if workers > 1:
+        parallel.prefill(
+            out,
+            groups,
+            run_id,
+            workers,
+            gpu,
+            (Path(model["model_path"]), Path(model["checkpoint_path"]), vocab, entries, owners),
+            cached,
+            load_result,
+        )
     detector = None
     totals: dict[str, dict[str, Counter[str]]] = {}
     probe_metrics: dict[str, Counter[str]] = {v: Counter() for v in VIEWS}
@@ -267,11 +306,18 @@ def main() -> None:
     p.add_argument(
         "--ner-file", type=Path, help="Optional local copy of the pinned official test transcript"
     )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        choices=range(1, 17),
+        help="Max independent retrieval workers on the selected card (1 = serial)",
+    )
     args = p.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     out = ROOT / "outputs/zh_en183_480_joint2351_eleven_v1"
     with exclusive_feature_cache_run(out):
-        run(out, args.gpu, args.ner_file)
+        run(out, args.gpu, args.ner_file, args.workers)
 
 
 if __name__ == "__main__":

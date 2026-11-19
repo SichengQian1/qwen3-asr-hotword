@@ -126,3 +126,123 @@ def test_eleven_dataset_delivery_and_negative_rates(tmp_path: Path, monkeypatch:
     write_json(result_path, saved)
     with pytest.raises(ValueError, match="incompatible"):
         cli.run(tmp_path, 5, None)
+
+
+def _fixture_retrieve(sample: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "steps": [[{"word": sample["language"], "score": 1.0, "phoneme": "t"}]],
+        "raw_last": [sample["language"]],
+    }
+
+
+def test_parallel_reuses_serial_identity_and_spawn_results(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+
+    from qwen_hotword.evaluation import zh_en_parallel as par
+
+    spec = importlib.util.spec_from_file_location(
+        "eleven_parallel_cli", ROOT / "scripts/run_zh_en_480_eleven.py"
+    )
+    assert spec is not None and spec.loader is not None
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    old = {"runner_sha256": cli.SERIAL_RUNNER_SHA, "head": "original", "audio_set": "unchanged"}
+    write_json(tmp_path / "run_config.json", old)
+    new = {**old, "runner_sha256": "later"}
+    rid = cli.resume_id(tmp_path, new)
+    assert rid == digest(old) and json.loads((tmp_path / "run_config.json").read_text()) == old
+    with pytest.raises(ValueError, match="inputs or scoring"):
+        cli.resume_id(tmp_path, {**new, "head": "different"})
+    examples = [
+        dict(sample_id=f"a{i}", language="en", audio_sha256=str(i) * 64, step_count=1)
+        for i in range(4)
+    ]
+    saved = cli.cached(tmp_path, examples[0])
+    first = _fixture_retrieve(examples[0])
+    write_json(
+        saved,
+        {
+            "run": rid,
+            "audio": examples[0]["audio_sha256"],
+            "language": "en",
+            "digest": digest(first),
+            "result": first,
+        },
+    )
+    before = saved.stat().st_mtime_ns
+    monkeypatch.setattr(par, "worker_limit", lambda *_: 2)
+    monkeypatch.setattr(par, "_infer", _fixture_retrieve)
+    for key in (
+        "TOKENIZERS_PARALLELISM",
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        monkeypatch.setenv(key, "1")
+    # Real spawn pool on CPU; substitute just the per-utterance model operation.
+    monkeypatch.setattr(
+        par,
+        "ProcessPoolExecutor",
+        lambda max_workers, mp_context, **_: ProcessPoolExecutor(
+            max_workers=max_workers, mp_context=mp_context
+        ),
+    )
+    groups = {"first": examples, "overlap": examples[:2]}
+    par.prefill(tmp_path, groups, rid, 2, 5, (), cli.cached, cli.load_result)
+    assert before == saved.stat().st_mtime_ns
+    assert len(list((tmp_path / "audio_results").rglob("*.json"))) == 4
+    for sample in examples:
+        assert cli.load_result(cli.cached(tmp_path, sample), rid, sample) == _fixture_retrieve(
+            sample
+        )
+    monkeypatch.setattr(par, "worker_limit", lambda *_: pytest.fail("no GPU required on resume"))
+    par.prefill(tmp_path, groups, rid, 2, 5, (), cli.cached, cli.load_result)
+
+
+def test_parallel_capacity_retry_and_replay_mismatch(tmp_path: Path, monkeypatch: Any) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from qwen_hotword.evaluation import zh_en_parallel as par
+
+    examples = [
+        dict(sample_id=str(i), audio_sha256=str(i), language="zh", step_count=1) for i in range(3)
+    ]
+    attempts = []
+
+    def pool(max_workers: int, **_: Any) -> ThreadPoolExecutor:
+        attempts.append(max_workers)
+        return ThreadPoolExecutor(max_workers=max_workers)
+
+    def infer(sample: dict[str, Any]) -> dict[str, Any]:
+        if attempts == [2] and sample == examples[1]:
+            raise par.WorkerCapacityError("synthetic OOM")
+        return _fixture_retrieve(sample)
+
+    monkeypatch.setattr(par, "ProcessPoolExecutor", pool)
+    monkeypatch.setattr(par, "_infer", infer)
+    monkeypatch.setattr(par, "worker_limit", lambda *_: 2)
+    for key in (
+        "TOKENIZERS_PARALLELISM",
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        monkeypatch.setenv(key, "1")
+
+    def path_for(out: Path, s: dict[str, Any]) -> Path:
+        return out / (str(s["sample_id"]) + ".json")
+
+    def load(p: Path, run: str, s: dict[str, Any]) -> dict[str, Any]:
+        return dict(json.loads(p.read_text())["result"])
+
+    par.prefill(tmp_path, {"test": examples}, "test", 2, 5, (), path_for, load)
+    assert attempts == [2, 1] and len(list(tmp_path.glob("*.json"))) == 3
+    new = {**examples[0], "sample_id": "new"}
+    monkeypatch.setattr(par, "_infer", lambda s: {"steps": [[]], "raw_last": []})
+    with pytest.raises(ValueError, match="timeline differs"):
+        par.prefill(tmp_path, {"test": examples + [new]}, "test", 2, 5, (), path_for, load)
+    assert not path_for(tmp_path, new).exists()
