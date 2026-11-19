@@ -1,5 +1,42 @@
 # 工作交接记录
 
+## 0.233 2026-11-19 中英 2,351 词联合库首批流式交付
+
+工区检查回传：指定基座的缺失文件列表为空。此次使用
+`outputs/zh_en_183_balanced530_v1_uscap/head/ctc_head_best.pt`，工区已报告最佳轮次
+16、183 类。正式入口启动时核对训练记录、权重分片哈希、Head 及类别顺序。真实召回率待工区运行。
+
+首批固定 3,465 句，AISHELL kw_subset 2,135 句（630 个不同目标、2,782 个句词对）；
+智慧家庭中文 668 句、英文 662 句，各自保留 val_v1、v2、n1、n2。联合表为
+`configs/zh_en_joint2351.v1.jsonl`，本地逐项对照两张原始 TSV 的词面、拼接音素、音素数，
+2,352 种词面与发音组合一致。天然同音词共存，PM2.5 有两种发音，同句候选按词面合并。
+完整 AISHELL 的 7,176 句尚缺可验证逐句实体；英文探针 25,839 个 WAV 都能按源路径 MD5
+关联，但仅匹配到 530 个不同目标，尚未还原 583 词口径。二者未作为独立评测集运行，其词仍在联合候选库中。
+
+容器内，分支 `codex/g2p-coverage-scan`：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/run_zh_en_delivery.py --gpu 5 --model /glusterfs_103/models/Qwen3-ASR-1.7B
+```
+
+每 2 秒用截至当前边界的音频重新检索，保留不足 2 秒的尾段，same-step 生效；
+每个音频前缀均检索同一个中英联合库。分别统计未经门控的末次 Top5/7、门控后末次及
+任意时刻送达的 Top5/7；召回分母为逐句去重的标注词数之和。目标在库外也保留在分母。
+390 句智慧家庭标注负样本单报收到候选的句率。没有运行 Decoder，
+这些计数无法说明最终转写的误插入或 WER。未加入额外噪声或近音词。
+
+新目录 `outputs/zh_en183_balanced530_joint2351_stream_v1/`，与训练及旧 AISHELL 输出隔离。
+同一命令可恢复：按输入音频、标注、模型、联合表、代码与环境核对身份，逐句复用完整结果，
+中断的句子重算。delivery 使用清单中的数据集名加 `@@zh` / `@@en` 和原始 utterance ID。
+完成后发 `delivery.zip` 给下游（上下文、时长、音频清单）；回传小文件 `report.json` 查看逐组指标。
+工区可以独立复核：
+
+```bash
+D=outputs/zh_en183_balanced530_joint2351_stream_v1
+python -B tests/fixtures/stream_interface_v1_validator.py.txt --ctx "$D/delivery/stream_contexts.json" --durations "$D/delivery/durations.json"
+unzip -t "$D/delivery.zip"
+```
+
 ## 0.232 2026-11-19 中英2351词联合库流式评测的工区输入定位
 
 工区终端回传 balanced530_uscap 的 best 文件存在，训练完成标记为183类、epoch 16；
