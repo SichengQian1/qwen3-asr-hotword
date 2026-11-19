@@ -1,5 +1,45 @@
 # 工作交接记录
 
+## 0.234 2026-11-19 中英各 480 小时 Head 的 11 组同库检索复测
+
+分支 `codex/g2p-coverage-scan`。复用原 AISHELL 评测的身份校验，指定
+`outputs/zh_en_183_noise70_dual_v2/head/ctc_head_best.pt`，epoch 25、
+SHA256 `955e31483b54040c5fce9da6e9287f604545087cdddf15db434a2ce7557991d1`。
+沿用 0.233 的 183 类、2,351 个候选词面、2,352 个发音、同一门控、
+原声、2 秒累积 same-step，上轮 epoch 16 的结果在原目录保留。本地已验证数据读取、
+指标、重叠音频复用、恢复和 delivery 契约。工区推理数字待回传。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/run_zh_en_480_eleven.py --gpu 5
+```
+
+| 数据集 | 目标定义与输出 |
+|---|---|
+| zh-aishell-test | 7,176 句，按 ID 对齐工区原文与官方逐句标注，仅计清单中 1,186 个词面的实体跨度；本机核对 3,082 次出现、3,064 个句词对，2,244 句含目标。 |
+| zh-aishell-kw_subset | 2,135 句、630 个词、2,782 个句词对，沿用原始逐句关键词。与全量集重叠，分别计分，同音频只推一次。 |
+| zh/en-smarthome-val_v1 | 中文 258、英文 282；同词新句，每种语言各一行。 |
+| zh/en-smarthome-val_v2 | 中文 200、英文 200；留出词，每种语言各一行。 |
+| zh/en-smarthome-val_n1 | 中文 60、英文 30；同音反例，召回率无分母，单报误提示率。 |
+| zh/en-smarthome-val_n2 | 中文 150、英文 150；无关键词反例，同上。 |
+| en-tts-583 | 读最终目录 WAV，按 MD5(源音频路径) 前 16 位与索引逐句关联，保留每条录音的多个实体。以原 583 词与实际目标的交集计分。记录覆盖与缺词、额外实体、未覆盖音频；未出现的词不计为漏召回。另报已覆盖词的宏平均召回。 |
+
+首次运行会从[作者仓库的固定版本](https://github.com/Alibaba-NLP/AISHELL-NER/blob/fb11b6495281bc9bbc2bea7b8bde9eb3c19a4605/data/aishell_ner_transcript.test.txt)
+下载约 450 KB 逐句标注，校验 SHA256 `0b2dfdf9d4196b4f3ce089937f714267ab6b0eee54513ac8d26221012c53ba53`。
+也可追加 `--ner-file /已有副本/aishell_ner_transcript.test.txt` 指向相同文件。
+此前实测 25,839 个英文 WAV 的索引标签有 530 个不同词面，正式报告会重新核对其与 583 词表的交集。
+负例指标是末次送出任意候选的句率。此次不调用 Decoder。
+
+独立目录 `outputs/zh_en183_480_joint2351_eleven_v1/`。同一命令验证模型、数据与代码身份后按已完成音频续跑。
+终端及 `by_dataset.tsv` 分 11 行列末次门控前/后 Top5、Top7、分母和负例误提示率。
+`report.json` 另含逐组命中数、流式曾送达召回及来源审计。各组独立，不混合计算总体召回。
+小包 `return_bundle.zip` 回传；`delivery.zip` 交下游。复核：
+
+```bash
+D=outputs/zh_en183_480_joint2351_eleven_v1
+cat "$D/by_dataset.tsv"
+unzip -t "$D/delivery.zip"
+```
+
 ## 0.233 2026-11-19 中英 2,351 词联合库首批流式交付
 
 工区检查回传：指定基座的缺失文件列表为空。此次使用
