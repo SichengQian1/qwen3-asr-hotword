@@ -2,6 +2,8 @@
 
 ## 0.238 英文五组 Context Learning 交付
 
+随包转交 [英文分组交付说明](EN_GROUPED_DELIVERY_GUIDE.md)。文档含 632 个实测目标词面、重叠标签、工区路径及逐句计分示例。
+
 分支 `codex/g2p-coverage-scan`，工区容器内运行：
 
 ```bash
