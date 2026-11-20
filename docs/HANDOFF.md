@@ -1,5 +1,21 @@
 # 工作交接记录
 
+## 0.239 与英文五组同版的中文六组交付
+
+中文流式结果已包含于 0.234 的原 11 组 `outputs/zh_en183_480_joint2351_eleven_v1/delivery.zip`。
+分支 `codex/g2p-coverage-scan`；若只交中文，在工区容器执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/export_zh_480_delivery.py
+```
+
+按原数据集 key 提取 AISHELL 全量 7176、关键词子集 2135，以及智慧家庭 v1/v2/n1/n2 各
+258/200/60/150 条，共 9979 条分组记录。两组 AISHELL 有重叠，分别保留其 key 和原始 ID。
+输出保留标准三文件、原始音频路径及门控后 same-step Top5/Top7（包括空列表和跨语言候选）。
+无需音频挂载或 GPU 推理。程序检查运行身份、各组记录数、音频清单、时长、逐步候选与 ZIP CRC。
+中断后重复命令即可重新导出；每次写入新的 `outputs/zh_480_delivery_<唯一后缀>/delivery.zip`。
+末行打印交付绝对路径，使用 `unzip -t <打印路径>` 可复核。如需确认工区完成情况，回传终端六组计数与最后一行即可。
+
 ## 0.238 英文五组 Context Learning 交付
 
 随包转交 [英文分组交付说明](EN_GROUPED_DELIVERY_GUIDE.md)。文档含 632 个实测目标词面、重叠标签、工区路径及逐句计分示例。
