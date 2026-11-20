@@ -54,3 +54,43 @@ def test_real_sdk_paired_audio_context_and_tail(monkeypatch):
     d.start()
     with pytest.raises(ValueError):
         d.step(b"", True)
+
+
+def test_decoder_starts_without_callable_rpc(tmp_path, monkeypatch):
+    import json
+    import os
+    import sys
+    from contextlib import ExitStack
+    from multiprocessing import Pipe
+    from threading import Thread
+
+    from qwen_hotword.demo import decoder
+
+    class NativeEngine:
+        def __init__(self, *, model_impl, **kwargs):
+            assert model_impl == "vllm"
+
+        # Deliberately no apply_model: this worker accepts data requests only.
+        def generate(self, request, **kwargs):
+            assert request["prompt_token_ids"] == [42]
+            audio, rate = request["multi_modal_data"]["audio"]
+            assert rate == 16000 and audio.tolist() == [0]
+            return [SimpleNamespace(outputs=[SimpleNamespace(text="中文")])]
+
+    monkeypatch.setattr(decoder, "version", {"vllm": "0.23.0", "qwen-asr": "0.0.6"}.__getitem__)
+    monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(LLM=NativeEngine, SamplingParams=dict))
+    (tmp_path / "config.json").write_text(
+        json.dumps({"architectures": ["Qwen3ASRForConditionalGeneration"]})
+    )
+
+    with ExitStack() as stack:
+        a, b = Pipe()
+        stack.enter_context(a)
+        stack.enter_context(b)
+        worker = Thread(target=decoder.serve, args=(os.dup(b.fileno()), str(tmp_path)), daemon=True)
+        worker.start()
+        assert a.poll(10) and a.recv() == {"ok": True}
+        a.send({"ids": [42], "wave": bytes(4)})
+        assert a.poll(10) and a.recv() == {"text": "中文"}
+    worker.join(5)
+    assert not worker.is_alive()

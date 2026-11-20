@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from importlib.metadata import version
 from multiprocessing.connection import Connection
+from pathlib import Path
 
 
 def serve(fd: int, model: str) -> None:
@@ -16,7 +18,13 @@ def serve(fd: int, model: str) -> None:
 
             if version("vllm").split("+")[0] != "0.23.0" or version("qwen-asr") != "0.0.6":
                 raise RuntimeError("需要已验证的 vLLM 0.23.0 / qwen-asr 0.0.6 环境")
+            # The parent checked the snapshot hashes. Reject the wrong architecture
+            # locally and require the native implementation without sending a callable.
+            arch = json.loads((Path(model) / "config.json").read_text())["architectures"]
+            if arch != ["Qwen3ASRForConditionalGeneration"]:
+                raise ValueError(f"不是预期的 Qwen3-ASR 架构：{arch}")
             engine = LLM(
+                model_impl="vllm",
                 model=model,
                 dtype="float16",
                 enforce_eager=True,
@@ -27,10 +35,6 @@ def serve(fd: int, model: str) -> None:
                 generation_config="vllm",
                 enable_prefix_caching=False,
             )
-            if engine.apply_model(lambda m: type(m).__module__) != [
-                "vllm.model_executor.models.qwen3_asr"
-            ]:
-                raise RuntimeError("未加载 vLLM 原生 Qwen3-ASR 实现")
             sampling = SamplingParams(temperature=0, max_tokens=128, seed=42)
             channel.send({"ok": True})
             while True:

@@ -1,5 +1,20 @@
 # 工作交接记录
 
+## 0.241 修复录屏 Demo 的 vLLM 启动自检
+
+工区日志显示 vLLM 0.23 已完成加载、KV cache 初始化与预热；旧 Demo 随后通过
+`apply_model(lambda ...)` 查询模型类型，函数不能被默认 RPC 序列化，导致选例前退出。
+改为读取已验哈希的本地 config 确认架构，并在创建 LLM 时指定 `model_impl="vllm"`。
+无需打开不安全序列化。H200 复验：分支 `codex/g2p-coverage-scan`，容器运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && bash scripts/start_zh_rag_demo.sh
+```
+
+应先进入“实测中文录屏样例”，随后出现“已就绪”。重启会重新加载模型，使用新的
+`outputs/zh_rag_demo_*/`，不需要 resume。核对本次目录的 `startup.json`；
+成功选例后可返回 `verified_cases.json`。本地检查不代替 H200 实测。
+
 ## 0.240 中文竞赛录屏 Demo：GPU 5 左右同声流式对照
 
 工区分支 `codex/g2p-coverage-scan`，容器中执行：
