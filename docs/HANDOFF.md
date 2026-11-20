@@ -1,5 +1,17 @@
 # 工作交接记录
 
+## 0.240 中文竞赛录屏 Demo：GPU 5 左右同声流式对照
+
+工区分支 `codex/g2p-coverage-scan`，容器中执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && bash scripts/start_zh_rag_demo.sh
+```
+
+沿用已跑完 11 组的 480h 版 183 类 epoch 25、2351 表和门控，无训练。左路无提示；右路每 2 秒实时检索后更新提示，动态中文 MFA 仅作用于当前索引。自动挑中文智慧家庭与 AISHELL 的原声，验证加词前后最终转写才推荐，最多 24 个候选/2 条成功样例。本地已验证页面、上游流式状态和对照数据流，未在本机测试 H200 恢复率或吞吐。
+
+[浏览器连接、实际录制与实现口径](ZH_RAG_RECORDING_DEMO.md)。终端打印独立的新 `outputs/zh_rag_demo_*/`、SSH 隧道及带口令的浏览器地址。停止后重新运行是新演示，无 `--resume`；不覆盖历史。验证：`cat <本次目录>/startup.json`，若有成功样例返回 `verified_cases.json`，否则返回 `case_checks.jsonl`（未选例可无）。不返回会话口令、模型或原始录音。
+
 ## 0.239 与英文五组同版的中文六组交付
 
 中文流式结果已包含于 0.234 的原 11 组 `outputs/zh_en183_480_joint2351_eleven_v1/delivery.zip`。
