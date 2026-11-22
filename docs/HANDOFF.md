@@ -1,5 +1,13 @@
 # 工作交接记录
 
+## 0.243 Demo 2.0：跨样例共享热词与会话历史（替代 0.242 的切换/三栏行为）
+
+工区容器分支 `codex/g2p-coverage-scan`。旧服务先 Ctrl+C；执行：
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && bash scripts/start_zh_rag_demo_v2.sh
+```
+GPU 3、8765、原选例身份/缓存不变，无需 resume。启动后沿用相同容器地址的 SSH 隧道，打开新打印的链接。样例与麦克风共享所有新增词；仍排除当前推荐样例目标的基础读音，有同名会话配置时按新增读音参与检索。自动筛选仍使用隔离词库，其内部操作不进入历史。切换、重播和刷新不清空会话记录；停止服务后新场次从空表开始。历史含加/删词、基础与增强定稿、实际提示，以及当时的基础表身份、目标排除、有效规模和新增词发音快照。页面显示最近 100 项，本次完整历史写入新 `outputs/zh_rag_demo_v2_*/session_history.jsonl`（无操作时不存在）。工区核对：加词后切到第二条再加一词、重播、移除；第二次定稿的词表应保留两个词。需要诊断时，从本次输出目录返回 `startup.json` 和必要的历史行即可。
+
 ## 0.242 中文录屏 Demo 2.0（独立入口，物理 GPU 3）
 
 工区分支 `codex/g2p-coverage-scan`，在原 Conda 环境的容器中：

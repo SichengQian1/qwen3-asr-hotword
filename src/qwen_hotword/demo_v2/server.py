@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from qwen_hotword.demo.runtime import CHUNK
-from qwen_hotword.demo_v2.runtime import Studio
+from qwen_hotword.demo_v2.session import SharedStudio
 from qwen_hotword.training.stage_progress import stage_progress
 
 
@@ -47,7 +47,7 @@ def main() -> None:
     seen = 0.0
     print("本次输出：", out, flush=True)
     with stage_progress("验证资产，加载 GPU 3 检索与双路共享的语音解码模型"):
-        demo = Studio(root, out, 3, Path(os.environ["DEMO_DECODER_PY"]))
+        demo = SharedStudio(root, out, 3, Path(os.environ["DEMO_DECODER_PY"]))
     try:
         if args.max_cases > 0:
             with (
@@ -148,7 +148,7 @@ def main() -> None:
                             demo.select(i)
                             result = {}
                         elif op == "/add":
-                            result = demo.add(str(params["word"]).strip())
+                            result = demo.register(str(params["word"]).strip())
                         elif op == "/remove":
                             result = demo.remove(str(params["word"]))
                         elif op == "/start":

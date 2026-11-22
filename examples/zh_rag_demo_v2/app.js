@@ -13,32 +13,36 @@ async function sync(){info=await req('/state');el('samples').replaceChildren(new
 let micFocus='';
 function tag(parent,name,text,cls=''){const n=document.createElement(name);n.textContent=text;if(cls)n.className=cls;parent.append(n);return n}
 function draw(){
- const hist=info?.history||[], extras=info?.extras||{}, c=info?.clips[info.selected];
- const focus=c?.word||micFocus||Object.keys(extras)[0]||'';
+ const hist=info?.history||[], extras=info?.extras||{};
  const list=el('extras');list.replaceChildren();
  for(const [w,phones] of Object.entries(extras)){
    const row=tag(list,'div','','hot');tag(row,'b',w);tag(row,'small',phones);
-   const prior=hist.at(-1);tag(row,'span',!prior?.extras.includes(w)?'已入库 · 待重播':
-      (prior.ever.includes(w)?'上次已召回':'上次未召回')+' / '+(prior.right.includes(w)?'定稿含词':'定稿未含词'),'feedback');
+   tag(row,'span',info.overrides.includes(w)?'已生效 · 覆盖基础读音':'已生效','feedback');
    const btn=tag(row,'button','移除');btn.disabled=busy;btn.onclick=()=>action(async()=>{
      const res=await req('/remove',{word:w});if(info.selected<0)micFocus=w;await sync();
      status(res.background?'已移除临时配置 · 已恢复背景词库读音':'已移除 · 可重播同一句');});
  }
  if(!list.childNodes.length)tag(list,'small','暂无临时热词');
- el('subject').textContent=focus?'对照目标：'+focus:'输入要比较的中文词';
- const other=Object.keys(extras).filter(w=>w!==focus).sort();
- const cols=[null,null,null];
- for(const r of hist){
-   if(!focus||JSON.stringify(other)!==JSON.stringify(r.extras.filter(w=>w!==focus).sort()))continue;
-   const i=r.extras.includes(focus)?1:r.removed.includes(focus)?2:0;cols[i]=r;
- }
  const out=el('history');out.replaceChildren();
- ['未添加','已添加','已移除'].forEach((name,i)=>{const box=tag(out,'div','','pass');tag(box,'b',name);const r=cols[i];
-   if(!r){tag(box,'small','等待本条件下的定稿');return}
-   tag(box,'small','基础模型');tag(box,'p',r.left);tag(box,'small','音素 RAG');const p=tag(box,'p','');
-   r.right.split(focus).forEach((part,j)=>{if(j)tag(p,'mark',focus);p.append(part)});
-   tag(box,'small',(r.ever.includes(focus)?'目标曾通过门控':'目标未通过门控')+' · 音频 '+r.audio.slice(0,8));
- });
+ if(!hist.length)tag(out,'small','尚无记录。添加热词或完成一次转写后会出现在这里。');
+ for(const e of [...hist].reverse()){
+   const row=tag(out,'article','','event');
+   const title=e.kind==='test'?'转写定稿':(e.kind==='add'?'添加热词：':'移除热词：')+e.word;
+   tag(row,'b',title);tag(row,'small','　'+new Date(e.time).toLocaleTimeString()+' · '+[e.source,e.target,e.sample].filter(Boolean).join(' / '));
+   if(e.kind==='test'){
+     const cols=tag(row,'div','','versions');
+     for(const [label,text] of [['基础模型',e.left],['热词增强',e.right]]){
+       const cell=tag(cols,'div','');tag(cell,'small',label);tag(cell,'p',text||'（空转写）');
+     }
+     tag(row,'small','本次各步实际提示：'+(e.prompted.join('、')||'无'));
+   }
+   const words=Object.keys(e.table.extras);
+   const detail=tag(row,'details','');
+   tag(detail,'summary','当时生效 '+e.table.size+' 词 · 本场配置：'+(words.join('、')||'无'));
+   tag(detail,'p','基础词表版本 '+e.table.base.slice(0,12)+(e.table.omitted?'；背景索引排除本例原词：'+e.table.omitted:'；使用完整背景词表'));
+   for(const [w,ph] of Object.entries(e.table.extras))tag(detail,'p',w+' → '+ph);
+ }
+
 }
 el('word').oninput=()=>{if(info&&info.selected<0){micFocus=el('word').value.trim();draw()}};
 function render(a){const focus=el('word').value.trim();for(const [k,rev] of [['left','lr'],['right','rr']]){const d=el(k),prev=d.textContent,t=a[k];let i=0;while(i<prev.length&&i<t.length&&prev[i]===t[i])i++;if(i<prev.length)el(rev).textContent='刚刚回改：'+prev.slice(i)+' → '+(t.slice(i)||'（删除）');d.replaceChildren();if(focus&&t.includes(focus)){t.split(focus).forEach((s,i)=>{if(i){let m=document.createElement('mark');m.textContent=focus;d.append(m)}d.append(s)})}else d.textContent=t;}
@@ -48,7 +52,7 @@ async function begin(kind){sid=(await req('/start',{kind})).session;seq=0;total=
 function release(){recording=false;if(node)node.port.onmessage=null;node?.disconnect();source?.disconnect();stream?.getTracks().forEach(t=>t.stop());if(ctx)ctx.close().catch(()=>{});ctx=node=source=stream=null;controls();}
 async function abort(){release();if(sid)try{await req('/abort',{}, {'X-Session':sid})}catch{}sid='';}
 async function action(fn){if(busy)return;busy=true;controls();try{await fn()}catch(e){await abort();status('未完成：'+e.message)}finally{busy=false;controls()}}
-el('samples').onchange=()=>action(async()=>{await req('/select',{i:+el('samples').value});await sync();el('word').value=info.clips[info.selected]?.word||micFocus;['phones','left','right','lr','rr','hits'].forEach(k=>el(k).textContent='');status(info.selected<0?'已恢复自由麦克风词库':'样例词库已重置，可开始对照')});
+el('samples').onchange=()=>action(async()=>{await req('/select',{i:+el('samples').value});await sync();el('word').value=info.clips[info.selected]?.word||micFocus;['phones','left','right','lr','rr','hits'].forEach(k=>el(k).textContent='');status('已切换音频 · 本场热词继续生效')});
 el('add').onclick=()=>action(async()=>{status('正在转换发音并更新检索索引…');const a=await req('/add',{word:el('word').value});if(info.selected<0)micFocus=a.word;el('phones').textContent=`${a.word} → ${a.phones}`;await sync();status('已入库 · 下一段语音生效')});
 el('play').onclick=()=>action(async()=>{ctx=new AudioContext({sampleRate:16000});try{await ctx.resume();const pcm=await req('/clip');await begin('replay');const b=ctx.createBuffer(1,pcm.length,16000), f=b.getChannelData(0);pcm.forEach((v,i)=>f[i]=v/32768);source=ctx.createBufferSource();source.buffer=b;source.connect(ctx.destination);const start=ctx.currentTime;source.start();for(let off=0;off<pcm.length;off+=32000){let end=Math.min(off+32000,pcm.length);await new Promise(r=>setTimeout(r,Math.max(0,(start+end/16000-ctx.currentTime)*1000)));await chunk(pcm.slice(off,end),end===pcm.length)}}finally{release()}});
 let stopRecording=()=>{};
