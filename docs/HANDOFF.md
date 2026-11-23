@@ -20,7 +20,7 @@ git pull --ff-only origin codex/g2p-coverage-scan
 python -u -B scripts/run_egy_streaming_e2e.py --gpu 4
 ```
 
-输出`outputs/egy_ep29_streaming_e2e_v1/`，同命令断点续跑。已完成逐音频前缀和三组
+输出`outputs/egy_ep29_streaming_e2e_mem15/`，同命令断点续跑。已完成逐音频前缀和三组
 转写单元校验后复用；改变身份须新目录。`--check`只检查数据及已有环境。
 每阶段有心跳和实际样本计数；详细分时Prompt/转写位于`asr/<mode>/*.json`的payload。
 核验`report.json`为completed、samples=2078，三组target_pairs均580；回传
@@ -28,6 +28,14 @@ python -u -B scripts/run_egy_streaming_e2e.py --gpu 4
 [EGY_STREAMING_E2E.md](EGY_STREAMING_E2E.md)。本地相关回归75通过、2依赖跳过；
 Ruff、Mypy、CLI帮助和空白检查通过。全量继续收集运行仍有14失败/7错误，
 均为既有Torch/soundfile/jiwer缺失；未改用户已有测试。尚无本次H200端到端实测。
+
+工区首次实测：身份校验通过，20/20条因果前缀完成（28.1秒，含模型加载）；
+Decoder尚未加载权重即在显存预算检查失败：GPU4空闲30.27/139.81 GiB，
+旧budget=0.5请求69.91 GiB。现将配置改为0.15（约20.97 GiB），其余推理参数不变。
+默认输出改到`outputs/egy_ep29_streaming_e2e_mem15`，不改写旧contract或伪造缓存身份；
+重做20条小前缀再自动进入全量，原目录保留。更新后继续上方同一条命令即可。
+本次配置差异检查确认只有显存预算和输出目录两项；相关75通过、2依赖跳过，
+Ruff/Mypy/空白检查通过。仍须工区确认Decoder启动及全量质量结果。
 
 ## 0.246 2026-11-23 真实埃及语料热词提取与epoch29整段Top5/Top7一条龙
 
