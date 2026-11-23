@@ -62,8 +62,11 @@ def seal_run_contract(path: Path, value: dict[str, Any]) -> None:
         previous = read(path)
         upgraded = json.loads(json.dumps(previous))
         script = str(Path(__file__))
-        old_sha = "15158ba7292ba8ff4799402ae8f630249df7177b721aa9c7c9f63e71dead4ee2"
-        if upgraded.get("inputs", {}).get(script) == old_sha:
+        old_sha = upgraded.get("inputs", {}).get(script)
+        if old_sha in {
+            "15158ba7292ba8ff4799402ae8f630249df7177b721aa9c7c9f63e71dead4ee2",
+            "ff4605fc1b78a904e597a6395d4438faa223b171f38d2b41d6d6b3433b2b4d74",
+        }:
             upgraded["inputs"][script] = value["inputs"][script]
             if upgraded == value:
                 write_json(
@@ -73,7 +76,8 @@ def seal_run_contract(path: Path, value: dict[str, Any]) -> None:
                         "current_script_sha256": value["inputs"][script],
                         "downloader_sha256": sha(ROOT / "src/qwen_hotword/io/pinned_download.py"),
                         "reason": (
-                            "Download retry/resume only; data/model/selection/scoring unchanged"
+                            "Download/local CALIMA initialization only; "
+                            "data/model/selection/scoring unchanged"
                         ),
                     },
                 )
@@ -153,9 +157,16 @@ def mine(
 
 
 def phonemize(output: Path, config: dict[str, Any]) -> None:
+    frontend_config = read(ROOT / config["frontend_config"])
+    assets = ROOT / frontend_config["assets"]
+    # CAMeL imports its catalogue even when DB/model paths are explicit.
+    # Match the training frontend setup before any camel_tools import.
+    os.environ["CAMELTOOLS_DATA"] = str(assets)
+    catalogue = assets / "catalogue.json"
+    if not catalogue.exists():
+        write_json(catalogue, {"version": "1.6", "packages": {}, "components": {}})
     from qwen_hotword.phonemes.arabic_pronunciation import PronunciationFrontend
 
-    frontend_config = read(ROOT / config["frontend_config"])
     source = read(ROOT / config["source_config"])
     verify_assets(frontend_config)
     table = read(output / "candidates.json")

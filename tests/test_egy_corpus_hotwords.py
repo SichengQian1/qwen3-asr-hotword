@@ -194,9 +194,15 @@ def test_reject_duplicate_test_audio() -> None:
         select_audio([row("a"), row("a")])
 
 
-def test_download_only_upgrade_preserves_old_contract(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "old_sha",
+    [
+        "15158ba7292ba8ff4799402ae8f630249df7177b721aa9c7c9f63e71dead4ee2",
+        "ff4605fc1b78a904e597a6395d4438faa223b171f38d2b41d6d6b3433b2b4d74",
+    ],
+)
+def test_download_only_upgrade_preserves_old_contract(tmp_path: Path, old_sha: str) -> None:
     script = str(Path(runner.__file__))
-    old_sha = "15158ba7292ba8ff4799402ae8f630249df7177b721aa9c7c9f63e71dead4ee2"
     old = {"inputs": {script: old_sha, "model": "unchanged"}, "policy": "fixed"}
     current = {"inputs": {script: "new", "model": "unchanged"}, "policy": "fixed"}
     path = tmp_path / "contract.json"
@@ -207,3 +213,50 @@ def test_download_only_upgrade_preserves_old_contract(tmp_path: Path) -> None:
     current["policy"] = "changed"
     with pytest.raises(ValueError, match="identity changed"):
         runner.seal_run_contract(path, current)
+
+
+def test_phonemize_sets_local_camel_data_before_frontend_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    import qwen_hotword.phonemes.arabic_pronunciation as pronunciation
+
+    monkeypatch.setattr(runner, "ROOT", tmp_path)
+    monkeypatch.setenv("CAMELTOOLS_DATA", "/wrong/default")
+    monkeypatch.setattr(runner, "verify_assets", lambda config: None)
+    output = tmp_path / "output"
+    for name, value in {
+        "frontend.json": {"assets": "assets"},
+        "source.json": {"vocab": "vocab.json"},
+        "vocab.json": {"tokens": ["blank", "unk", "a", "b", "c", "d"]},
+        "policy.json": {},
+        "output/candidates.json": [{"id": "word", "surface": "القاهرة"}],
+        "output/contract.json": {"sealed": True},
+    }.items():
+        runner.write_json(tmp_path / name, value)
+
+    class OfflineFrontend:
+        def __init__(self, assets: Path, *args: Any) -> None:
+            assert os.environ["CAMELTOOLS_DATA"] == str(assets)
+            assert runner.read(assets / "catalogue.json") == {
+                "version": "1.6",
+                "packages": {},
+                "components": {},
+            }
+
+        def label(self, text: str, *, mode: str) -> dict[str, Any]:
+            assert mode == "isolated"
+            return {"ids": [2, 3, 4, 5], "unreviewed_exception_words": []}
+
+    monkeypatch.setattr(pronunciation, "PronunciationFrontend", OfflineFrontend)
+    runner.phonemize(
+        output,
+        {
+            "frontend_config": "frontend.json",
+            "source_config": "source.json",
+            "pronunciation_policy": "policy.json",
+        },
+    )
+    assert runner.read(output / "table.json")[0]["pronunciation"]["status"] == "active"

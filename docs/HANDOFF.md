@@ -33,6 +33,13 @@ python -u -B scripts/evaluate_egy_corpus_hotwords.py --gpu 4
 错误Range、SHA不符和原contract兼容；官方HF小文件真实续传校验通过；权重实际断点
 199,932,540处请求返回正确206 Content-Range。修复相关34测试通过，Ruff/Mypy/空白检查通过；
 全量1185通过、68跳过，仍为既有缺依赖的14失败/7错误。
+随后工区NER全部资产校验成功、2,978条文本提取完成；发音加载暴露新入口漏传
+CAMELTOOLS_DATA，CAMeL导入默认目录catalogue时触发隐式下载。入口现于加载前设置
+既有assets目录，并沿用训练setup的本地空catalogue（仅缺失时创建）；没有改发音规则。
+原两版入口的contract保持不变，已完成NER结果可复用。旧代码立即可用
+`export CAMELTOOLS_DATA=/host_home/star/q00933266/qwen3-asr-hotword/models/arabic_native_v1/data`
+后重跑原命令；拉取本修复后不需手工export。相关61测试通过、Ruff/Mypy及空白检查通过。
+本次全量1187通过、68跳过；14失败/7错误仍为既有Torch/soundfile/jiwer缺失。
 
 核验`report.json`中status=completed、best_epoch=29、table_sha256、
 selection.by_source、all.operating.top5/top7、pronunciation_target_coverage。

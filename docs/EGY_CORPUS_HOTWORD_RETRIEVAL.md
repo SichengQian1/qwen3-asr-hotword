@@ -36,6 +36,9 @@ tail -f outputs/egy_ep29_corpus_hotwords_v1.log
 下载保留`.pending`，按8MiB范围续传；网络失败自动重试，进度显示已下载/总字节数。
 本次下载实现更新允许原`cae1113`脚本创建的contract继续使用，其他身份严格不变，
 记录`download_upgrade.json`；无需删目录或重做已经冻结的选样。
+CALIMA入口自动设置`CAMELTOOLS_DATA`指向已安装assets，并沿用本地catalogue，
+避免显式DB路径加载前仍访问默认目录、触发隐式下载。该加载修复也兼容原两版入口产物，
+不更改已完成NER结果、发音规则或检索评分。
 不可同时开两份指向相同输出目录的任务。GPU编号不影响恢复；更换数据、词表政策、
 相关代码或模型必须新建`--output-dir`，不会复用身份不同的预测。
 
