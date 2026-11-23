@@ -22,8 +22,9 @@ python -u -B scripts/run_egy_streaming_e2e.py --gpu 4
 目录继续沿用`mem15`历史名称，实际预算以`Decoder memory`日志为准。
 
 若任务仍在执行，先在原终端按一次Ctrl+C并等待退出，再拉取代码执行上方命令。
-本次不改配置文件或原contract；仅允许已审阅旧runner SHA `9c274bf1…543f5f3`
-升级为资源/调度实现，记录`memory_runtime_upgrade.json`。已完成的前缀和ASR组合保留，
+本次不改配置文件或原contract；允许已审阅旧runner SHA `9c274bf1…543f5f3`
+及并批版 `c8504269…646fc` 升级。既有`memory_runtime_upgrade.json`保留，
+新增`token_limit_runtime_upgrade.json`记录输出上限重试升级。已完成的前缀和ASR组合保留，
 未完成组合重做。其他模型、数据、词表或算法代码变化仍拒绝混用。
 
 ## 固定输入
@@ -80,11 +81,19 @@ max_model_len=8192、eager、关闭prefix cache；模型、采样、Prompt及评
 相加当作墙钟耗时。加速幅度需要H200实测，不能宣称一定三倍。
 并批可能产生浮点差异，不保证逐字节复现单序列结果；复用的旧结果与新增批次通过
 `legacy_cells_without_launch_id`及每条`decoder_launch_id`区分，模型与评测口径不变。
-遇到输出被token上限截断会停止，不把截断转写算作正常完成。
+每步初始输出上限仍为512。仅遇到`finish_reason=length`的请求按1024、2048上限重试，
+并受8192减实际输入token数的上下文余量限制；同一前缀、同一prompt重新生成，
+不把截断文本接入后续流式状态。正常同批请求保留，不重复生成。
+仍触顶的音频×模式组合记入`failures/<mode>/`，其他组合继续执行；
+`token_limit_events/`保存样本ID、模式、音频前缀长度、各次上限及截断输出供定位。
+这能区分后续重试是否恢复，不能仅凭触顶判断原音频太长还是模型重复输出。
 
 ## 输出与指标
 
 - `report.json`：全量三组和分来源指标。
+- 若有重试后仍触顶的组合，`status=needs_review`，`unresolved_combinations`列出具体问题；
+  全量`by_mode/by_source`为空，仅另列三组均完成样本的`paired_completed_subset_only`，
+  明确保留`expected_target_pairs_full_set=580`，不冒充全量召回。
 - `smoke_report.json`：20条执行链路检查结果，不能当总体指标。
 - `asr/{no_rag,top5,top7}/*.json`：逐音频结果。`payload` 中含原文、最终转写、
   每步 `timeline`（累计时刻、候选、prompt、部分转写）及实际 Decoder 请求。
@@ -107,11 +116,12 @@ WER/CER采用既有 Arabic normalization：NFC、大小写归一、去短元音/
 
 中断后重复原命令；完整且身份匹配的逐音频前缀/逐模式ASR结果复用，未完成单元重做。
 缓存有内容校验，不接受损坏或不同输入的旧结果。改变配置、词表、模型或相关代码时
-指定新的 `--output-dir`；本次已审阅的资源/调度升级例外，可保持原目录续跑。
+指定新的 `--output-dir`；本次已审阅的资源/调度及触顶重试升级例外，可保持原目录续跑。
+之前正常停止的输出无需因上限增加重做；失败组合没有成功缓存，下次仍会重试。
 一个输出目录只能由一个任务占用；不删除已有成果。
 
 ```bash
-jq '{status,samples,by_mode}' outputs/egy_ep29_streaming_e2e_mem15/report.json
+jq '{status,samples,completed_combinations,expected_combinations,unresolved_combinations,by_mode}' outputs/egy_ep29_streaming_e2e_mem15/report.json
 ```
 
 应看到 `status=completed`、2078条，三组 `target_pairs` 均为580。

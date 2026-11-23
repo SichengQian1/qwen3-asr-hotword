@@ -26,6 +26,71 @@ TABLE = [
 ]
 
 
+def test_collect_quarantines_unresolved_modes_without_shrinking_full_target_count(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    contract = {
+        "model": "m",
+        "checkpoint": "c",
+        "expected": {},
+        "selection": {},
+        "config": {"expected_table_sha256": "table"},
+    }
+    runner.write_json(tmp_path / "contract.json", contract)
+    rows = [
+        {"id": name, "text": "مصر", "audio_sha256": name, "source_group": "open_source"}
+        for name in ("good", "bad")
+    ]
+    monkeypatch.setattr(runner, "selection", lambda *_: (contract, rows, TABLE))
+    monkeypatch.setattr(runner, "inputs_unchanged", lambda _: None)
+    missing = None
+    for row in rows:
+        name = runner.order_key(row["id"]) + ".json"
+        prefix = tmp_path / "prefixes" / name
+        runner.save_cell(prefix, {"identity": runner.row_identity(tmp_path, row)})
+        for mode in MODES:
+            identity = runner.fingerprint(
+                [runner.row_identity(tmp_path, row), runner.sha(prefix), mode]
+            )
+            cell = {
+                "identity": identity,
+                "id": row["id"],
+                "mode": mode,
+                "source_group": "open_source",
+                "actual_decoder_requests": [],
+                "timeline": [],
+                "metrics": score_row(row["text"], row["text"], TABLE, set()),
+            }
+            path = tmp_path / "asr" / mode / name
+            if row["id"] == "bad" and mode == "top7":
+                missing = (path, cell)
+                runner.save_cell(
+                    tmp_path / "failures" / mode / name,
+                    {
+                        **cell,
+                        "audio_path": "bad.wav",
+                        "duration_seconds": 3,
+                        "status": "token_limit_unresolved",
+                        "detail": {},
+                    },
+                )
+            else:
+                runner.save_cell(path, cell)
+    report = runner.collect(tmp_path, "full")
+    assert report["status"] == "needs_review"
+    assert report["completed_combinations"] == 5
+    assert report["expected_combinations"] == 6
+    assert report["expected_target_pairs_full_set"] == 2
+    assert report["by_mode"] is report["by_source"] is None
+    assert report["paired_completed_subset_only"]["top7"]["target_pairs"] == 1
+    assert missing is not None
+    runner.save_cell(*missing)
+    recovered = runner.collect(tmp_path, "full")
+    assert recovered["status"] == "completed"
+    assert recovered["unresolved_combinations"] == []  # stale failure cannot override success
+    assert recovered["by_mode"]["top7"]["target_pairs"] == 2
+
+
 def candidate(identifier: str, surface: str = "القاهرة") -> dict[str, Any]:
     return {
         "hotword_id": identifier,
@@ -405,7 +470,7 @@ def test_memory_upgrade_keeps_original_contract_and_completed_cells(tmp_path: Pa
     assert runner.load_cell(cell, identity)["prediction"] == "القاهرة"
     runner.inputs_unchanged(old)
     assert runner.seal_stream_contract(path, current) == old  # repeated restart
-    audit = json.loads((tmp_path / "memory_runtime_upgrade.json").read_text())
+    audit = json.loads((tmp_path / "token_limit_runtime_upgrade.json").read_text())
     assert audit["original_contract_sha256"] == runner.sha(path)
     assert audit["reviewed_script_sha256"] == runner.sha(Path(runner.__file__))
     (tmp_path / "model").write_text("changed model")
@@ -425,7 +490,7 @@ def test_memory_upgrade_does_not_allow_other_identity_changes(tmp_path: Path, ch
         path.write_text(json.dumps(old))
     with pytest.raises(ValueError, match="sealed identity changed"):
         runner.seal_stream_contract(path, current)
-    assert not (tmp_path / "memory_runtime_upgrade.json").exists()
+    assert not (tmp_path / "token_limit_runtime_upgrade.json").exists()
 
 
 @pytest.mark.parametrize("mode", ["auto", "fixed"])
@@ -628,3 +693,128 @@ def test_native_decoder_submits_batch_and_preserves_request_mapping(
         assert reply["audio_samples"] == 32000 + n
         assert reply["prompt_ids_sha256"] == runner.fingerprint(requests[n]["ids"])
         assert reply["batch_size"] == 3 and reply["batch_id"] == 0
+
+
+def test_retry_upgrade_preserves_prior_batch_upgrade_audit(tmp_path: Path) -> None:
+    path, old, current = contract_upgrade_fixture(tmp_path)
+    prior = tmp_path / "memory_runtime_upgrade.json"
+    runner.write_json(
+        prior,
+        {
+            "original_contract_sha256": runner.sha(path),
+            "recorded_script_sha256": runner.LEGACY_MEMORY_SCRIPT_SHA256,
+            "reviewed_script_sha256": runner.BATCH_SCRIPT_SHA256,
+        },
+    )
+    before = prior.read_bytes()
+    assert runner.seal_stream_contract(path, current) == old
+    assert prior.read_bytes() == before
+    assert (tmp_path / "token_limit_runtime_upgrade.json").is_file()
+
+
+def test_retry_upgrade_rejects_changed_prior_audit(tmp_path: Path) -> None:
+    path, _, current = contract_upgrade_fixture(tmp_path)
+    runner.write_json(
+        tmp_path / "memory_runtime_upgrade.json",
+        {
+            "original_contract_sha256": "bad",
+            "recorded_script_sha256": "bad",
+            "reviewed_script_sha256": runner.BATCH_SCRIPT_SHA256,
+        },
+    )
+    with pytest.raises(ValueError, match="previous runtime"):
+        runner.seal_stream_contract(path, current)
+
+
+def generation(text: str, finish: str, prompt_length: int = 100) -> Any:
+    return SimpleNamespace(
+        prompt_token_ids=[0] * prompt_length,
+        outputs=[SimpleNamespace(text=text, finish_reason=finish, token_ids=[1, 2])],
+    )
+
+
+def test_only_truncated_request_retried_same_prompt_and_normal_sibling_kept(tmp_path: Path) -> None:
+    calls = []
+
+    class Engine:
+        def generate(self, inputs: Any, sampling_params: Any, **kw: Any) -> Any:
+            calls.append((inputs, sampling_params))
+            if len(calls) == 1:
+                return [generation("truncated", "length"), generation("normal", "stop")]
+            return [generation("complete long transcription", "stop")]
+
+    inputs = [{"prompt_token_ids": [1]}, {"prompt_token_ids": [2]}]
+    requests = [
+        {"ids": [n], "wave": b"0000", "metadata": {"sample_id": "s", "mode": mode}}
+        for n, mode in [(1, "top5"), (2, "no_rag")]
+    ]
+    cfg = {"max_new_tokens": 512, "max_model_len": 8192, "seed": 123}
+    results = runner.bounded_batch_generate(
+        Engine(), lambda **kw: kw, inputs, requests, cfg, tmp_path, "launch", 1
+    )
+    assert [call[1]["max_tokens"] for call in calls] == [512, 1024]
+    assert calls[1][0] == inputs[:1]
+    assert all(call[1]["temperature"] == 0 and call[1]["seed"] == 123 for call in calls)
+    assert results[0]["text"] == "complete long transcription"
+    assert results[1]["text"] == "normal"
+    assert results[0]["error_type"] is None
+    event = runner.read(next((tmp_path / "token_limit_events").glob("*.json")))
+    assert event["request"] == {"sample_id": "s", "mode": "top5"}
+    assert event["truncated_text"] == "truncated"
+
+
+@pytest.mark.parametrize(
+    "prompt_length,caps", [(100, [512, 1024, 2048]), (7600, [512, 592]), (7680, [512])]
+)
+def test_token_limit_retries_are_bounded_by_context_and_report_unresolved(
+    tmp_path: Path,
+    prompt_length: int,
+    caps: list[int],
+) -> None:
+    used = []
+
+    class Engine:
+        def generate(self, inputs: Any, sampling_params: Any, **kw: Any) -> Any:
+            used.append(sampling_params["max_tokens"])
+            return [generation("repeat repeat", "length", prompt_length)]
+
+    results = runner.bounded_batch_generate(
+        Engine(),
+        lambda **kw: kw,
+        [{}],
+        [{"ids": [1], "wave": b"0000"}],
+        {"max_new_tokens": 512, "max_model_len": 8192, "seed": 1},
+        tmp_path,
+        "l",
+        0,
+    )
+    assert used == caps
+    assert results[0]["error_type"] == "token_limit"
+    assert results[0]["text"] == ""
+    assert "repeat" in results[0]["truncated_text_preview"]
+    assert len(results[0]["generation_attempts"]) == len(caps)
+
+
+def test_unresolved_output_is_not_returned_to_streaming_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import numpy as np
+
+    waveform = np.zeros(32000, dtype="float32")
+    tokenizer = Tokenizer()
+    ids = tokenizer.encode("SYSTEM:القاهرة")
+    detail = {
+        "text": "",
+        "error_type": "token_limit",
+        "finish_reason": "length",
+        "prompt_ids_sha256": runner.fingerprint(ids),
+        "audio_samples": len(waveform),
+    }
+    monkeypatch.setattr(runner, "receive", lambda *args: detail)
+    channel = SimpleNamespace(send=lambda _: None)
+    bridge = runner.DecoderBridge(channel, object(), tokenizer)  # type: ignore[arg-type]
+    bridge.expected_prompt = "SYSTEM:القاهرة"
+    with pytest.raises(runner.TokenLimitError) as error:
+        bridge.generate([{"prompt": "SYSTEM:القاهرة", "multi_modal_data": {"audio": [waveform]}}])
+    assert error.value.detail is detail
+    assert len(bridge.calls) == 1

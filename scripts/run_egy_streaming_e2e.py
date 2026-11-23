@@ -72,6 +72,8 @@ def load_cell(path: Path, identity: str) -> Any:
 
 # Reviewed upgrade: allocation and batched scheduling; data, prompts and scoring unchanged.
 LEGACY_MEMORY_SCRIPT_SHA256 = "9c274bf1874081ba5957c4f3772181fb3a27459841cf0f9e1af91b5bc543f5f3"
+BATCH_SCRIPT_SHA256 = "c85042699e96bae4dbb6194a09f1dd46b39b68d87029371ed246f94be5b646fc"
+REVIEWED_SCRIPTS = {LEGACY_MEMORY_SCRIPT_SHA256, BATCH_SCRIPT_SHA256}
 
 
 def seal_stream_contract(path: Path, current: dict[str, Any]) -> dict[str, Any]:
@@ -80,23 +82,32 @@ def seal_stream_contract(path: Path, current: dict[str, Any]) -> dict[str, Any]:
         upgraded = json.loads(json.dumps(previous))
         script = str(Path(__file__))
         old = upgraded.get("inputs", {}).get(script)
-        if old == LEGACY_MEMORY_SCRIPT_SHA256:
+        if old in REVIEWED_SCRIPTS:
             upgraded["inputs"][script] = current["inputs"][script]
             if upgraded == current:
+                prior_path = path.parent / "memory_runtime_upgrade.json"
+                if prior_path.exists():
+                    prior = read(prior_path)
+                    if (
+                        prior["original_contract_sha256"] != sha(path)
+                        or prior["recorded_script_sha256"] != old
+                        or prior["reviewed_script_sha256"] not in REVIEWED_SCRIPTS
+                    ):
+                        raise ValueError("previous runtime upgrade identity changed")
                 sealed(
-                    path.parent / "memory_runtime_upgrade.json",
+                    path.parent / "token_limit_runtime_upgrade.json",
                     {
                         "original_contract_sha256": sha(path),
                         "recorded_script_sha256": old,
                         "reviewed_script_sha256": current["inputs"][script],
                         "reason": (
-                            "GPU allocation and batched scheduling; "
-                            "model/prompt/sampling/scoring unchanged"
+                            "Retry token-limited unfinished requests; retain successful results. "
+                            "Model, prompts, seed, temperature and scoring unchanged"
                         ),
                     },
                 )
                 print(
-                    "Reviewed scheduling runtime upgrade; "
+                    "Reviewed token-limit recovery upgrade; "
                     "retain original contract and completed cells",
                     flush=True,
                 )
@@ -279,7 +290,7 @@ def prepare(config_path: Path, output: Path) -> dict[str, Any]:
 
 def inputs_unchanged(contract: dict[str, Any]) -> None:
     for path, digest in contract["inputs"].items():
-        if Path(path) == Path(__file__) and digest == LEGACY_MEMORY_SCRIPT_SHA256:
+        if Path(path) == Path(__file__) and digest in REVIEWED_SCRIPTS:
             # Only this exact historical runner is accepted; all other input pins remain strict.
             continue
         pin(Path(path), digest)
@@ -366,6 +377,106 @@ def receive(channel: Connection, child: subprocess.Popen[Any], timeout: float) -
     raise TimeoutError("native decoder response timed out; existing cells retained")
 
 
+class TokenLimitError(RuntimeError):
+    def __init__(self, detail: dict[str, Any]):
+        super().__init__("decoder still reached token limit after bounded retries")
+        self.detail = detail
+
+
+def bounded_batch_generate(
+    engine: Any,
+    sampling_factory: Any,
+    inputs: list[dict[str, Any]],
+    requests: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    output: Path,
+    launch_id: str,
+    batch_id: int,
+) -> list[dict[str, Any]]:
+    """Only a capped request is retried; never pass its truncated text to the ASR state."""
+    base_cap = int(cfg["max_new_tokens"])
+
+    def generate(items: list[dict[str, Any]], cap: int) -> Any:
+        return engine.generate(
+            items,
+            sampling_params=sampling_factory(temperature=0, max_tokens=cap, seed=cfg["seed"]),
+            use_tqdm=False,
+        )
+
+    generated = generate(inputs, base_cap)
+    if len(generated) != len(inputs):
+        raise ValueError("native decoder response count differs from batch")
+    replies = []
+    for index, (item, request, result) in enumerate(zip(inputs, requests, generated, strict=True)):
+        attempts = []
+        cap = base_cap
+        for attempt in range(3):
+            prediction = result.outputs[0]
+            prompt_ids = getattr(result, "prompt_token_ids", None)
+            record = {
+                "max_tokens": cap,
+                "finish_reason": prediction.finish_reason,
+                "generated_tokens": len(getattr(prediction, "token_ids", [])),
+                "expanded_prompt_tokens": len(prompt_ids) if prompt_ids else None,
+            }
+            attempts.append(record)
+            if prediction.finish_reason == "stop":
+                break
+            if prediction.finish_reason != "length":
+                raise RuntimeError(
+                    "unexpected decoder finish reason: " + str(prediction.finish_reason)
+                )
+            event_path = (
+                output / "token_limit_events" / f"{launch_id}_{batch_id}_{index}_{attempt}.json"
+            )
+            write_json(
+                event_path,
+                {
+                    "request": request.get("metadata", {}),
+                    "audio_samples": len(request["wave"]) // 4,
+                    "prompt_ids_sha256": fingerprint(request["ids"]),
+                    "launch_id": launch_id,
+                    "batch_id": batch_id,
+                    "attempt": attempt,
+                    **record,
+                    "truncated_text": prediction.text,
+                },
+            )
+            record["diagnostic_file"] = str(event_path)
+            print(
+                "Token limit: " + json.dumps({**request.get("metadata", {}), **record}), flush=True
+            )
+            if attempt == 2 or not prompt_ids:
+                break
+            headroom = int(cfg["max_model_len"]) - len(prompt_ids)
+            next_cap = min(base_cap * (2 ** (attempt + 1)), headroom)
+            if next_cap <= cap:
+                break
+            cap = next_cap
+            # Same prefix, same prompt, no truncated continuation and no reference access.
+            retried = generate([item], cap)
+            if len(retried) != 1:
+                raise ValueError("token-limit retry response count mismatch")
+            result = retried[0]
+        failed = prediction.finish_reason == "length"
+        replies.append(
+            {
+                "text": "" if failed else prediction.text,
+                "finish_reason": prediction.finish_reason,
+                "error_type": "token_limit" if failed else None,
+                "truncated_text_preview": prediction.text[:800] + prediction.text[-800:]
+                if failed
+                else None,
+                "generation_attempts": attempts,
+                "prompt_ids_sha256": fingerprint(request["ids"]),
+                "audio_samples": len(request["wave"]) // 4,
+                "batch_id": batch_id,
+                "batch_size": len(inputs),
+            }
+        )
+    return replies
+
+
 def decoder_server(fd: int, output: Path) -> None:
     """Native vLLM subprocess deliberately never imports qwen_asr."""
     import numpy as np
@@ -414,9 +525,6 @@ def decoder_server(fd: int, output: Path) -> None:
                 generation_config="vllm",
                 enable_prefix_caching=False,
             )
-            sampling = SamplingParams(
-                temperature=0, max_tokens=cfg["max_new_tokens"], seed=cfg["seed"]
-            )
             allocation["status"] = "ready"
             write_json(launch_path, allocation)
             channel.send({"ready": True, "decoder_launch_id": launch_id})
@@ -428,38 +536,19 @@ def decoder_server(fd: int, output: Path) -> None:
                     raise ValueError("decoder batch must contain 1-3 independent streaming states")
                 waves = [np.frombuffer(request["wave"], dtype="<f4") for request in requests]
                 started = time.perf_counter()
-                generated = engine.generate(
-                    [
-                        {
-                            "prompt_token_ids": request["ids"],
-                            "multi_modal_data": {"audio": (wave, 16000)},
-                        }
-                        for request, wave in zip(requests, waves, strict=True)
-                    ],
-                    sampling_params=sampling,
-                    use_tqdm=False,
+                inputs = [
+                    {
+                        "prompt_token_ids": request["ids"],
+                        "multi_modal_data": {"audio": (wave, 16000)},
+                    }
+                    for request, wave in zip(requests, waves, strict=True)
+                ]
+                replies = bounded_batch_generate(
+                    engine, SamplingParams, inputs, requests, cfg, output, launch_id, batch_id
                 )
                 seconds = time.perf_counter() - started
-                if len(generated) != len(requests):
-                    raise ValueError("native decoder response count differs from batch")
-                replies = []
-                for request, wave, result in zip(requests, waves, generated, strict=True):
-                    prediction = result.outputs[0]
-                    if prediction.finish_reason == "length":
-                        raise RuntimeError(
-                            "decoder token limit reached; refusing truncated evaluation"
-                        )
-                    replies.append(
-                        {
-                            "text": prediction.text,
-                            "finish_reason": prediction.finish_reason,
-                            "prompt_ids_sha256": fingerprint(request["ids"]),
-                            "audio_samples": len(wave),
-                            "batch_id": batch_id,
-                            "batch_size": len(requests),
-                            "batch_seconds": seconds,
-                        }
-                    )
+                for reply in replies:
+                    reply["batch_seconds"] = seconds
                 if batch_id < 3 or batch_id % 50 == 0:
                     print(
                         f"Native decoder batch={batch_id} requests={len(requests)} "
@@ -555,6 +644,7 @@ class DecoderBridge:
         self.broker = broker
         self.channel, self.child, self.tokenizer = channel, child, tokenizer
         self.expected_prompt = ""
+        self.metadata: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
 
     def generate(self, inputs: list[dict[str, Any]], **kwargs: Any) -> list[Any]:
@@ -564,7 +654,11 @@ class DecoderBridge:
         if not self.expected_prompt or not prompt.startswith(self.expected_prompt):
             raise ValueError("official streaming request did not use refreshed prompt")
         ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        value = {"ids": ids, "wave": wave.astype("<f4", copy=False).tobytes()}
+        value = {
+            "ids": ids,
+            "wave": wave.astype("<f4", copy=False).tobytes(),
+            "metadata": self.metadata,
+        }
         if self.broker is None:
             self.channel.send(value)
             reply = receive(self.channel, self.child, 600)
@@ -581,8 +675,11 @@ class DecoderBridge:
                 "batch_id": reply.get("batch_id"),
                 "batch_size": reply.get("batch_size"),
                 "batch_seconds": reply.get("batch_seconds"),
+                "generation_attempts": reply.get("generation_attempts", []),
             }
         )
+        if reply.get("error_type") == "token_limit":
+            raise TokenLimitError(reply)
         return [SimpleNamespace(outputs=[SimpleNamespace(text=reply["text"])])]
 
 
@@ -681,6 +778,7 @@ def asr_worker(output: Path, scope: str) -> None:
         def decode_mode(item: Any, wave: Any, prefixes: Any) -> None:
             row, mode, path, identity = item
             bridge = DecoderBridge(channel, child, processor.tokenizer, broker)
+            bridge.metadata = {"sample_id": row["id"], "mode": mode}
             wrapper = Qwen3ASRModel(backend="vllm", model=bridge, processor=processor)
             backend = AuditedBackend(wrapper, bridge)
             prompt_probe(backend, cfg)
@@ -696,19 +794,40 @@ def asr_worker(output: Path, scope: str) -> None:
                 active_hotword_ids=active,
             )
             bridge.calls.clear()
-            result, timeline = run_streaming_sample(
-                backend=backend,
-                waveform=wave,
-                sample=sample,
-                group="C" if replay is None else "D",
-                hotword_surfaces=surfaces,
-                ctc_detector=replay,
-                prompt_template=cfg["prompt_template"],
-                chunk_size_sec=cfg["chunk_seconds"],
-                unfixed_chunk_num=cfg["unfixed_chunk_num"],
-                unfixed_token_num=cfg["unfixed_token_num"],
-                asr_language="Arabic",
-            )
+            try:
+                result, timeline = run_streaming_sample(
+                    backend=backend,
+                    waveform=wave,
+                    sample=sample,
+                    group="C" if replay is None else "D",
+                    hotword_surfaces=surfaces,
+                    ctc_detector=replay,
+                    prompt_template=cfg["prompt_template"],
+                    chunk_size_sec=cfg["chunk_seconds"],
+                    unfixed_chunk_num=cfg["unfixed_chunk_num"],
+                    unfixed_token_num=cfg["unfixed_token_num"],
+                    asr_language="Arabic",
+                )
+            except TokenLimitError as exc:
+                failure = {
+                    "identity": identity,
+                    "id": row["id"],
+                    "mode": mode,
+                    "source_group": row["source_group"],
+                    "audio_path": row["audio_path"],
+                    "duration_seconds": row["duration_seconds"],
+                    "reference": row["text"],
+                    "status": "token_limit_unresolved",
+                    "decoder_launch_id": ready["decoder_launch_id"],
+                    "detail": exc.detail,
+                    "actual_decoder_requests": list(bridge.calls),
+                }
+                save_cell(output / "failures" / mode / path.name, failure)
+                print(
+                    f"Recorded unresolved token limit: {row['id']} {mode}; continue other cells",
+                    flush=True,
+                )
+                return
             if replay is not None:
                 replay.finish()
             if not bridge.calls:
@@ -776,6 +895,7 @@ def asr_worker(output: Path, scope: str) -> None:
 def collect(output: Path, scope: str) -> dict[str, Any]:
     contract, rows, table = selection(output, scope)
     cells = []
+    failures = []
     for row in rows:
         prefix = output / "prefixes" / (order_key(row["id"]) + ".json")
         load_cell(prefix, row_identity(output, row))
@@ -783,10 +903,46 @@ def collect(output: Path, scope: str) -> dict[str, Any]:
             identity = fingerprint([row_identity(output, row), sha(prefix), mode])
             cell = load_cell(output / "asr" / mode / (order_key(row["id"]) + ".json"), identity)
             if cell is None:
-                raise ValueError("incomplete evaluation; no final report will be emitted")
-            cells.append(cell)
+                failed = load_cell(
+                    output / "failures" / mode / (order_key(row["id"]) + ".json"), identity
+                )
+                if failed is None:
+                    raise ValueError("incomplete evaluation; no final report will be emitted")
+                failures.append(
+                    {
+                        key: failed[key]
+                        for key in (
+                            "id",
+                            "mode",
+                            "audio_path",
+                            "duration_seconds",
+                            "status",
+                            "detail",
+                        )
+                    }
+                )
+            else:
+                cells.append(cell)
+    failed_ids = {f["id"] for f in failures}
+    complete_ids = {r["id"] for r in rows} - failed_ids
+    paired = [cell for cell in cells if cell["id"] in complete_ids]
+    event_paths = sorted((output / "token_limit_events").glob("*.json"))
+    examples = []
+    for event_path in event_paths[:10]:
+        event = read(event_path)
+        event["truncated_text"] = event["truncated_text"][:1600]
+        examples.append(event)
     report = {
-        "status": "completed",
+        "token_limit_event_count": len(event_paths),
+        "token_limit_examples": examples,
+        "status": "needs_review" if failures else "completed",
+        "expected_combinations": len(rows) * 3,
+        "completed_combinations": len(cells),
+        "unresolved_combinations": failures,
+        "expected_target_pairs_full_set": sum(
+            len(expected_ids(row["text"], table)) for row in rows
+        ),
+        "paired_completed_subset_only": summary(paired, complete_ids) if failures else None,
         "scope": scope,
         "output_dir": str(output),
         "contract_sha256": sha(output / "contract.json"),
@@ -807,7 +963,7 @@ def collect(output: Path, scope: str) -> dict[str, Any]:
             }
             for mode in MODES
         },
-        "by_mode": summary(cells, {r["id"] for r in rows}),
+        "by_mode": None if failures else summary(cells, {r["id"] for r in rows}),
         "by_source": {
             source: {
                 mode: aggregate(
@@ -816,7 +972,17 @@ def collect(output: Path, scope: str) -> dict[str, Any]:
                 for mode in MODES
             }
             for source in sorted({r["source_group"] for r in rows})
-        },
+        }
+        if not failures
+        else None,
+        "token_limit_retry_policy": (
+            "512 -> 1024 -> 2048, bounded by context headroom; same prefix/prompt"
+        ),
+        "recovered_requests": sum(
+            len(call.get("generation_attempts", [])) > 1
+            for cell in cells
+            for call in cell["actual_decoder_requests"]
+        ),
         "model": contract["model"],
         "checkpoint": contract["checkpoint"],
         "expected": contract["expected"],
@@ -873,6 +1039,9 @@ def run(config_path: Path, output: Path, gpu: int, check: bool) -> dict[str, Any
                         cwd=ROOT,
                     )
             report = collect(output, scope)
+            if scope == "smoke" and report["status"] != "completed":
+                write_json(output / "report.json", report)
+                break
             if scope == "smoke":
                 print(
                     "20-sample three-way engineering smoke passed; continue full frozen set",
@@ -891,9 +1060,10 @@ def run(config_path: Path, output: Path, gpu: int, check: bool) -> dict[str, Any
                     "runtime_decoder.json",
                 ):
                     archive.write(output / name, name)
-                upgrade = output / "memory_runtime_upgrade.json"
-                if upgrade.exists():
-                    archive.write(upgrade, upgrade.name)
+                for name in ("memory_runtime_upgrade.json", "token_limit_runtime_upgrade.json"):
+                    upgrade = output / name
+                    if upgrade.exists():
+                        archive.write(upgrade, upgrade.name)
         return report
 
 
