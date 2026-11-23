@@ -1,5 +1,42 @@
 # 工作交接记录
 
+## 0.246 2026-11-23 真实埃及语料热词提取与epoch29整段Top5/Top7一条龙
+
+用户指出164条策划词没有测试文本依据，并授权直接完成语料提词到Top5/Top7。
+新增独立脚本、配置与评测模块；保留0.245旧候选及审阅入口。固定新EGY ×3 epoch29、
+r15 Encoder、167类表、原始音频，使用已封存test先按时长8:1:1抽样，再提词。
+实际原文实体由固定CAMeLBERT NER提取；专业术语仅保留确实出现的草案术语，
+训练文本提取不在评测参考中出现的干扰词。不是把全部164条硬加入测试。
+
+独立EGY发音，失败目标保留主召回分母；固定Anchor64及置信门限，整段Top5/Top7，
+不调参、不训练、不使用Decoder。表在推理前冻结，预测函数只接收音频和静态索引。
+新增×3入口，不更改旧×2流式加载约束。输出含分来源、目标密度、负样本、
+发音覆盖和未过滤排名对照。属于语料条件化评测，不宣称未知业务词表盲测。
+
+分支 `codex/g2p-coverage-scan`，工区项目环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/evaluate_egy_corpus_hotwords.py --gpu 4
+```
+
+输出`outputs/egy_ep29_corpus_hotwords_v1/`。同命令校验身份后恢复NER/发音/逐音频结果；
+失败条目重做；改输入/规则/相关代码须新目录；单目录独占锁，旧训练与候选不变。
+首跑下载约436MB固定NER，TLS绕过仅下载且SHA验证；使用现有CALIMA隔离环境。
+所有长阶段带心跳与真实计数；先NER再Qwen，单物理卡，不并行占用两份模型。
+
+核验`report.json`中status=completed、best_epoch=29、table_sha256、
+selection.by_source、all.operating.top5/top7、pronunciation_target_coverage。
+查看`candidates.tsv`/`table.json`词表依据和发音；回传`return_summary.zip`，
+传输受限可传所有`return_part_*.txt`（每片<32KiB）。详细口径与命令见
+[EGY_CORPUS_HOTWORD_RETRIEVAL.md](EGY_CORPUS_HOTWORD_RETRIEVAL.md)。
+
+本地相关回归79通过、4依赖跳过；改动Ruff/Mypy及git diff --check通过。
+全量pytest：1178通过、68跳过、14失败、7错误；失败/错误均为既有用例缺少
+Torch/soundfile/jiwer依赖，未改用户已有测试。尚无工区NER候选数量、发音覆盖或检索实测，
+不能提前声称召回率。
+
 ## 0.245 2026-11-23 埃及阿语164条热词候选审阅入口（未检索）
 
 用户确认新EGY ×3最佳epoch29（Head SHA `c561799f…5164b320`），配套r15 Encoder、

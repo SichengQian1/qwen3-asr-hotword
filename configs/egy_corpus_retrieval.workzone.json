@@ -1,0 +1,21 @@
+{
+  "source_config": "configs/egy_hotword_review.workzone.json",
+  "test_manifest": "outputs/en_egy_480_ctc_v1/test.jsonl",
+  "test_sha256": "c2ce6c2cbf1c65591b87686fc49dfca39d6b9859898eaad71efffc2b932ba81a",
+  "validation_manifest": "outputs/en_egy_480_ctc_v1/validation.jsonl",
+  "validation_sha256": "e334696b12269d660bd435f6b2f83fa56fdf7a1991077945c35fad8bc6d94c0e",
+  "encoder_plan": "outputs/en_ar_r15_5100_ctc_v1/plan.json",
+  "frontend_config": "configs/arabic_native_frontend.workzone.json",
+  "pronunciation_policy": "configs/arabic_pronunciation_policy.json",
+  "training_ner_samples_per_source": 300,
+  "ner_directory": "models/egy_corpus_ner_v1",
+  "ner_repository": "CAMeL-Lab/bert-base-arabic-camelbert-msa-ner",
+  "ner_revision": "54e2905e7c756883b00877cd48ed710a304af0d1",
+  "ner_files": {
+    "config.json": "ee69edfcdab0148af49a85cf6ab687415b32e233b420911d7db32811a1a6c1f1",
+    "pytorch_model.bin": "6bb57947c055feedfb765d3b82f2ae5efbf7c01be6bc289b9e51968d1bb51920",
+    "special_tokens_map.json": "303df45a03609e4ead04bc3dc1536d0ab19b5358db685b6f3da123d05ec200e3",
+    "tokenizer_config.json": "73f5e97ab29042bac49dc96f7b8a7a790994509bbd2fe3e9cd4f59affc46c2ce",
+    "vocab.txt": "1df5f8da6ad6c56153c7a974c0b149bb7a0a6e332bcfa795c99deee6c1136ce2"
+  }
+}
