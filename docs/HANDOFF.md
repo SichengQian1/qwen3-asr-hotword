@@ -25,6 +25,14 @@ python -u -B scripts/evaluate_egy_corpus_hotwords.py --gpu 4
 失败条目重做；改输入/规则/相关代码须新目录；单目录独占锁，旧训练与候选不变。
 首跑下载约436MB固定NER，TLS绕过仅下载且SHA验证；使用现有CALIMA隔离环境。
 所有长阶段带心跳与真实计数；先NER再Qwen，单物理卡，不并行占用两份模型。
+工区首次运行已过身份检查和8:1:1选样；NER权重仅收到199,932,540/436,407,625字节，
+未进入实体提取/检索。下载现按8MiB范围续传、网络失败最多连续重试5次，保留.pending；
+完整SHA不符只从零重试一次，绝不把半截文件当模型。原脚本SHA `15158ba7…dead4ee2`
+仅允许下载实现升级，其他输入必须完全一致；保留原contract和选样，写download_upgrade.json。
+更新后继续上方原命令，不需删目录/手工下模型。下载回归涵盖短响应、断连、服务器忽略Range、
+错误Range、SHA不符和原contract兼容；官方HF小文件真实续传校验通过；权重实际断点
+199,932,540处请求返回正确206 Content-Range。修复相关34测试通过，Ruff/Mypy/空白检查通过；
+全量1185通过、68跳过，仍为既有缺依赖的14失败/7错误。
 
 核验`report.json`中status=completed、best_epoch=29、table_sha256、
 selection.by_source、all.operating.top5/top7、pronunciation_target_coverage。

@@ -189,25 +189,21 @@ def test_pinned_ner_official_person_label() -> None:
     assert all(len(s) == 64 for s in config["ner_files"].values())
 
 
-def test_download_bad_checksum_never_becomes_completed_asset(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import io
-
-    monkeypatch.setattr(runner, "ROOT", tmp_path)
-    monkeypatch.setattr(runner.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(b"wrong"))
-    config = dict(
-        ner_directory="assets",
-        ner_files={"config.json": "0" * 64},
-        ner_repository="official/model",
-        ner_revision="fixed",
-    )
-    with pytest.raises(ValueError, match="pinned input"):
-        runner.acquire_ner(config)
-    assert not (tmp_path / "assets/config.json").exists()
-
-
 def test_reject_duplicate_test_audio() -> None:
     with pytest.raises(ValueError, match="duplicate"):
         select_audio([row("a"), row("a")])
+
+
+def test_download_only_upgrade_preserves_old_contract(tmp_path: Path) -> None:
+    script = str(Path(runner.__file__))
+    old_sha = "15158ba7292ba8ff4799402ae8f630249df7177b721aa9c7c9f63e71dead4ee2"
+    old = {"inputs": {script: old_sha, "model": "unchanged"}, "policy": "fixed"}
+    current = {"inputs": {script: "new", "model": "unchanged"}, "policy": "fixed"}
+    path = tmp_path / "contract.json"
+    runner.write_json(path, old)
+    runner.seal_run_contract(path, current)
+    assert runner.read(path) == old
+    assert (tmp_path / "download_upgrade.json").exists()
+    current["policy"] = "changed"
+    with pytest.raises(ValueError, match="identity changed"):
+        runner.seal_run_contract(path, current)

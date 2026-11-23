@@ -10,10 +10,8 @@ import hashlib
 import heapq
 import json
 import os
-import ssl
 import subprocess
 import sys
-import urllib.request
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -34,6 +32,7 @@ from qwen_hotword.evaluation.egy_corpus_hotwords import (
     summarize,
 )
 from qwen_hotword.evaluation.egy_hotword_review import verify_run
+from qwen_hotword.io.pinned_download import download
 from qwen_hotword.phonemes.mfa_v03_assets import pin, sha, write_json
 from qwen_hotword.training.en_ar_source_audit import iter_jsonl
 from qwen_hotword.training.stage_progress import stage_progress
@@ -58,6 +57,30 @@ def sealed(path: Path, value: Any) -> None:
         write_json(path, value)
 
 
+def seal_run_contract(path: Path, value: dict[str, Any]) -> None:
+    if path.exists():
+        previous = read(path)
+        upgraded = json.loads(json.dumps(previous))
+        script = str(Path(__file__))
+        old_sha = "15158ba7292ba8ff4799402ae8f630249df7177b721aa9c7c9f63e71dead4ee2"
+        if upgraded.get("inputs", {}).get(script) == old_sha:
+            upgraded["inputs"][script] = value["inputs"][script]
+            if upgraded == value:
+                write_json(
+                    path.parent / "download_upgrade.json",
+                    {
+                        "previous_script_sha256": old_sha,
+                        "current_script_sha256": value["inputs"][script],
+                        "downloader_sha256": sha(ROOT / "src/qwen_hotword/io/pinned_download.py"),
+                        "reason": (
+                            "Download retry/resume only; data/model/selection/scoring unchanged"
+                        ),
+                    },
+                )
+                return
+    sealed(path, value)
+
+
 def result_file(path: Path, identity: str) -> Any:
     if not path.exists():
         return None
@@ -72,27 +95,18 @@ def acquire_ner(config: dict[str, Any]) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     for name, digest in config["ner_files"].items():
         path = directory / name
-        with stage_progress("Acquire/verify pinned NER asset " + name) as tick:
-            if not path.exists():
-                url = (
-                    f"https://huggingface.co/{config['ner_repository']}/resolve/"
-                    f"{config['ner_revision']}/{name}"
-                )
-                # Explicit work-zone permission: scoped TLS bypass, pinned SHA before use.
-                context = ssl._create_unverified_context()
-                temporary = path.with_suffix(path.suffix + ".pending")
-                with (
-                    urllib.request.urlopen(url, context=context, timeout=120) as response,
-                    temporary.open("wb") as stream,
-                ):
-                    size = 0
-                    while chunk := response.read(1024 * 1024):
-                        stream.write(chunk)
-                        size += len(chunk)
-                        tick(size)
-                pin(temporary, digest)
-                temporary.replace(path)
-            pin(path, digest)
+        sizes = {
+            "config.json": 980,
+            "pytorch_model.bin": 436407625,
+            "special_tokens_map.json": 112,
+            "tokenizer_config.json": 86,
+            "vocab.txt": 304561,
+        }
+        url = (
+            f"https://huggingface.co/{config['ner_repository']}/resolve/"
+            f"{config['ner_revision']}/{name}"
+        )
+        download(url, path, digest, sizes[name])
     return directory
 
 
@@ -378,7 +392,7 @@ def run(config_path: Path, output: Path, gpu: int) -> dict[str, Any]:
             "gpu_does_not_change_identity": True,
         }
         output.mkdir(parents=True, exist_ok=True)
-        sealed(output / "contract.json", contract)
+        seal_run_contract(output / "contract.json", contract)
     with stage_progress("Freeze 8:1:1 audio BEFORE entity extraction; verify train/val isolation"):
         selected, selection = select_audio(list(iter_jsonl(test_path)))
         assert_disjoint(selected, iter_jsonl(val_path))
