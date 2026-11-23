@@ -1,0 +1,17 @@
+{
+  "source_output": "outputs/egy_ep29_corpus_hotwords_v1",
+  "source_config": "configs/egy_corpus_retrieval.workzone.json",
+  "output": "outputs/egy_ep29_streaming_e2e_v1",
+  "decoder_python": ".venv/qwen_asr_vllm023_cu129/bin/python",
+  "expected_table_sha256": "088052f81ae19f23373f0745225f717cae36f75e9925b9099b891207a8d217a0",
+  "expected_samples": 2078,
+  "expected_target_pairs": 580,
+  "chunk_seconds": 2.0,
+  "unfixed_chunk_num": 2,
+  "unfixed_token_num": 5,
+  "max_new_tokens": 512,
+  "max_model_len": 8192,
+  "gpu_memory_utilization": 0.5,
+  "seed": 20261123,
+  "prompt_template": "قد ترد الكلمات التالية في الصوت، وهي مرجع للتهجئة فقط. لا تكتبها إلا إذا سمعتها بالفعل: {hotwords}"
+}

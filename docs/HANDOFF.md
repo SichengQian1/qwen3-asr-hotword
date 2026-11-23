@@ -1,5 +1,34 @@
 # 工作交接记录
 
+## 0.247 2026-11-23 埃及阿语三组动态Prompt流式端到端模拟（待工区）
+
+用户授权沿用新EGY ×3 epoch29、r15、原始2078条音频和383词表，执行无RAG/Top5/Top7
+三组端到端对照。新增独立入口；先20条工程smoke，成功后自动全量；不训练、不重新提词
+或打标。按原时长8:1:1固定样本，保留580目标分母与负样本。CTC仅使用当前累计音频，
+每2秒刷新同一步Prompt；共享因果前缀缓存，不能使用整段候选提前注入。
+
+复用原qwen-asr0.0.6状态机及既有`.venv/qwen_asr_vllm023_cu129`原生vLLM0.23环境。
+检索进程退出后再加载Decoder，原生vLLM通过独立子进程隔离旧注册冲突；实际请求记录
+prompt和音频长度，截断输出停止。无需下载安装。结果是最终转写召回/WER/CER、
+提示词落入转写、负样本错误词及相对无RAG的配对增损，不与纯检索召回混淆。
+
+分支 `codex/g2p-coverage-scan`，工区原项目环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/run_egy_streaming_e2e.py --gpu 4
+```
+
+输出`outputs/egy_ep29_streaming_e2e_v1/`，同命令断点续跑。已完成逐音频前缀和三组
+转写单元校验后复用；改变身份须新目录。`--check`只检查数据及已有环境。
+每阶段有心跳和实际样本计数；详细分时Prompt/转写位于`asr/<mode>/*.json`的payload。
+核验`report.json`为completed、samples=2078，三组target_pairs均580；回传
+`return_summary.zip`即可，不传模型/全部时间线。完整口径见
+[EGY_STREAMING_E2E.md](EGY_STREAMING_E2E.md)。本地相关回归75通过、2依赖跳过；
+Ruff、Mypy、CLI帮助和空白检查通过。全量继续收集运行仍有14失败/7错误，
+均为既有Torch/soundfile/jiwer缺失；未改用户已有测试。尚无本次H200端到端实测。
+
 ## 0.246 2026-11-23 真实埃及语料热词提取与epoch29整段Top5/Top7一条龙
 
 用户指出164条策划词没有测试文本依据，并授权直接完成语料提词到Top5/Top7。
