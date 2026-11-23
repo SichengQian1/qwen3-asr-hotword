@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "candidate_file": "configs/hotwords/egy_entities_terms.review.v1.json",
+  "source_run": "outputs/en_egy_480_up3_standalone_v1",
+  "vocab": "configs/phonemes/en_ar_native_ipa_vocab.v1.1.json",
+  "expected": {
+    "checkpoint_sha256": "c561799f91650b08b148f101d2d152c225d141be9ac3425eb90b9b9a5164b320",
+    "best_epoch": 29,
+    "time_upsampling_factor": 3,
+    "num_classes": 167,
+    "vocab_sha256": "b337255bf239fdec3b4bdb0770bf39941fee74246336774c7ece8741d4534bf2",
+    "train_manifest_sha256": "7f3d5cc35ab9d2fa89750ed4d5123f3f253569f9717441bd593c41ab88849101",
+    "model_weight_sha256": "7dd3d4da16d9fef24c38feaa649b4aaca467a2499e48fceb5968611d98aa5443"
+  },
+  "future_evaluation": {
+    "audio": "original_no_added_noise",
+    "retrieval": "whole_utterance_top5_top7",
+    "arabic_duration_ratios": {"open_source": 0.8, "gaoshan_train": 0.1, "coarse_train": 0.1},
+    "requires_user_candidate_approval": true,
+    "test_manifest_read_at_this_stage": false
+  }
+}

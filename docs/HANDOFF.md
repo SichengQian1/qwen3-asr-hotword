@@ -1,5 +1,37 @@
 # 工作交接记录
 
+## 0.245 2026-11-23 埃及阿语164条热词候选审阅入口（未检索）
+
+用户确认新EGY ×3最佳epoch29（Head SHA `c561799f…5164b320`），配套r15 Encoder、
+167类词表；原始音频、不加噪、整段Top5/Top7；后续阿语测试按时长open-source/gaoshan/coarse
+8:1:1。本次只交候选，用户确认后再检索。旧混合EGY+MSA的epoch24不用于此次比较。
+
+新增164条通用实体/术语策划草案，含中文释义、九类分类、10对嵌套关系。它不是工区
+语料挖掘的既成结果，不宣称出现率或发音已通过；本地缺工区语料。新增脚本仅从固定
+train清单补充词频、分来源和例句，不扫描validation/test、不读音频、不生成IPA、不推理。
+匹配保留词/标点边界，前接成分单列待审，不把任意子串当成真实目标。零出现候选仍保留。
+
+分支 `codex/g2p-coverage-scan`，工区项目环境：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+python -u -B scripts/prepare_egy_hotword_candidates.py
+```
+
+无GPU/新安装；显示身份校验和train已处理/总数。默认新目录
+`outputs/egy_hotword_review_XXXXXXXX/review/`，拒绝覆盖已有审阅；中断后同命令重新扫纯文本，
+生成新目录，无resume，不影响原训练/检索产物。核验该目录 `report.json` 的
+`status=candidate_review_ready`、`training_counts.rows=489330`、`test_set_read=false`、
+`retrieval_started=false`。回传终端打印的 `return_review.zip`，或全部不超过32KiB的
+`return_part_*.txt`。详细流程、匹配限制、后续确认边界见
+[EGY_HOTWORD_CANDIDATE_REVIEW.md](EGY_HOTWORD_CANDIDATE_REVIEW.md)。
+
+本地164条草案已生成可读预览；12项新测试、相关回归70项通过；改动Ruff/Mypy通过。
+全量pytest先因Torch缺失在收集阶段停止；允许继续收集后14项失败、7项错误，
+错误均为本地缺少torch/soundfile/jiwer，未改动已有测试或安装重型依赖。
+工区词频、IPA覆盖率和Top5/Top7均未测，不把编辑草案当成最终评测词表。
+
 ## 0.244 中文录屏 Demo 里程碑与 2,411 词联合库中文七组评测
 
 **Demo 记录**　工区 1.0 日志显示首次使用物理 5 卡，在

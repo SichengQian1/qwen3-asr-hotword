@@ -1,0 +1,1321 @@
+{
+  "schema_version": 1,
+  "status": "editorial_draft_not_corpus_extracted",
+  "language": "ar",
+  "authorship": "assistant_curated_for_user_review",
+  "human_review_completed": false,
+  "candidates": [
+    {
+      "id": "egy_candidate_0001",
+      "surface": "مصر",
+      "category": "地名",
+      "gloss_zh": "埃及",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0002",
+      "surface": "القاهرة",
+      "category": "地名",
+      "gloss_zh": "开罗",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0003",
+      "surface": "الإسكندرية",
+      "category": "地名",
+      "gloss_zh": "亚历山大",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0004",
+      "surface": "الجيزة",
+      "category": "地名",
+      "gloss_zh": "吉萨",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0005",
+      "surface": "الأقصر",
+      "category": "地名",
+      "gloss_zh": "卢克索",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0006",
+      "surface": "أسوان",
+      "category": "地名",
+      "gloss_zh": "阿斯旺",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0007",
+      "surface": "أسيوط",
+      "category": "地名",
+      "gloss_zh": "艾斯尤特",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0008",
+      "surface": "المنصورة",
+      "category": "地名",
+      "gloss_zh": "曼苏拉",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0009",
+      "surface": "طنطا",
+      "category": "地名",
+      "gloss_zh": "坦塔",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0010",
+      "surface": "الزقازيق",
+      "category": "地名",
+      "gloss_zh": "扎加齐格",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0011",
+      "surface": "الإسماعيلية",
+      "category": "地名",
+      "gloss_zh": "伊斯梅利亚",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0012",
+      "surface": "بورسعيد",
+      "category": "地名",
+      "gloss_zh": "塞得港",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0013",
+      "surface": "السويس",
+      "category": "地名",
+      "gloss_zh": "苏伊士",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0014",
+      "surface": "دمياط",
+      "category": "地名",
+      "gloss_zh": "杜姆亚特",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0015",
+      "surface": "الفيوم",
+      "category": "地名",
+      "gloss_zh": "法尤姆",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0016",
+      "surface": "بني سويف",
+      "category": "地名",
+      "gloss_zh": "贝尼苏韦夫",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0017",
+      "surface": "المنيا",
+      "category": "地名",
+      "gloss_zh": "明亚",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0018",
+      "surface": "سوهاج",
+      "category": "地名",
+      "gloss_zh": "索哈杰",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0019",
+      "surface": "قنا",
+      "category": "地名",
+      "gloss_zh": "基纳",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0020",
+      "surface": "البحر الأحمر",
+      "category": "地名",
+      "gloss_zh": "红海",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0021",
+      "surface": "البحر المتوسط",
+      "category": "地名",
+      "gloss_zh": "地中海",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0022",
+      "surface": "سيناء",
+      "category": "地名",
+      "gloss_zh": "西奈",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0023",
+      "surface": "شرم الشيخ",
+      "category": "地名",
+      "gloss_zh": "沙姆沙伊赫",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0024",
+      "surface": "الغردقة",
+      "category": "地名",
+      "gloss_zh": "赫尔格达",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0025",
+      "surface": "مرسى مطروح",
+      "category": "地名",
+      "gloss_zh": "马特鲁港",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0026",
+      "surface": "العلمين",
+      "category": "地名",
+      "gloss_zh": "阿拉曼",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0027",
+      "surface": "القاهرة الجديدة",
+      "category": "地名",
+      "gloss_zh": "新开罗",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0028",
+      "surface": "التجمع الخامس",
+      "category": "地名",
+      "gloss_zh": "第五聚居区",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0029",
+      "surface": "السادس من أكتوبر",
+      "category": "地名",
+      "gloss_zh": "十月六日城（也有日期歧义）",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0030",
+      "surface": "العاصمة الإدارية الجديدة",
+      "category": "地名",
+      "gloss_zh": "新行政首都",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0031",
+      "surface": "وادي النيل",
+      "category": "地名",
+      "gloss_zh": "尼罗河谷",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0032",
+      "surface": "الدلتا",
+      "category": "地名",
+      "gloss_zh": "三角洲（地域指称需看上下文）",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0033",
+      "surface": "قناة السويس",
+      "category": "地标交通",
+      "gloss_zh": "苏伊士运河",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0034",
+      "surface": "نهر النيل",
+      "category": "地标交通",
+      "gloss_zh": "尼罗河",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0035",
+      "surface": "أهرامات الجيزة",
+      "category": "地标交通",
+      "gloss_zh": "吉萨金字塔",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0036",
+      "surface": "أبو الهول",
+      "category": "地标交通",
+      "gloss_zh": "狮身人面像",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0037",
+      "surface": "المتحف المصري",
+      "category": "地标交通",
+      "gloss_zh": "埃及博物馆",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0038",
+      "surface": "المتحف المصري الكبير",
+      "category": "地标交通",
+      "gloss_zh": "大埃及博物馆",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0039",
+      "surface": "قلعة صلاح الدين",
+      "category": "地标交通",
+      "gloss_zh": "萨拉丁城堡",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0040",
+      "surface": "خان الخليلي",
+      "category": "地标交通",
+      "gloss_zh": "哈利利市场",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0041",
+      "surface": "ميدان التحرير",
+      "category": "地标交通",
+      "gloss_zh": "解放广场",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0042",
+      "surface": "مطار القاهرة الدولي",
+      "category": "地标交通",
+      "gloss_zh": "开罗国际机场",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0043",
+      "surface": "مترو الأنفاق",
+      "category": "地标交通",
+      "gloss_zh": "地铁",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0044",
+      "surface": "السكك الحديدية",
+      "category": "地标交通",
+      "gloss_zh": "铁路",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0045",
+      "surface": "جامعة القاهرة",
+      "category": "机构",
+      "gloss_zh": "开罗大学",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0046",
+      "surface": "جامعة عين شمس",
+      "category": "机构",
+      "gloss_zh": "艾因夏姆斯大学",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0047",
+      "surface": "جامعة الإسكندرية",
+      "category": "机构",
+      "gloss_zh": "亚历山大大学",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0048",
+      "surface": "جامعة الأزهر",
+      "category": "机构",
+      "gloss_zh": "爱资哈尔大学",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0049",
+      "surface": "الأزهر الشريف",
+      "category": "机构",
+      "gloss_zh": "爱资哈尔",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0050",
+      "surface": "وزارة الصحة",
+      "category": "机构",
+      "gloss_zh": "卫生部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0051",
+      "surface": "وزارة التربية والتعليم",
+      "category": "机构",
+      "gloss_zh": "教育部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0052",
+      "surface": "وزارة التعليم العالي",
+      "category": "机构",
+      "gloss_zh": "高等教育部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0053",
+      "surface": "وزارة المالية",
+      "category": "机构",
+      "gloss_zh": "财政部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0054",
+      "surface": "وزارة الداخلية",
+      "category": "机构",
+      "gloss_zh": "内政部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0055",
+      "surface": "وزارة الخارجية",
+      "category": "机构",
+      "gloss_zh": "外交部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0056",
+      "surface": "وزارة الاتصالات",
+      "category": "机构",
+      "gloss_zh": "通信部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0057",
+      "surface": "مجلس النواب",
+      "category": "机构",
+      "gloss_zh": "众议院",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0058",
+      "surface": "مجلس الوزراء",
+      "category": "机构",
+      "gloss_zh": "内阁",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0059",
+      "surface": "البنك المركزي المصري",
+      "category": "机构",
+      "gloss_zh": "埃及中央银行",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0060",
+      "surface": "البنك الأهلي المصري",
+      "category": "机构",
+      "gloss_zh": "埃及国民银行",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0061",
+      "surface": "بنك مصر",
+      "category": "机构",
+      "gloss_zh": "埃及银行",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0062",
+      "surface": "جامعة الدول العربية",
+      "category": "机构",
+      "gloss_zh": "阿拉伯国家联盟",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0063",
+      "surface": "الأمم المتحدة",
+      "category": "机构",
+      "gloss_zh": "联合国",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0064",
+      "surface": "منظمة الصحة العالمية",
+      "category": "机构",
+      "gloss_zh": "世界卫生组织",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0065",
+      "surface": "صندوق النقد الدولي",
+      "category": "机构",
+      "gloss_zh": "国际货币基金组织",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0066",
+      "surface": "البنك الدولي",
+      "category": "机构",
+      "gloss_zh": "世界银行",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0067",
+      "surface": "مصر للطيران",
+      "category": "品牌组织",
+      "gloss_zh": "埃及航空",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0068",
+      "surface": "المصرية للاتصالات",
+      "category": "品牌组织",
+      "gloss_zh": "埃及电信",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0069",
+      "surface": "فودافون",
+      "category": "品牌组织",
+      "gloss_zh": "沃达丰",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0070",
+      "surface": "أورنج",
+      "category": "品牌组织",
+      "gloss_zh": "Orange通信品牌",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0071",
+      "surface": "سامسونج",
+      "category": "品牌组织",
+      "gloss_zh": "三星",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0072",
+      "surface": "هواوي",
+      "category": "品牌组织",
+      "gloss_zh": "华为",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0073",
+      "surface": "مايكروسوفت",
+      "category": "品牌组织",
+      "gloss_zh": "微软",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0074",
+      "surface": "جوجل",
+      "category": "品牌组织",
+      "gloss_zh": "谷歌",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0075",
+      "surface": "يوتيوب",
+      "category": "品牌组织",
+      "gloss_zh": "YouTube",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0076",
+      "surface": "فيسبوك",
+      "category": "品牌组织",
+      "gloss_zh": "Facebook",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0077",
+      "surface": "واتساب",
+      "category": "品牌组织",
+      "gloss_zh": "WhatsApp",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0078",
+      "surface": "إنستجرام",
+      "category": "品牌组织",
+      "gloss_zh": "Instagram",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0079",
+      "surface": "النادي الأهلي",
+      "category": "品牌组织",
+      "gloss_zh": "阿赫利俱乐部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0080",
+      "surface": "نادي الزمالك",
+      "category": "品牌组织",
+      "gloss_zh": "扎马雷克俱乐部",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0081",
+      "surface": "محمد صلاح",
+      "category": "人物",
+      "gloss_zh": "穆罕默德·萨拉赫",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0082",
+      "surface": "أحمد زويل",
+      "category": "人物",
+      "gloss_zh": "艾哈迈德·泽维尔",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0083",
+      "surface": "نجيب محفوظ",
+      "category": "人物",
+      "gloss_zh": "纳吉布·马哈福兹",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0084",
+      "surface": "أم كلثوم",
+      "category": "人物",
+      "gloss_zh": "乌姆·库勒苏姆",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0085",
+      "surface": "طه حسين",
+      "category": "人物",
+      "gloss_zh": "塔哈·侯赛因",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0086",
+      "surface": "جمال عبد الناصر",
+      "category": "人物",
+      "gloss_zh": "贾迈勒·阿卜杜勒·纳赛尔",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0087",
+      "surface": "أنور السادات",
+      "category": "人物",
+      "gloss_zh": "安瓦尔·萨达特",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0088",
+      "surface": "عبد الفتاح السيسي",
+      "category": "人物",
+      "gloss_zh": "阿卜杜勒·法塔赫·塞西",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0089",
+      "surface": "محمد مجدي أفشة",
+      "category": "人物",
+      "gloss_zh": "穆罕默德·马格迪·阿夫沙",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0090",
+      "surface": "عمر الشريف",
+      "category": "人物",
+      "gloss_zh": "奥马尔·沙里夫",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0091",
+      "surface": "مرض السكري",
+      "category": "医疗",
+      "gloss_zh": "糖尿病",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0092",
+      "surface": "ضغط الدم",
+      "category": "医疗",
+      "gloss_zh": "血压",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0093",
+      "surface": "ارتفاع ضغط الدم",
+      "category": "医疗",
+      "gloss_zh": "高血压",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0094",
+      "surface": "الأنسولين",
+      "category": "医疗",
+      "gloss_zh": "胰岛素",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0095",
+      "surface": "الغدة الدرقية",
+      "category": "医疗",
+      "gloss_zh": "甲状腺",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0096",
+      "surface": "الفشل الكلوي",
+      "category": "医疗",
+      "gloss_zh": "肾衰竭",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0097",
+      "surface": "غسيل الكلى",
+      "category": "医疗",
+      "gloss_zh": "透析",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0098",
+      "surface": "زراعة الكبد",
+      "category": "医疗",
+      "gloss_zh": "肝移植",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0099",
+      "surface": "جلطة القلب",
+      "category": "医疗",
+      "gloss_zh": "心肌梗死",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0100",
+      "surface": "السكتة الدماغية",
+      "category": "医疗",
+      "gloss_zh": "脑卒中",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0101",
+      "surface": "العلاج الطبيعي",
+      "category": "医疗",
+      "gloss_zh": "物理治疗",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0102",
+      "surface": "العلاج الكيميائي",
+      "category": "医疗",
+      "gloss_zh": "化疗",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0103",
+      "surface": "العلاج الإشعاعي",
+      "category": "医疗",
+      "gloss_zh": "放疗",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0104",
+      "surface": "الأشعة المقطعية",
+      "category": "医疗",
+      "gloss_zh": "CT扫描",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0105",
+      "surface": "الرنين المغناطيسي",
+      "category": "医疗",
+      "gloss_zh": "磁共振成像",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0106",
+      "surface": "الموجات فوق الصوتية",
+      "category": "医疗",
+      "gloss_zh": "超声波",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0107",
+      "surface": "العناية المركزة",
+      "category": "医疗",
+      "gloss_zh": "重症监护",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0108",
+      "surface": "المضادات الحيوية",
+      "category": "医疗",
+      "gloss_zh": "抗生素",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0109",
+      "surface": "نقص المناعة",
+      "category": "医疗",
+      "gloss_zh": "免疫缺陷",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0110",
+      "surface": "التأمين الصحي",
+      "category": "医疗",
+      "gloss_zh": "医疗保险",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0111",
+      "surface": "فيروس كورونا",
+      "category": "医疗",
+      "gloss_zh": "冠状病毒",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0112",
+      "surface": "التهاب الكبد",
+      "category": "医疗",
+      "gloss_zh": "肝炎",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0113",
+      "surface": "سعر الصرف",
+      "category": "金融经济",
+      "gloss_zh": "汇率",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0114",
+      "surface": "سعر الفائدة",
+      "category": "金融经济",
+      "gloss_zh": "利率",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0115",
+      "surface": "الجنيه المصري",
+      "category": "金融经济",
+      "gloss_zh": "埃及镑",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0116",
+      "surface": "الدولار الأمريكي",
+      "category": "金融经济",
+      "gloss_zh": "美元",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0117",
+      "surface": "التضخم",
+      "category": "金融经济",
+      "gloss_zh": "通货膨胀",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0118",
+      "surface": "الناتج المحلي الإجمالي",
+      "category": "金融经济",
+      "gloss_zh": "国内生产总值",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0119",
+      "surface": "الاحتياطي النقدي",
+      "category": "金融经济",
+      "gloss_zh": "货币储备",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0120",
+      "surface": "الميزان التجاري",
+      "category": "金融经济",
+      "gloss_zh": "贸易差额",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0121",
+      "surface": "ضريبة القيمة المضافة",
+      "category": "金融经济",
+      "gloss_zh": "增值税",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0122",
+      "surface": "البورصة المصرية",
+      "category": "金融经济",
+      "gloss_zh": "埃及证券交易所",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0123",
+      "surface": "صناديق الاستثمار",
+      "category": "金融经济",
+      "gloss_zh": "投资基金",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0124",
+      "surface": "الشمول المالي",
+      "category": "金融经济",
+      "gloss_zh": "普惠金融",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0125",
+      "surface": "التمويل العقاري",
+      "category": "金融经济",
+      "gloss_zh": "房地产融资",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0126",
+      "surface": "القروض العقارية",
+      "category": "金融经济",
+      "gloss_zh": "住房抵押贷款",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0127",
+      "surface": "التحويلات البنكية",
+      "category": "金融经济",
+      "gloss_zh": "银行转账",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0128",
+      "surface": "بطاقة الائتمان",
+      "category": "金融经济",
+      "gloss_zh": "信用卡",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0129",
+      "surface": "غسيل الأموال",
+      "category": "金融经济",
+      "gloss_zh": "洗钱",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0130",
+      "surface": "الأمن الغذائي",
+      "category": "金融经济",
+      "gloss_zh": "粮食安全",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0131",
+      "surface": "سلاسل الإمداد",
+      "category": "金融经济",
+      "gloss_zh": "供应链",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0132",
+      "surface": "المشروعات الصغيرة",
+      "category": "金融经济",
+      "gloss_zh": "小型企业项目",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0133",
+      "surface": "الذكاء الاصطناعي",
+      "category": "科技",
+      "gloss_zh": "人工智能",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0134",
+      "surface": "التعلم الآلي",
+      "category": "科技",
+      "gloss_zh": "机器学习",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0135",
+      "surface": "التعلم العميق",
+      "category": "科技",
+      "gloss_zh": "深度学习",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0136",
+      "surface": "معالجة اللغة الطبيعية",
+      "category": "科技",
+      "gloss_zh": "自然语言处理",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0137",
+      "surface": "التعرف على الكلام",
+      "category": "科技",
+      "gloss_zh": "语音识别",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0138",
+      "surface": "الأمن السيبراني",
+      "category": "科技",
+      "gloss_zh": "网络安全",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0139",
+      "surface": "حماية البيانات",
+      "category": "科技",
+      "gloss_zh": "数据保护",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0140",
+      "surface": "قواعد البيانات",
+      "category": "科技",
+      "gloss_zh": "数据库",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0141",
+      "surface": "الحوسبة السحابية",
+      "category": "科技",
+      "gloss_zh": "云计算",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0142",
+      "surface": "مراكز البيانات",
+      "category": "科技",
+      "gloss_zh": "数据中心",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0143",
+      "surface": "إنترنت الأشياء",
+      "category": "科技",
+      "gloss_zh": "物联网",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0144",
+      "surface": "التحول الرقمي",
+      "category": "科技",
+      "gloss_zh": "数字化转型",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0145",
+      "surface": "التجارة الإلكترونية",
+      "category": "科技",
+      "gloss_zh": "电子商务",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0146",
+      "surface": "التوقيع الإلكتروني",
+      "category": "科技",
+      "gloss_zh": "电子签名",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0147",
+      "surface": "الألياف الضوئية",
+      "category": "科技",
+      "gloss_zh": "光纤",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0148",
+      "surface": "أشباه الموصلات",
+      "category": "科技",
+      "gloss_zh": "半导体",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0149",
+      "surface": "الأقمار الصناعية",
+      "category": "科技",
+      "gloss_zh": "卫星",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0150",
+      "surface": "الواقع الافتراضي",
+      "category": "科技",
+      "gloss_zh": "虚拟现实",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0151",
+      "surface": "الواقع المعزز",
+      "category": "科技",
+      "gloss_zh": "增强现实",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0152",
+      "surface": "البصمة الوراثية",
+      "category": "科技",
+      "gloss_zh": "DNA指纹",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0153",
+      "surface": "الطاقة الشمسية",
+      "category": "能源环境",
+      "gloss_zh": "太阳能",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0154",
+      "surface": "الطاقة المتجددة",
+      "category": "能源环境",
+      "gloss_zh": "可再生能源",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0155",
+      "surface": "الغاز الطبيعي",
+      "category": "能源环境",
+      "gloss_zh": "天然气",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0156",
+      "surface": "الهيدروجين الأخضر",
+      "category": "能源环境",
+      "gloss_zh": "绿色氢能",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0157",
+      "surface": "محطة الضبعة",
+      "category": "能源环境",
+      "gloss_zh": "达巴电站",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0158",
+      "surface": "السد العالي",
+      "category": "能源环境",
+      "gloss_zh": "阿斯旺高坝",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0159",
+      "surface": "تحلية المياه",
+      "category": "能源环境",
+      "gloss_zh": "海水淡化",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0160",
+      "surface": "الصرف الصحي",
+      "category": "能源环境",
+      "gloss_zh": "污水处理及排污系统",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0161",
+      "surface": "تغير المناخ",
+      "category": "能源环境",
+      "gloss_zh": "气候变化",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0162",
+      "surface": "الاحتباس الحراري",
+      "category": "能源环境",
+      "gloss_zh": "全球变暖",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0163",
+      "surface": "ثاني أكسيد الكربون",
+      "category": "能源环境",
+      "gloss_zh": "二氧化碳",
+      "aliases": [],
+      "review_status": "pending"
+    },
+    {
+      "id": "egy_candidate_0164",
+      "surface": "إعادة التدوير",
+      "category": "能源环境",
+      "gloss_zh": "回收再利用",
+      "aliases": [],
+      "review_status": "pending"
+    }
+  ]
+}
