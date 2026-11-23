@@ -1,0 +1,10 @@
+{
+  "audio_root": "/data/z00816262/tts_light_hotwords/wav_16k",
+  "previous_table": "configs/zh_en_joint2351.v1.jsonl",
+  "previous_table_sha256": "33e73fa9df358475d766b7cd3c5f2fa07071a5ffc25ed8e87923e2effaae5e40",
+  "word_list": "configs/zh_light_hotwords.v1.txt",
+  "checkpoint_config": "configs/aishell_original_retrieval.workzone.json",
+  "sources_config": "configs/zh_en_stream2351_probe.workzone.json",
+  "cached_aishell_ner": "outputs/zh_en183_480_joint2351_eleven_v1/aishell_ner_transcript.test.txt",
+  "output": "outputs/zh_en183_480_joint2411_zh7_v1"
+}
