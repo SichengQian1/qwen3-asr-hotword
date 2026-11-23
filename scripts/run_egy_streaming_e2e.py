@@ -6,17 +6,22 @@ from __future__ import annotations
 import argparse
 import importlib.metadata
 import json
+import math
 import os
+import queue
 import socket
 import subprocess
 import sys
+import threading
 import time
 import zipfile
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from importlib import import_module
 from multiprocessing.connection import Connection
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
@@ -63,6 +68,72 @@ def load_cell(path: Path, identity: str) -> Any:
     if saved["sha256"] != fingerprint(value) or value["identity"] != identity:
         raise ValueError("completed result changed: " + str(path))
     return value
+
+
+# Reviewed upgrade: allocation and batched scheduling; data, prompts and scoring unchanged.
+LEGACY_MEMORY_SCRIPT_SHA256 = "9c274bf1874081ba5957c4f3772181fb3a27459841cf0f9e1af91b5bc543f5f3"
+
+
+def seal_stream_contract(path: Path, current: dict[str, Any]) -> dict[str, Any]:
+    if path.exists():
+        previous: dict[str, Any] = read(path)
+        upgraded = json.loads(json.dumps(previous))
+        script = str(Path(__file__))
+        old = upgraded.get("inputs", {}).get(script)
+        if old == LEGACY_MEMORY_SCRIPT_SHA256:
+            upgraded["inputs"][script] = current["inputs"][script]
+            if upgraded == current:
+                sealed(
+                    path.parent / "memory_runtime_upgrade.json",
+                    {
+                        "original_contract_sha256": sha(path),
+                        "recorded_script_sha256": old,
+                        "reviewed_script_sha256": current["inputs"][script],
+                        "reason": (
+                            "GPU allocation and batched scheduling; "
+                            "model/prompt/sampling/scoring unchanged"
+                        ),
+                    },
+                )
+                print(
+                    "Reviewed scheduling runtime upgrade; "
+                    "retain original contract and completed cells",
+                    flush=True,
+                )
+                return previous
+    sealed(path, current)
+    return current
+
+
+def memory_budget(
+    free_bytes: int, total_bytes: int, mode: str, fixed_utilization: float
+) -> dict[str, Any]:
+    if not 0 < free_bytes <= total_bytes:
+        raise ValueError("invalid free/total GPU memory snapshot")
+    if mode == "auto":
+        reserve = max(2 * 1024**3, math.ceil(free_bytes * 0.1))
+        if free_bytes <= reserve:
+            raise ValueError("GPU has insufficient free memory after the 2 GiB minimum reserve")
+        utilization = math.floor((free_bytes - reserve) / total_bytes * 10000) / 10000
+    elif mode == "fixed":
+        utilization = fixed_utilization
+    else:
+        raise ValueError("decoder memory mode must be auto or fixed")
+    if not math.isfinite(utilization) or not 0 < utilization < 1:
+        raise ValueError("invalid GPU memory utilization")
+    requested = math.floor(total_bytes * utilization)
+    if requested >= free_bytes:
+        raise ValueError("requested decoder memory exceeds currently free memory")
+    return {
+        "mode": mode,
+        "free_bytes": free_bytes,
+        "total_bytes": total_bytes,
+        "requested_bytes": requested,
+        "reserved_free_bytes": free_bytes - requested,
+        "effective_gpu_memory_utilization": utilization,
+        "original_config_utilization": fixed_utilization,
+        "policy": "auto: use 90% of free memory, leave at least 2 GiB; snapshot at engine startup",
+    }
 
 
 def runtime_info(decoder: bool) -> dict[str, Any]:
@@ -203,12 +274,14 @@ def prepare(config_path: Path, output: Path) -> dict[str, Any]:
         "inference_reference_access": False,
         "evaluation_scope": "corpus_conditioned_frozen_table_streaming_simulation",
     }
-    sealed(output / "contract.json", contract)
-    return contract
+    return seal_stream_contract(output / "contract.json", contract)
 
 
 def inputs_unchanged(contract: dict[str, Any]) -> None:
     for path, digest in contract["inputs"].items():
+        if Path(path) == Path(__file__) and digest == LEGACY_MEMORY_SCRIPT_SHA256:
+            # Only this exact historical runner is accepted; all other input pins remain strict.
+            continue
         pin(Path(path), digest)
 
 
@@ -304,14 +377,39 @@ def decoder_server(fd: int, output: Path) -> None:
     cfg = contract["config"]
     with Connection(fd) as channel:
         try:
+            # CUDA is inspected in the launcher; force spawn before engine workers start.
+            os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+            import torch
+
+            free, total = torch.cuda.mem_get_info(0)
+            allocation = memory_budget(
+                free,
+                total,
+                os.environ.get("EGY_DECODER_MEMORY", "auto"),
+                cfg["gpu_memory_utilization"],
+            )
+            launch_id = uuid4().hex
+            allocation.update(
+                {
+                    "launch_id": launch_id,
+                    "created_unix_seconds": time.time(),
+                    "physical_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"),
+                    "script_sha256": sha(Path(__file__)),
+                    "status": "starting",
+                    "max_num_seqs": 3,
+                }
+            )
+            launch_path = output / "decoder_launches" / (launch_id + ".json")
+            write_json(launch_path, allocation)
+            print("Decoder memory: " + json.dumps(allocation, ensure_ascii=False), flush=True)
             engine = LLM(
                 model=contract["model"],
                 model_impl="vllm",
                 dtype="float16",
                 enforce_eager=True,
-                max_num_seqs=1,
+                max_num_seqs=3,
                 max_model_len=cfg["max_model_len"],
-                gpu_memory_utilization=cfg["gpu_memory_utilization"],
+                gpu_memory_utilization=allocation["effective_gpu_memory_utilization"],
                 seed=cfg["seed"],
                 generation_config="vllm",
                 enable_prefix_caching=False,
@@ -319,28 +417,57 @@ def decoder_server(fd: int, output: Path) -> None:
             sampling = SamplingParams(
                 temperature=0, max_tokens=cfg["max_new_tokens"], seed=cfg["seed"]
             )
-            channel.send({"ready": True})
+            allocation["status"] = "ready"
+            write_json(launch_path, allocation)
+            channel.send({"ready": True, "decoder_launch_id": launch_id})
+            batch_id = 0
             while True:
-                request = channel.recv()
-                wave = np.frombuffer(request["wave"], dtype="<f4")
-                prediction = engine.generate(
-                    {
-                        "prompt_token_ids": request["ids"],
-                        "multi_modal_data": {"audio": (wave, 16000)},
-                    },
+                packet = channel.recv()
+                requests = packet.get("requests", [packet])
+                if not 1 <= len(requests) <= 3:
+                    raise ValueError("decoder batch must contain 1-3 independent streaming states")
+                waves = [np.frombuffer(request["wave"], dtype="<f4") for request in requests]
+                started = time.perf_counter()
+                generated = engine.generate(
+                    [
+                        {
+                            "prompt_token_ids": request["ids"],
+                            "multi_modal_data": {"audio": (wave, 16000)},
+                        }
+                        for request, wave in zip(requests, waves, strict=True)
+                    ],
                     sampling_params=sampling,
                     use_tqdm=False,
-                )[0].outputs[0]
-                if prediction.finish_reason == "length":
-                    raise RuntimeError("decoder token limit reached; refusing truncated evaluation")
-                channel.send(
-                    {
-                        "text": prediction.text,
-                        "finish_reason": prediction.finish_reason,
-                        "prompt_ids_sha256": fingerprint(request["ids"]),
-                        "audio_samples": len(wave),
-                    }
                 )
+                seconds = time.perf_counter() - started
+                if len(generated) != len(requests):
+                    raise ValueError("native decoder response count differs from batch")
+                replies = []
+                for request, wave, result in zip(requests, waves, generated, strict=True):
+                    prediction = result.outputs[0]
+                    if prediction.finish_reason == "length":
+                        raise RuntimeError(
+                            "decoder token limit reached; refusing truncated evaluation"
+                        )
+                    replies.append(
+                        {
+                            "text": prediction.text,
+                            "finish_reason": prediction.finish_reason,
+                            "prompt_ids_sha256": fingerprint(request["ids"]),
+                            "audio_samples": len(wave),
+                            "batch_id": batch_id,
+                            "batch_size": len(requests),
+                            "batch_seconds": seconds,
+                        }
+                    )
+                if batch_id < 3 or batch_id % 50 == 0:
+                    print(
+                        f"Native decoder batch={batch_id} requests={len(requests)} "
+                        f"elapsed={seconds:.3f}s",
+                        flush=True,
+                    )
+                batch_id += 1
+                channel.send({"results": replies} if "requests" in packet else replies[0])
         except EOFError:
             pass
         except Exception as exc:
@@ -348,8 +475,84 @@ def decoder_server(fd: int, output: Path) -> None:
             raise
 
 
+class BatchBroker:
+    """One socket owner coalesces up to three independent state requests, never their prompts."""
+
+    def __init__(
+        self,
+        channel: Connection,
+        child: subprocess.Popen[Any],
+        maximum: int = 3,
+        wait_seconds: float = 0.02,
+    ):
+        self.channel, self.child = channel, child
+        self.maximum, self.wait_seconds = maximum, wait_seconds
+        self.queue: queue.Queue[Any] = queue.Queue()
+        self.lock = threading.Lock()
+        self.error: BaseException | None = None
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def request(self, value: dict[str, Any]) -> dict[str, Any]:
+        future: Future[dict[str, Any]] = Future()
+        with self.lock:
+            if self.error is not None:
+                raise self.error
+            self.queue.put((value, future))
+        return future.result(timeout=650)
+
+    def _serve(self) -> None:
+        while True:
+            first = self.queue.get()
+            if first is None:
+                return
+            batch = [first]
+            deadline = time.monotonic() + self.wait_seconds
+            while len(batch) < self.maximum:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    item = self.queue.get(timeout=remaining)
+                except queue.Empty:
+                    break
+                if item is None:
+                    self.queue.put(None)
+                    break
+                batch.append(item)
+            try:
+                self.channel.send({"requests": [value for value, _ in batch]})
+                replies = receive(self.channel, self.child, 600)["results"]
+                if len(replies) != len(batch):
+                    raise ValueError("batch broker response count mismatch")
+                for (_, future), reply in zip(batch, replies, strict=True):
+                    future.set_result(reply)
+            except BaseException as exc:
+                with self.lock:
+                    self.error = exc
+                    while not self.queue.empty():
+                        item = self.queue.get_nowait()
+                        if item is not None:
+                            batch.append(item)
+                for _, future in batch:
+                    if not future.done():
+                        future.set_exception(exc)
+                return
+
+    def close(self) -> None:
+        self.queue.put(None)
+        self.thread.join(timeout=2)
+
+
 class DecoderBridge:
-    def __init__(self, channel: Connection, child: subprocess.Popen[Any], tokenizer: Any):
+    def __init__(
+        self,
+        channel: Connection,
+        child: subprocess.Popen[Any],
+        tokenizer: Any,
+        broker: BatchBroker | None = None,
+    ):
+        self.broker = broker
         self.channel, self.child, self.tokenizer = channel, child, tokenizer
         self.expected_prompt = ""
         self.calls: list[dict[str, Any]] = []
@@ -361,8 +564,12 @@ class DecoderBridge:
         if not self.expected_prompt or not prompt.startswith(self.expected_prompt):
             raise ValueError("official streaming request did not use refreshed prompt")
         ids = self.tokenizer.encode(prompt, add_special_tokens=False)
-        self.channel.send({"ids": ids, "wave": wave.astype("<f4", copy=False).tobytes()})
-        reply = receive(self.channel, self.child, 600)
+        value = {"ids": ids, "wave": wave.astype("<f4", copy=False).tobytes()}
+        if self.broker is None:
+            self.channel.send(value)
+            reply = receive(self.channel, self.child, 600)
+        else:
+            reply = self.broker.request(value)
         if reply["prompt_ids_sha256"] != fingerprint(ids) or reply["audio_samples"] != len(wave):
             raise ValueError("native decoder did not acknowledge the exact causal request")
         self.calls.append(
@@ -371,6 +578,9 @@ class DecoderBridge:
                 "audio_samples": len(wave),
                 "finish_reason": reply["finish_reason"],
                 "prompt_ids_sha256": reply["prompt_ids_sha256"],
+                "batch_id": reply.get("batch_id"),
+                "batch_size": reply.get("batch_size"),
+                "batch_seconds": reply.get("batch_seconds"),
             }
         )
         return [SimpleNamespace(outputs=[SimpleNamespace(text=reply["text"])])]
@@ -425,6 +635,11 @@ def asr_worker(output: Path, scope: str) -> None:
             path = output / "asr" / mode / (order_key(row["id"]) + ".json")
             if load_cell(path, identity) is None:
                 pending.append((row, mode, path, identity))
+    print(
+        f"Streaming resume: completed={len(rows) * 3 - len(pending)}/{len(rows) * 3}; "
+        f"pending={len(pending)}; decoder concurrency=3",
+        flush=True,
+    )
     if not pending:
         print("All streaming cells verified; no GPU reload needed", flush=True)
         return
@@ -458,76 +673,93 @@ def asr_worker(output: Path, scope: str) -> None:
         right.close()
     try:
         with stage_progress("Load native vLLM r15 Decoder; Encoder extraction process has exited"):
-            receive(channel, child, 1200)
-        bridge = DecoderBridge(channel, child, processor.tokenizer)
-        wrapper = Qwen3ASRModel(backend="vllm", model=bridge, processor=processor)
-        backend = AuditedBackend(wrapper, bridge)
-        prompt_probe(backend, cfg)
+            ready = receive(channel, child, 1200)
         surfaces = {t["id"]: t["surface"] for t in table}
         active = tuple(t["id"] for t in table if t["pronunciation"]["status"] == "active")
-        with stage_progress(
-            "Streaming final ASR: no-RAG / Top5 / Top7", total=len(pending), every=1
-        ) as tick:
-            previous_id, wave = "", None
-            for n, (row, mode, path, identity) in enumerate(pending, 1):
-                if row["id"] != previous_id:
-                    wave, previous_id = audio(row), row["id"]
-                prefixes = load_cell(
-                    output / "prefixes" / (order_key(row["id"]) + ".json"),
-                    row_identity(output, row),
-                )["prefixes"]
-                replay = None if mode == "no_rag" else PrefixReplay(prefixes, active, int(mode[3:]))
-                # Reference and expected targets are withheld from ALL model/prompt calls.
-                sample = StreamingSample(
-                    case_id=row["id"],
-                    sample_id=row["id"],
-                    reference_text="",
-                    language="ar",
-                    expected_hotword_ids=(),
-                    expected_surfaces=(),
-                    active_hotword_ids=active,
-                )
-                bridge.calls.clear()
-                result, timeline = run_streaming_sample(
-                    backend=backend,
-                    waveform=wave,
-                    sample=sample,
-                    group="C" if replay is None else "D",
-                    hotword_surfaces=surfaces,
-                    ctc_detector=replay,
-                    prompt_template=cfg["prompt_template"],
-                    chunk_size_sec=cfg["chunk_seconds"],
-                    unfixed_chunk_num=cfg["unfixed_chunk_num"],
-                    unfixed_token_num=cfg["unfixed_token_num"],
-                    asr_language="Arabic",
-                )
-                if replay is not None:
-                    replay.finish()
-                if not bridge.calls:
-                    raise ValueError("no actual decoder generation was performed")
-                injected = {
-                    str(i)
-                    for step in timeline
-                    for i in cast(list[str], step["injected_hotword_ids"])
-                }
-                prediction = str(result["prediction"])
-                pin(Path(row["audio_path"]), row["audio_sha256"])
-                save_cell(
-                    path,
-                    {
-                        "identity": identity,
-                        "id": row["id"],
-                        "mode": mode,
-                        "source_group": row["source_group"],
-                        "prediction": prediction,
-                        "reference": row["text"],
-                        "timeline": timeline,
-                        "actual_decoder_requests": list(bridge.calls),
-                        "inference_seconds": result["inference_seconds"],
-                        "metrics": score_row(row["text"], prediction, table, injected),
-                    },
-                )
-                tick(n)
+        broker = BatchBroker(channel, child)
+
+        def decode_mode(item: Any, wave: Any, prefixes: Any) -> None:
+            row, mode, path, identity = item
+            bridge = DecoderBridge(channel, child, processor.tokenizer, broker)
+            wrapper = Qwen3ASRModel(backend="vllm", model=bridge, processor=processor)
+            backend = AuditedBackend(wrapper, bridge)
+            prompt_probe(backend, cfg)
+            replay = None if mode == "no_rag" else PrefixReplay(prefixes, active, int(mode[3:]))
+            # Reference and expected targets are withheld from ALL model/prompt calls.
+            sample = StreamingSample(
+                case_id=row["id"],
+                sample_id=row["id"],
+                reference_text="",
+                language="ar",
+                expected_hotword_ids=(),
+                expected_surfaces=(),
+                active_hotword_ids=active,
+            )
+            bridge.calls.clear()
+            result, timeline = run_streaming_sample(
+                backend=backend,
+                waveform=wave,
+                sample=sample,
+                group="C" if replay is None else "D",
+                hotword_surfaces=surfaces,
+                ctc_detector=replay,
+                prompt_template=cfg["prompt_template"],
+                chunk_size_sec=cfg["chunk_seconds"],
+                unfixed_chunk_num=cfg["unfixed_chunk_num"],
+                unfixed_token_num=cfg["unfixed_token_num"],
+                asr_language="Arabic",
+            )
+            if replay is not None:
+                replay.finish()
+            if not bridge.calls:
+                raise ValueError("no actual decoder generation was performed")
+            injected = {
+                str(i) for step in timeline for i in cast(list[str], step["injected_hotword_ids"])
+            }
+            prediction = str(result["prediction"])
+            pin(Path(row["audio_path"]), row["audio_sha256"])
+            save_cell(
+                path,
+                {
+                    "identity": identity,
+                    "id": row["id"],
+                    "mode": mode,
+                    "decoder_launch_id": ready["decoder_launch_id"],
+                    "source_group": row["source_group"],
+                    "prediction": prediction,
+                    "reference": row["text"],
+                    "timeline": timeline,
+                    "actual_decoder_requests": list(bridge.calls),
+                    "inference_seconds": result["inference_seconds"],
+                    "metrics": score_row(row["text"], prediction, table, injected),
+                },
+            )
+
+        try:
+            grouped: dict[str, list[Any]] = {}
+            for item in pending:
+                grouped.setdefault(item[0]["id"], []).append(item)
+            with stage_progress(
+                "Streaming ASR: batched no-RAG / Top5 / Top7", total=len(pending), every=1
+            ) as tick:
+                completed = 0
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    for items in grouped.values():
+                        row = items[0][0]
+                        wave = audio(row)
+                        prefixes = load_cell(
+                            output / "prefixes" / (order_key(row["id"]) + ".json"),
+                            row_identity(output, row),
+                        )["prefixes"]
+                        futures = [
+                            executor.submit(decode_mode, item, wave, prefixes) for item in items
+                        ]
+                        for future in as_completed(futures):
+                            future.result()
+                            completed += 1
+                            tick(completed)
+        finally:
+            broker.close()
     finally:
         channel.close()
         try:
@@ -590,11 +822,17 @@ def collect(output: Path, scope: str) -> dict[str, Any]:
         "expected": contract["expected"],
         "selection": contract["selection"],
         "table_sha256": contract["config"]["expected_table_sha256"],
+        "decoder_launches": [
+            read(path) for path in sorted((output / "decoder_launches").glob("*.json"))
+        ],
+        "legacy_cells_without_launch_id": sum("decoder_launch_id" not in cell for cell in cells),
         "WER_CER_normalization": NORMALIZATION,
         "notes": [
             "Final transcript recall, not retrieval candidate recall.",
             "Same-step causal prefix prompts; original audio, no added noise.",
             "Offline streaming simulation, not concurrent service latency.",
+            "Independent states batch up to 3 requests; retained legacy cells may be serial. "
+            "Batching can introduce floating-point differences; launch IDs record execution.",
             "Corpus-conditioned table; not unseen-business-vocabulary evaluation.",
             "Prompt adoption is co-occurrence, not a causal attribution.",
             "False words are measured against reference text, not human audio review.",
@@ -653,6 +891,9 @@ def run(config_path: Path, output: Path, gpu: int, check: bool) -> dict[str, Any
                     "runtime_decoder.json",
                 ):
                     archive.write(output / name, name)
+                upgrade = output / "memory_runtime_upgrade.json"
+                if upgrade.exists():
+                    archive.write(upgrade, upgrade.name)
         return report
 
 
@@ -664,6 +905,12 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--gpu", type=int, default=4)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument(
+        "--decoder-memory",
+        choices=("auto", "fixed"),
+        default="auto",
+        help="startup allocation: auto uses free memory minus reserve; fixed uses config",
+    )
     parser.add_argument("--stage", choices=("prefix", "asr", "decoder"))
     parser.add_argument("--scope", choices=("smoke", "full"), default="full")
     parser.add_argument("--probe", choices=("main", "decoder"))
@@ -684,6 +931,7 @@ def main() -> int:
         elif args.stage == "asr":
             asr_worker(output, args.scope)
         else:
+            os.environ["EGY_DECODER_MEMORY"] = args.decoder_memory
             print(
                 json.dumps(
                     run(args.config.resolve(), output, args.gpu, args.check),

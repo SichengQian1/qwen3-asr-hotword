@@ -333,3 +333,298 @@ def test_bridge_verifies_actual_prompt_and_receipted_audio(
     assert bridge.calls[0]["prompt"] == "SYSTEM:القاهرة prefix"
     with pytest.raises(ValueError, match="refreshed prompt"):
         bridge.generate([{"prompt": "OLD_PROMPT", "multi_modal_data": {"audio": [Wave()]}}])
+
+
+@pytest.mark.parametrize("free_gib,total_gib", [(30.27, 139.81), (120, 139.81), (5, 139.81)])
+def test_dynamic_budget_uses_free_not_total_and_keeps_headroom(
+    free_gib: float,
+    total_gib: float,
+) -> None:
+    free, total = int(free_gib * 1024**3), int(total_gib * 1024**3)
+    result = runner.memory_budget(free, total, "auto", 0.15)
+    assert result["reserved_free_bytes"] >= max(2 * 1024**3, free * 0.1)
+    expected = free - max(2 * 1024**3, free * 0.1)
+    assert expected - total / 10000 - 2 <= result["requested_bytes"] <= expected
+    assert result["effective_gpu_memory_utilization"] < free / total
+    assert result["original_config_utilization"] == 0.15
+
+
+@pytest.mark.parametrize(
+    "free,total,mode,fixed",
+    [
+        (0, 100, "auto", 0.15),
+        (101, 100, "auto", 0.15),
+        (2 * 1024**3, 140 * 1024**3, "auto", 0.15),
+        (30 * 1024**3, 140 * 1024**3, "fixed", 0.5),
+        (30 * 1024**3, 140 * 1024**3, "invalid", 0.15),
+    ],
+)
+def test_dynamic_budget_rejects_invalid_or_insufficient_memory(
+    free: int,
+    total: int,
+    mode: str,
+    fixed: float,
+) -> None:
+    with pytest.raises(ValueError):
+        runner.memory_budget(free, total, mode, fixed)
+
+
+def test_fixed_memory_option_preserves_configured_budget() -> None:
+    result = runner.memory_budget(30 * 1024**3, 140 * 1024**3, "fixed", 0.15)
+    assert result["effective_gpu_memory_utilization"] == 0.15
+    assert result["requested_bytes"] == 21 * 1024**3
+
+
+def contract_upgrade_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    model = tmp_path / "model"
+    model.write_text("unchanged model")
+    old = {
+        "inputs": {
+            str(Path(runner.__file__)): runner.LEGACY_MEMORY_SCRIPT_SHA256,
+            str(model): runner.sha(model),
+        },
+        "config": {"gpu_memory_utilization": 0.15},
+    }
+    path = tmp_path / "contract.json"
+    runner.sealed(path, old)
+    current = json.loads(json.dumps(old))
+    current["inputs"][str(Path(runner.__file__))] = runner.sha(Path(runner.__file__))
+    return path, old, current
+
+
+def test_memory_upgrade_keeps_original_contract_and_completed_cells(tmp_path: Path) -> None:
+    path, old, current = contract_upgrade_fixture(tmp_path)
+    before = path.read_bytes()
+    row = {"id": "sample", "audio_sha256": "audio"}
+    identity = runner.row_identity(tmp_path, row)
+    cell = tmp_path / "completed.json"
+    runner.save_cell(cell, {"identity": identity, "prediction": "القاهرة"})
+    assert runner.seal_stream_contract(path, current) == old
+    assert path.read_bytes() == before
+    assert runner.row_identity(tmp_path, row) == identity
+    assert runner.load_cell(cell, identity)["prediction"] == "القاهرة"
+    runner.inputs_unchanged(old)
+    assert runner.seal_stream_contract(path, current) == old  # repeated restart
+    audit = json.loads((tmp_path / "memory_runtime_upgrade.json").read_text())
+    assert audit["original_contract_sha256"] == runner.sha(path)
+    assert audit["reviewed_script_sha256"] == runner.sha(Path(runner.__file__))
+    (tmp_path / "model").write_text("changed model")
+    with pytest.raises(ValueError):
+        runner.inputs_unchanged(old)
+
+
+@pytest.mark.parametrize("change", ["model", "config", "unknown_script"])
+def test_memory_upgrade_does_not_allow_other_identity_changes(tmp_path: Path, change: str) -> None:
+    path, old, current = contract_upgrade_fixture(tmp_path)
+    if change == "model":
+        current["inputs"][str(tmp_path / "model")] = "different"
+    elif change == "config":
+        current["config"]["seed"] = 99
+    else:
+        old["inputs"][str(Path(runner.__file__))] = "unknown historical code"
+        path.write_text(json.dumps(old))
+    with pytest.raises(ValueError, match="sealed identity changed"):
+        runner.seal_stream_contract(path, current)
+    assert not (tmp_path / "memory_runtime_upgrade.json").exists()
+
+
+@pytest.mark.parametrize("mode", ["auto", "fixed"])
+def test_native_engine_receives_effective_memory_and_records_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    import sys
+
+    free, total = 30 * 1024**3, 140 * 1024**3
+    calls, messages = [], []
+    monkeypatch.setenv("EGY_DECODER_MEMORY", mode)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda device: (free, total))),
+    )
+    fake_vllm = SimpleNamespace(LLM=lambda **kw: calls.append(kw), SamplingParams=lambda **kw: kw)
+    monkeypatch.setattr(runner, "import_module", lambda _: fake_vllm)
+
+    class Channel:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+        def send(self, message: Any) -> None:
+            messages.append(message)
+
+        def recv(self) -> Any:
+            raise EOFError
+
+    monkeypatch.setattr(runner, "Connection", lambda _: Channel())
+    runner.write_json(
+        tmp_path / "contract.json",
+        {
+            "model": "/merged-r15",
+            "config": {
+                "gpu_memory_utilization": 0.15,
+                "max_model_len": 8192,
+                "max_new_tokens": 512,
+                "seed": 20261123,
+            },
+        },
+    )
+    runner.decoder_server(0, tmp_path)
+    expected = runner.memory_budget(free, total, mode, 0.15)
+    assert calls[0]["gpu_memory_utilization"] == expected["effective_gpu_memory_utilization"]
+    assert calls[0]["max_num_seqs"] == 3
+    assert calls[0]["model"] == "/merged-r15"
+    assert messages[0]["ready"] is True
+    launch = runner.read(next((tmp_path / "decoder_launches").glob("*.json")))
+    assert launch["status"] == "ready"
+    assert launch["physical_gpu"] == "4"
+    assert launch["launch_id"] == messages[0]["decoder_launch_id"]
+    assert launch["requested_bytes"] == expected["requested_bytes"]
+
+
+@pytest.mark.parametrize("remaining_modes", [1, 2, 3])
+def test_broker_batches_remaining_modes_without_crossing_their_results(
+    monkeypatch: pytest.MonkeyPatch,
+    remaining_modes: int,
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    packets: list[dict[str, Any]] = []
+    channel = SimpleNamespace(send=lambda value: packets.append(value))
+    barrier = threading.Barrier(remaining_modes)
+
+    def receive(*_: Any) -> dict[str, Any]:
+        return {"results": [{"text": str(request["ids"])} for request in packets[-1]["requests"]]}
+
+    monkeypatch.setattr(runner, "receive", receive)
+    broker = runner.BatchBroker(channel, object(), wait_seconds=0.1)  # type: ignore[arg-type]
+    try:
+
+        def stream(mode: int) -> list[str]:
+            replies = []
+            for step in range(3):
+                barrier.wait(timeout=3)
+                replies.append(broker.request({"ids": [mode, step], "wave": b"pcm"})["text"])
+            return replies
+
+        with ThreadPoolExecutor(max_workers=remaining_modes) as pool:
+            results = list(pool.map(stream, range(remaining_modes)))
+        assert len(packets) == 3
+        assert all(len(packet["requests"]) == remaining_modes for packet in packets)
+        for mode, replies in enumerate(results):
+            assert replies == [str([mode, step]) for step in range(3)]
+    finally:
+        broker.close()
+    assert not broker.thread.is_alive()
+
+
+def test_broker_failure_releases_all_waiters_and_rejects_later_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    def receive(*_: Any) -> Any:
+        raise RuntimeError("native engine failed")
+
+    monkeypatch.setattr(runner, "receive", receive)
+    channel = SimpleNamespace(send=lambda _: None)
+    broker = runner.BatchBroker(channel, object(), wait_seconds=0.1)  # type: ignore[arg-type]
+    barrier = threading.Barrier(3)
+    try:
+
+        def stream(n: int) -> Any:
+            barrier.wait(timeout=3)
+            return broker.request({"ids": [n], "wave": b""})
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(stream, n) for n in range(3)]
+            for future in futures:
+                with pytest.raises(RuntimeError, match="native engine failed"):
+                    future.result(timeout=3)
+        with pytest.raises(RuntimeError, match="native engine failed"):
+            broker.request({"ids": [4], "wave": b""})
+    finally:
+        broker.close()
+
+
+def test_native_decoder_submits_batch_and_preserves_request_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    import numpy as np
+
+    sent, batches = [], []
+    requests = [
+        {"ids": [i, 10 + i], "wave": np.zeros(32000 + i, dtype="<f4").tobytes()} for i in range(3)
+    ]
+    incoming = iter([{"requests": requests}])
+
+    class Channel:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
+        def send(self, value: Any) -> None:
+            sent.append(value)
+
+        def recv(self) -> Any:
+            try:
+                return next(incoming)
+            except StopIteration:
+                raise EOFError from None
+
+    class Engine:
+        def generate(self, inputs: Any, **kw: Any) -> Any:
+            batches.append(inputs)
+            return [
+                SimpleNamespace(
+                    outputs=[
+                        SimpleNamespace(text=str(item["prompt_token_ids"]), finish_reason="stop")
+                    ]
+                )
+                for item in inputs
+            ]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda _: (30 * 1024**3, 140 * 1024**3))),
+    )
+    monkeypatch.setattr(runner, "Connection", lambda _: Channel())
+    monkeypatch.setattr(
+        runner,
+        "import_module",
+        lambda _: SimpleNamespace(LLM=lambda **kw: Engine(), SamplingParams=lambda **kw: kw),
+    )
+    runner.write_json(
+        tmp_path / "contract.json",
+        {
+            "model": "/r15",
+            "config": {
+                "gpu_memory_utilization": 0.15,
+                "max_model_len": 8192,
+                "max_new_tokens": 512,
+                "seed": 1,
+            },
+        },
+    )
+    runner.decoder_server(0, tmp_path)
+    assert len(batches) == 1 and len(batches[0]) == 3
+    assert [item["prompt_token_ids"] for item in batches[0]] == [r["ids"] for r in requests]
+    replies = sent[1]["results"]
+    for n, reply in enumerate(replies):
+        assert reply["text"] == str(requests[n]["ids"])
+        assert reply["audio_samples"] == 32000 + n
+        assert reply["prompt_ids_sha256"] == runner.fingerprint(requests[n]["ids"])
+        assert reply["batch_size"] == 3 and reply["batch_id"] == 0
