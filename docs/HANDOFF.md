@@ -1,5 +1,17 @@
 # 工作交接记录
 
+## 0.248 2026-11-24 中文七组下游流式 delivery（2,411 词联合库）
+
+对应 0.244 的 480h 中英 Head（183 类、epoch 25）。工区完成七组评测后，在原项目环境运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/export_zh_light_delivery.py
+```
+
+**交下游**：`outputs/zh_en183_480_joint2411_zh7_v1/delivery.zip`。包内沿用 `delivery/stream_contexts.json`、`delivery/audio_manifest.json`、`delivery/durations.json`。使用门控后的 Top5/Top7，每 2 秒一组同一步候选，含句尾，空列表亦保留。音频清单使用工区路径，不含参考目标、音频文件或 ASR 转写。七组为 AISHELL 全集及关键词子集、中文智慧家庭 v1/v2/n1/n2、新增的 `zh-light-hotwords`；全集和子集各有独立键，合计效果不要重复计入子集。
+
+导出只读取原评测用的音频/标注及本轮逐前缀缓存；核对清单、模型、词表和缓存身份，按组复核报告计数，再做下游格式校验及 ZIP 校验。无需 GPU 或重跑推理。中断后重复同一命令；不覆盖不同内容的同名包。缺完成报告先按 0.244 完成评测。本地仅验证导出逻辑，实际条数以工区输出为准。工区可用 `unzip -l outputs/zh_en183_480_joint2411_zh7_v1/delivery.zip` 核对三个成员；如需回传核对，贴终端的“流式格式验证”和“请发给下游”两行即可。
+
 ## 0.247 2026-11-23 埃及阿语三组动态Prompt流式端到端模拟（待工区）
 
 用户授权沿用新EGY ×3 epoch29、r15、原始2078条音频和383词表，执行无RAG/Top5/Top7
