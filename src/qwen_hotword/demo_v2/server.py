@@ -18,21 +18,28 @@ from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
-from qwen_hotword.demo.runtime import CHUNK
-from qwen_hotword.demo_v2.session import SharedStudio
 from qwen_hotword.training.stage_progress import stage_progress
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--gpu", default=3, type=int, help="物理 GPU 卡号，默认 3")
     parser.add_argument("--port", default=8765, type=int)
     parser.add_argument(
         "--max-cases", default=150, type=int, help="每次自动验证的候选上限；0=仅麦克风"
     )
     parser.add_argument("--bind", default="0.0.0.0")
     args = parser.parse_args()
+    if args.gpu < 0:
+        parser.error("--gpu 必须为非负整数")
     if args.max_cases < 0:
         parser.error("--max-cases 必须为非负整数")
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    # Set visibility before importing the inference stack or spawning the Decoder.
+    from qwen_hotword.demo.runtime import CHUNK
+    from qwen_hotword.demo_v2.session import SharedStudio
+
     # Don't initialize CUDA and run a search only to discover an occupied port.
     with socket.socket() as probe:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -46,8 +53,8 @@ def main() -> None:
     session = ""
     seen = 0.0
     print("本次输出：", out, flush=True)
-    with stage_progress("验证资产，加载 GPU 3 检索与双路共享的语音解码模型"):
-        demo = SharedStudio(root, out, 3, Path(os.environ["DEMO_DECODER_PY"]))
+    with stage_progress(f"验证资产，加载 GPU {args.gpu} 检索与双路共享的语音解码模型"):
+        demo = SharedStudio(root, out, args.gpu, Path(os.environ["DEMO_DECODER_PY"]))
     try:
         if args.max_cases > 0:
             with (
@@ -67,7 +74,7 @@ def main() -> None:
             json.dumps(
                 dict(
                     status="ready",
-                    gpu=3,
+                    gpu=args.gpu,
                     checkpoint_sha256=demo.checkpoint,
                     epoch=25,
                     classes=183,

@@ -1,5 +1,26 @@
 # 工作交接记录
 
+## 0.249 2026-11-25 Demo v2 支持指定物理 GPU
+
+启动入口新增 `--gpu`，默认仍为3；不再在Shell和服务中固定使用3卡。
+在导入推理模块前设置CUDA可见卡，检索显存检查、Decoder子进程、日志及startup.json
+使用同一指定物理卡，进程内仍为cuda:0。不会停止其他GPU任务。
+
+工区在原环境执行（示例改用物理5卡，可替换数字）：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+bash scripts/start_zh_rag_demo_v2.sh --gpu 5
+```
+
+原Demo若仍占用8765端口，先在它的终端Ctrl+C退出；需保留并行服务则加`--port 8766`，
+按新启动日志设置SSH转发。选卡不会改变模型、词表或选例规则，已验证样例按原身份复用，
+无需resume。每次启动生成新的`outputs/zh_rag_demo_v2_*/`，会话历史从新场次开始。
+检查启动日志物理卡号及本次目录`startup.json`中的gpu字段；需回传仅提供该小文件。
+本地Demo相关7通过、1依赖跳过；Ruff、Mypy、Shell语法及空白检查通过。
+未在本地执行H200推理；所选卡仍须满足原有55GiB空闲显存要求。
+
 ## 0.248 2026-11-24 中文七组下游流式 delivery（2,411 词联合库）
 
 对应 0.244 的 480h 中英 Head（183 类、epoch 25）。工区完成七组评测后，在原项目环境运行：

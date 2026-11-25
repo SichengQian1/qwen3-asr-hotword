@@ -1,14 +1,64 @@
 """Ensure mic continuity, acoustic identity and bounded verified-only cache reuse."""
 
+import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from qwen_hotword.demo_v2 import runtime
 from qwen_hotword.phonemes.mfa_v03_assets import sha, write_json
 from qwen_hotword.training.zh_en_common import digest, save_rows
+
+
+@pytest.mark.parametrize("gpu_args,expected", [([], 3), (["--gpu", "5"], 5)])
+def test_server_gpu_selection_reaches_runtime_and_startup(
+    monkeypatch, tmp_path, gpu_args, expected
+):
+    from qwen_hotword.demo_v2 import server, session
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "7")
+    monkeypatch.setenv("DEMO_DECODER_PY", "/existing/python")
+    monkeypatch.setattr(sys, "argv", ["demo", "--max-cases", "0", *gpu_args])
+    monkeypatch.setattr(server.socket, "socket", lambda: MagicMock())
+    demo = MagicMock()
+    demo.clips = []
+    demo.checked = set()
+    demo.checkpoint = "checkpoint"
+
+    def load(root, out, gpu, decoder):
+        assert gpu == expected
+        assert os.environ["CUDA_VISIBLE_DEVICES"] == str(expected)
+        assert os.environ["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+        assert decoder == Path("/existing/python")
+        return demo
+
+    monkeypatch.setattr(session, "SharedStudio", load)
+
+    def stop_before_http(*args):
+        raise RuntimeError("test startup finished")
+
+    monkeypatch.setattr(server, "ThreadingHTTPServer", stop_before_http)
+    with pytest.raises(RuntimeError, match="test startup finished"):
+        server.main()
+    startup = next(tmp_path.glob("outputs/zh_rag_demo_v2_*/startup.json"))
+    assert json.loads(startup.read_text())["gpu"] == expected
+    demo.close.assert_called_once()
+
+
+def test_server_rejects_negative_gpu_before_loading(monkeypatch, tmp_path):
+    from qwen_hotword.demo_v2 import server
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["demo", "--gpu", "-1"])
+    with pytest.raises(SystemExit) as error:
+        server.main()
+    assert error.value.code == 2
+    assert not (tmp_path / "outputs").exists()
 
 
 def studio():
