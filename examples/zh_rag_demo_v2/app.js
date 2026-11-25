@@ -1,16 +1,16 @@
 'use strict';
 const el=id=>document.getElementById(id), status=t=>el('status').textContent=t;
-let token=location.hash.slice(1)||sessionStorage.getItem('demo-token')||'', info, busy=false, sid='', seq=0, stream, ctx,node,source;
+let info, busy=false, sid='', seq=0, stream, ctx,node,source;
 let vocabulary={words:[],extras:[]}, vocabularyRenderKey='';
 let tail=new Int16Array(0), chain=Promise.resolve(), total=0, recording=false, fail=null;
 async function req(path,body={},headers={}){
  const binary=body instanceof Int16Array;
- const r=await fetch(path,{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':binary?'application/octet-stream':'application/json',...headers},body:binary?body:JSON.stringify(body)});
+ const r=await fetch(path,{method:'POST',headers:{'Content-Type':binary?'application/octet-stream':'application/json',...headers},body:binary?body:JSON.stringify(body)});
  if(!r.ok){let err;try{err=(await r.json()).error}catch{}throw Error(err||('HTTP '+r.status))}
  return path==='/clip'?new Int16Array(await r.arrayBuffer()):r.json();
 }
 function controls(){for(const id of ['mic','add','samples','word'])el(id).disabled=busy||!info||info.occupied;el('play').disabled=busy||!info||info.occupied||!info.replayable;el('stop').disabled=!recording;el('mic').disabled=busy||!info||info.occupied||info.selected>=0;document.querySelectorAll('#extras button').forEach(b=>b.disabled=busy||info?.occupied);}
-async function sync(){info=await req('/state');vocabulary=await req('/vocabulary');drawVocabulary();el('login').hidden=true;el('shared').textContent=info.occupied?'有人正在录音或识别，请稍候再操作。':'共享操作台 · 当前空闲 · 热词与历史共用，请轮流录音';el('samples').replaceChildren(new Option('自由麦克风',-1),...info.clips.map((c,i)=>new Option(`实测样例 ${i+1} · ${c.word} · ${c.source} · ${c.seconds.toFixed(1)} 秒`,i)));el('samples').value=info.selected;const c=info.clips[info.selected];el('hint').textContent=c?`本段目标：${c.word} · ${Object.hasOwn(info.extras,c.word)?'已加入本场词库':'尚未加入本场词库'}`:'输入中文人名、地名或品牌，下一段音频生效。';el('online').textContent=`GPU ${info.gpu} 已连接 · ${info.size} 个热词`;draw();controls();}
+async function sync(){info=await req('/state');vocabulary=await req('/vocabulary');drawVocabulary();el('shared').textContent=info.occupied?'有人正在录音或识别，请稍候再操作。':'共享操作台 · 当前空闲 · 热词与历史共用，请轮流录音';el('samples').replaceChildren(new Option('自由麦克风',-1),...info.clips.map((c,i)=>new Option(`实测样例 ${i+1} · ${c.word} · ${c.source} · ${c.seconds.toFixed(1)} 秒`,i)));el('samples').value=info.selected;const c=info.clips[info.selected];el('hint').textContent=c?`本段目标：${c.word} · ${Object.hasOwn(info.extras,c.word)?'已加入本场词库':'尚未加入本场词库'}`:'输入中文人名、地名或品牌，下一段音频生效。';el('online').textContent=`GPU ${info.gpu} 已连接 · ${info.size} 个热词`;draw();controls();}
 let micFocus='';
 function tag(parent,name,text,cls=''){const n=document.createElement(name);n.textContent=text;if(cls)n.className=cls;parent.append(n);return n}
 function draw(){
@@ -71,9 +71,7 @@ function drawVocabulary(){
  if(!matches.length)tag(list,'small','没有匹配的热词');
 }
 el('word-query').oninput=drawVocabulary;
-async function connect(){token=el('access-token').value.trim()||token;if(!token){status('请输入共享访问口令');return}try{await sync();sessionStorage.setItem('demo-token',token);el('access-token').value='';el('word').value=info.clips[info.selected]?.word||micFocus;status('已就绪 · 可开始录音')}catch(e){el('login').hidden=false;status(e.message)}}
-el('connect').onclick=connect;
-el('access-token').onkeydown=e=>{if(e.key==='Enter')connect()};
-if(token)connect();else{draw();controls();status('请输入访问口令进入共享操作台')}
+async function connect(){try{await sync();el('word').value=info.clips[info.selected]?.word||micFocus;status('已就绪 · 可开始录音')}catch(e){status(e.message)}}
+connect();
 let refreshing=false;
-setInterval(async()=>{if(!token||!info||busy||refreshing||document.hidden)return;refreshing=true;try{await sync()}catch(e){status(e.message)}finally{refreshing=false}},5000);
+setInterval(async()=>{if(busy||refreshing||document.hidden)return;refreshing=true;try{await sync()}catch(e){status(e.message)}finally{refreshing=false}},5000);

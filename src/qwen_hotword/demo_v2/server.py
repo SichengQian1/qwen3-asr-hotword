@@ -1,10 +1,9 @@
-"""One control session and a private recording URL."""
+"""Shared LAN console with one active recording at a time."""
 
 from __future__ import annotations
 
 import argparse
 import fcntl
-import hmac
 import json
 import os
 import secrets
@@ -63,7 +62,6 @@ def main() -> None:
     static = root / "examples/zh_rag_demo_v2"
     (root / "outputs").mkdir(exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix="zh_rag_demo_v2_", dir=root / "outputs"))
-    token = secrets.token_urlsafe(24)
     lock = Lock()
     session = ""
     seen = 0.0
@@ -140,11 +138,6 @@ def main() -> None:
 
             def do_POST(self) -> None:
                 nonlocal session, seen
-                if not hmac.compare_digest(
-                    self.headers.get("Authorization", ""), "Bearer " + token
-                ):
-                    self.send({"error": "请打开终端输出的完整专属地址"}, 403)
-                    return
                 with lock:
                     try:
                         op = self.path
@@ -221,8 +214,7 @@ def main() -> None:
                     encoding="utf-8",
                 )
                 print(
-                    f"内网访问：https://{args.public_host}:{args.port}/\n访问口令：{token}\n"
-                    f"也可分享完整链接：https://{args.public_host}:{args.port}/#{token}\n"
+                    f"内网访问：https://{args.public_host}:{args.port}/（直接进入，无访问口令）\n"
                     "若容器无端口映射，在宿主机另开终端执行：\n"
                     f"python3 scripts/expose_zh_rag_demo.py --container {socket.gethostname()} "
                     f"--host-ip {args.public_host} --port {args.port}",
@@ -233,7 +225,7 @@ def main() -> None:
                 print(
                     f"已就绪：实测录屏样例 {len(demo.clips)} 条。\n"
                     f"电脑端单独开终端：ssh -N -L {args.port}:{ip}:{args.port} star@starpc\n"
-                    f"浏览器打开：http://localhost:{args.port}/#{token}",
+                    f"浏览器打开：http://localhost:{args.port}/",
                     flush=True,
                 )
             http.serve_forever()

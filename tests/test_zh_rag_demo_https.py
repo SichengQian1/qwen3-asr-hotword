@@ -1,4 +1,4 @@
-"""Exercise trusted TLS and shared-operation API without GPU/model dependencies."""
+"""Exercise TLS and password-free shared-operation API without model dependencies."""
 
 import json
 import os
@@ -17,7 +17,7 @@ from qwen_hotword.demo_v2 import server, session
 from qwen_hotword.demo_v2.https import certificate_context
 
 
-def test_tls_shared_console_auth_words_and_recording_lock(monkeypatch, tmp_path):
+def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp_path):
     directory = tmp_path / "outputs/demo_tls"
     certificate_context(directory, "127.0.0.1")
     original = (directory / "127.0.0.1.crt").read_bytes()
@@ -41,7 +41,7 @@ def test_tls_shared_console_auth_words_and_recording_lock(monkeypatch, tmp_path)
     demo.checkpoint = "checkpoint"
     demo.snapshot.return_value = {"selected": -1}
     monkeypatch.setattr(session, "SharedStudio", lambda *_: demo)
-    monkeypatch.setattr(server.secrets, "token_urlsafe", lambda _: "access-token")
+    monkeypatch.setattr(server.secrets, "token_urlsafe", lambda _: "recording-session")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DEMO_DECODER_PY", sys.executable)
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "7")
@@ -90,19 +90,16 @@ def test_tls_shared_console_auth_words_and_recording_lock(monkeypatch, tmp_path)
         urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context)
     )
 
-    def request(path, payload=None, token="access-token", **headers):
+    def request(path, payload=None, **headers):
         req = urllib.request.Request(
             f"https://127.0.0.1:{port}" + path,
             data=json.dumps(payload or {}).encode(),
-            headers={"Authorization": "Bearer " + token, **headers},
+            headers=headers,
         )
         with opener.open(req, timeout=5) as reply:
             return json.load(reply)
 
     try:
-        with pytest.raises(urllib.error.HTTPError) as invalid:
-            request("/vocabulary", token="wrong")
-        assert invalid.value.code == 403
         assert request("/vocabulary") == {"words": ["北京", "新热词"], "extras": ["新热词"]}
         assert request("/state") == {"selected": -1, "occupied": False, "gpu": 5}
         request("/start", {"kind": "mic"})
@@ -110,7 +107,11 @@ def test_tls_shared_console_auth_words_and_recording_lock(monkeypatch, tmp_path)
         with pytest.raises(urllib.error.HTTPError) as occupied:
             request("/start", {"kind": "mic"})
         assert occupied.value.code == 409
-        request("/abort", **{"X-Session": "access-token"})
+        with pytest.raises(urllib.error.HTTPError) as invalid_session:
+            request("/abort", **{"X-Session": "someone-else"})
+        assert invalid_session.value.code == 400
+        assert request("/state")["occupied"]
+        request("/abort", **{"X-Session": "recording-session"})
         assert not request("/state")["occupied"]
         demo.hunt.assert_not_called()
         demo.select.assert_called_once_with(-1)
