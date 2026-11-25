@@ -24,9 +24,13 @@ from qwen_hotword.training.stage_progress import stage_progress
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", default=3, type=int, help="物理 GPU 卡号，默认 3")
+    parser.add_argument("--https", action="store_true", help="开启HTTPS，默认自动生成内网证书")
+    parser.add_argument("--public-host", default="10.44.168.92")
+    parser.add_argument("--tls-cert", type=Path)
+    parser.add_argument("--tls-key", type=Path)
     parser.add_argument("--port", default=8765, type=int)
     parser.add_argument(
-        "--max-cases", default=150, type=int, help="每次自动验证的候选上限；0=仅麦克风"
+        "--max-cases", default=0, type=int, help="每次自动验证的候选上限；0=仅麦克风（默认）"
     )
     parser.add_argument("--bind", default="0.0.0.0")
     args = parser.parse_args()
@@ -34,6 +38,10 @@ def main() -> None:
         parser.error("--gpu 必须为非负整数")
     if args.max_cases < 0:
         parser.error("--max-cases 必须为非负整数")
+    if not 1 <= args.port <= 65535:
+        parser.error("--port 必须为1到65535")
+    if (args.tls_cert or args.tls_key) and not args.https:
+        parser.error("指定证书时必须加 --https")
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     # Set visibility before importing the inference stack or spawning the Decoder.
@@ -45,6 +53,13 @@ def main() -> None:
         probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind((args.bind, args.port))
     root = Path.cwd()
+    tls = None
+    if args.https:
+        from qwen_hotword.demo_v2.https import certificate_context
+
+        tls = certificate_context(
+            root / "outputs/demo_tls", args.public_host, args.tls_cert, args.tls_key
+        )
     static = root / "examples/zh_rag_demo_v2"
     (root / "outputs").mkdir(exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix="zh_rag_demo_v2_", dir=root / "outputs"))
@@ -65,16 +80,16 @@ def main() -> None:
                 demo.hunt(args.max_cases)
         demo.configure("", {})
         demo.init_studio()
-        if demo.clips:
-            demo.select(0)
-        else:
-            print("本次未验证出成功样例；麦克风仍可使用。", flush=True)
+        demo.select(-1)
+        print("默认进入自由麦克风；同事共享热词和历史，轮流录音。", flush=True)
 
         (out / "startup.json").write_text(
             json.dumps(
                 dict(
                     status="ready",
                     gpu=args.gpu,
+                    https=args.https,
+                    public_url=f"https://{args.public_host}:{args.port}/" if tls else None,
                     checkpoint_sha256=demo.checkpoint,
                     epoch=25,
                     classes=183,
@@ -144,6 +159,12 @@ def main() -> None:
                             session = ""
                         if op == "/state":
                             result = demo.snapshot()
+                            result.update(gpu=args.gpu, occupied=bool(session))
+                        elif op == "/vocabulary":
+                            result = {
+                                "words": sorted({e.surface for e in demo.entries}),
+                                "extras": sorted(demo.extras),
+                            }
                         elif op == "/clip":
                             self.send(demo.replay(), mime="application/octet-stream")
                             return
@@ -186,13 +207,35 @@ def main() -> None:
                         self.send({"error": str(exc)}, 400)
 
         with ThreadingHTTPServer((args.bind, args.port), Handler) as http:
-            ip = socket.gethostbyname(socket.gethostname())
-            print(
-                f"已就绪：实测录屏样例 {len(demo.clips)} 条。\n"
-                f"电脑端单独开终端：ssh -N -L {args.port}:{ip}:{args.port} star@starpc\n"
-                f"浏览器打开：http://localhost:{args.port}/#{token}",
-                flush=True,
-            )
+            if tls:
+                http.socket = tls.wrap_socket(http.socket, server_side=True)
+                (root / "outputs/demo_https_endpoint.json").write_text(
+                    json.dumps(
+                        {
+                            "container": socket.gethostname(),
+                            "host": args.public_host,
+                            "port": args.port,
+                            "output_dir": str(out),
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                print(
+                    f"内网访问：https://{args.public_host}:{args.port}/\n访问口令：{token}\n"
+                    f"也可分享完整链接：https://{args.public_host}:{args.port}/#{token}\n"
+                    "若容器无端口映射，在宿主机另开终端执行：\n"
+                    f"python3 scripts/expose_zh_rag_demo.py --container {socket.gethostname()} "
+                    f"--host-ip {args.public_host} --port {args.port}",
+                    flush=True,
+                )
+            if not tls:
+                ip = socket.gethostbyname(socket.gethostname())
+                print(
+                    f"已就绪：实测录屏样例 {len(demo.clips)} 条。\n"
+                    f"电脑端单独开终端：ssh -N -L {args.port}:{ip}:{args.port} star@starpc\n"
+                    f"浏览器打开：http://localhost:{args.port}/#{token}",
+                    flush=True,
+                )
             http.serve_forever()
     finally:
         demo.close()

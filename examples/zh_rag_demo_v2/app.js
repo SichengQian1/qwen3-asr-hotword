@@ -1,6 +1,7 @@
 'use strict';
 const el=id=>document.getElementById(id), status=t=>el('status').textContent=t;
-let token=location.hash.slice(1), info, busy=false, sid='', seq=0, stream, ctx,node,source;
+let token=location.hash.slice(1)||sessionStorage.getItem('demo-token')||'', info, busy=false, sid='', seq=0, stream, ctx,node,source;
+let vocabulary={words:[],extras:[]}, vocabularyRenderKey='';
 let tail=new Int16Array(0), chain=Promise.resolve(), total=0, recording=false, fail=null;
 async function req(path,body={},headers={}){
  const binary=body instanceof Int16Array;
@@ -8,8 +9,8 @@ async function req(path,body={},headers={}){
  if(!r.ok){let err;try{err=(await r.json()).error}catch{}throw Error(err||('HTTP '+r.status))}
  return path==='/clip'?new Int16Array(await r.arrayBuffer()):r.json();
 }
-function controls(){for(const id of ['mic','add','samples','word'])el(id).disabled=busy||!info;el('play').disabled=busy||!info||!info.replayable;el('stop').disabled=!recording;el('mic').disabled=busy||!info||info.selected>=0;document.querySelectorAll('#extras button').forEach(b=>b.disabled=busy);}
-async function sync(){info=await req('/state');el('samples').replaceChildren(new Option('自由麦克风',-1),...info.clips.map((c,i)=>new Option(`实测样例 ${i+1} · ${c.word} · ${c.source} · ${c.seconds.toFixed(1)} 秒`,i)));el('samples').value=info.selected;const c=info.clips[info.selected];el('hint').textContent=c?`本段目标：${c.word} · ${Object.hasOwn(info.extras,c.word)?'已加入本场词库':'尚未加入本场词库'}`:'输入中文人名、地名或品牌，下一段音频生效。';el('online').textContent=`GPU 3 已连接 · ${info.size} 个热词`;draw();controls();}
+function controls(){for(const id of ['mic','add','samples','word'])el(id).disabled=busy||!info||info.occupied;el('play').disabled=busy||!info||info.occupied||!info.replayable;el('stop').disabled=!recording;el('mic').disabled=busy||!info||info.occupied||info.selected>=0;document.querySelectorAll('#extras button').forEach(b=>b.disabled=busy||info?.occupied);}
+async function sync(){info=await req('/state');vocabulary=await req('/vocabulary');drawVocabulary();el('login').hidden=true;el('shared').textContent=info.occupied?'有人正在录音或识别，请稍候再操作。':'共享操作台 · 当前空闲 · 热词与历史共用，请轮流录音';el('samples').replaceChildren(new Option('自由麦克风',-1),...info.clips.map((c,i)=>new Option(`实测样例 ${i+1} · ${c.word} · ${c.source} · ${c.seconds.toFixed(1)} 秒`,i)));el('samples').value=info.selected;const c=info.clips[info.selected];el('hint').textContent=c?`本段目标：${c.word} · ${Object.hasOwn(info.extras,c.word)?'已加入本场词库':'尚未加入本场词库'}`:'输入中文人名、地名或品牌，下一段音频生效。';el('online').textContent=`GPU ${info.gpu} 已连接 · ${info.size} 个热词`;draw();controls();}
 let micFocus='';
 function tag(parent,name,text,cls=''){const n=document.createElement(name);n.textContent=text;if(cls)n.className=cls;parent.append(n);return n}
 function draw(){
@@ -18,7 +19,7 @@ function draw(){
  for(const [w,phones] of Object.entries(extras)){
    const row=tag(list,'div','','hot');tag(row,'b',w);tag(row,'small',phones);
    tag(row,'span',info.overrides.includes(w)?'已生效 · 覆盖基础读音':'已生效','feedback');
-   const btn=tag(row,'button','移除');btn.disabled=busy;btn.onclick=()=>action(async()=>{
+   const btn=tag(row,'button','移除');btn.disabled=busy||info?.occupied;btn.onclick=()=>action(async()=>{
      const res=await req('/remove',{word:w});if(info.selected<0)micFocus=w;await sync();
      status(res.background?'已移除临时配置 · 已恢复背景词库读音':'已移除 · 可重播同一句');});
  }
@@ -57,5 +58,22 @@ el('add').onclick=()=>action(async()=>{status('正在转换发音并更新检索
 el('play').onclick=()=>action(async()=>{ctx=new AudioContext({sampleRate:16000});try{await ctx.resume();const pcm=await req('/clip');await begin('replay');const b=ctx.createBuffer(1,pcm.length,16000), f=b.getChannelData(0);pcm.forEach((v,i)=>f[i]=v/32768);source=ctx.createBufferSource();source.buffer=b;source.connect(ctx.destination);const start=ctx.currentTime;source.start();for(let off=0;off<pcm.length;off+=32000){let end=Math.min(off+32000,pcm.length);await new Promise(r=>setTimeout(r,Math.max(0,(start+end/16000-ctx.currentTime)*1000)));await chunk(pcm.slice(off,end),end===pcm.length)}}finally{release()}});
 let stopRecording=()=>{};
 el('stop').onclick=()=>stopRecording();
-el('mic').onclick=()=>action(async()=>{if(!navigator.mediaDevices?.getUserMedia)throw Error('请从电脑的 localhost 地址访问并允许麦克风');try{ctx=new AudioContext({sampleRate:16000});await ctx.resume();if(ctx.sampleRate!==16000)throw Error('请使用支持 16 kHz 采集的 Chrome 或 Edge');stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});await ctx.audioWorklet.addModule('/mic.js');source=ctx.createMediaStreamSource(stream);node=new AudioWorkletNode(ctx,'pcm-input');const mute=ctx.createGain();mute.gain.value=0;node.connect(mute).connect(ctx.destination);await begin('mic');recording=true;controls();await new Promise(resolve=>{stopRecording=()=>{if(recording){recording=false;controls();resolve()}};node.port.onmessage=({data})=>{if(!recording)return;const n=Math.min(data.length,480000-total),next=new Int16Array(tail.length+n);next.set(tail);for(let i=0;i<n;i++)next[tail.length+i]=Math.max(-32768,Math.min(32767,Math.round(data[i]*32768)));total+=n;tail=next;if(tail.length>=32000){const p=tail.slice(0,32000);tail=tail.slice(32000);chain=chain.then(()=>{if(!fail)return chunk(p,false)}).catch(e=>{fail=e;stopRecording()})}if(total>=480000)stopRecording()};source.connect(node)});release();await chain;if(fail)throw fail;if(!total)throw Error('没有收到音频');await chunk(tail,true)}finally{release()}});
-if(token){sync().then(()=>{el('word').value=info.clips[info.selected]?.word||micFocus;status('已就绪')}).catch(e=>status(e.message))}else{draw();controls();status('静态预览 · 工区启动后可录音')}
+el('mic').onclick=()=>action(async()=>{if(!navigator.mediaDevices?.getUserMedia)throw Error('请使用已信任证书的 HTTPS 地址访问，并允许麦克风权限');try{ctx=new AudioContext({sampleRate:16000});await ctx.resume();if(ctx.sampleRate!==16000)throw Error('请使用支持 16 kHz 采集的 Chrome 或 Edge');stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});await ctx.audioWorklet.addModule('/mic.js');source=ctx.createMediaStreamSource(stream);node=new AudioWorkletNode(ctx,'pcm-input');const mute=ctx.createGain();mute.gain.value=0;node.connect(mute).connect(ctx.destination);await begin('mic');recording=true;controls();await new Promise(resolve=>{stopRecording=()=>{if(recording){recording=false;controls();resolve()}};node.port.onmessage=({data})=>{if(!recording)return;const n=Math.min(data.length,480000-total),next=new Int16Array(tail.length+n);next.set(tail);for(let i=0;i<n;i++)next[tail.length+i]=Math.max(-32768,Math.min(32767,Math.round(data[i]*32768)));total+=n;tail=next;if(tail.length>=32000){const p=tail.slice(0,32000);tail=tail.slice(32000);chain=chain.then(()=>{if(!fail)return chunk(p,false)}).catch(e=>{fail=e;stopRecording()})}if(total>=480000)stopRecording()};source.connect(node)});release();await chain;if(fail)throw fail;if(!total)throw Error('没有收到音频');await chunk(tail,true)}finally{release()}});
+function drawVocabulary(){
+ const q=el('word-query').value.trim(), normalized=q.toLocaleLowerCase();
+ const renderKey=JSON.stringify([q,vocabulary]);if(renderKey===vocabularyRenderKey)return;vocabularyRenderKey=renderKey;
+ const matches=vocabulary.words.filter(w=>w.toLocaleLowerCase().includes(normalized));
+ const exact=vocabulary.words.some(w=>w.toLocaleLowerCase()===normalized);
+ el('word-count').textContent=`${vocabulary.words.length} 词`;
+ el('query-status').textContent=q?`${exact?'已存在该热词':'未找到完全相同的热词'} · ${matches.length} 个包含匹配`:`共 ${matches.length} 词 · 上下滚动查看，拖动底边可调整高度`;
+ const list=el('word-list');list.replaceChildren();
+ for(const w of matches){const row=tag(list,'div','','word-row');tag(row,'span',w);if(vocabulary.extras.includes(w))tag(row,'small','本场配置')}
+ if(!matches.length)tag(list,'small','没有匹配的热词');
+}
+el('word-query').oninput=drawVocabulary;
+async function connect(){token=el('access-token').value.trim()||token;if(!token){status('请输入共享访问口令');return}try{await sync();sessionStorage.setItem('demo-token',token);el('access-token').value='';el('word').value=info.clips[info.selected]?.word||micFocus;status('已就绪 · 可开始录音')}catch(e){el('login').hidden=false;status(e.message)}}
+el('connect').onclick=connect;
+el('access-token').onkeydown=e=>{if(e.key==='Enter')connect()};
+if(token)connect();else{draw();controls();status('请输入访问口令进入共享操作台')}
+let refreshing=false;
+setInterval(async()=>{if(!token||!info||busy||refreshing||document.hidden)return;refreshing=true;try{await sync()}catch(e){status(e.message)}finally{refreshing=false}},5000);

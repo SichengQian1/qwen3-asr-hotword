@@ -1,5 +1,40 @@
 # 工作交接记录
 
+## 0.250 2026-11-25 Demo v2 内网HTTPS、麦克风默认与词表侧栏
+
+用户要求同事在10.44.168.92直接HTTPS录音，保持共享操作台轮流使用。
+新增HTTPS入口（默认8444避开同事8443，可用--port覆盖），GPU仍自选。
+默认max-cases=0，不运行案例筛选，进入自由麦克风。右侧展示当前有效热词表，
+支持滚动/调高、包含搜索/完全存在提示、显示本场新增配置；显示实际GPU，取消写死GPU3。
+空闲页面轮询共享状态，录音互斥继续由服务端执行；普通IP网址支持输入共享口令进入。
+
+分支`codex/g2p-coverage-scan`，容器内：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan
+bash scripts/start_zh_rag_demo_https.sh --gpu 5 --port 8444
+```
+
+等待内网访问提示后，宿主机另开终端：
+
+```bash
+cd /home/star/q00933266/qwen3-asr-hotword
+python3 scripts/expose_zh_rag_demo.py
+```
+
+转发程序读取本次outputs/demo_https_endpoint.json与Docker实际容器IP，不重建容器、不动挂载。
+host网络提示无需转发；已有同端口映射也无需重复代理。两个终端保持运行。
+自动证书模式首次需同事导入公开outputs/demo_ca.crt信任为根证书，然后访问
+https://10.44.168.92:8444/，输入终端访问口令并允许麦克风；不可传递demo_tls中的私钥。
+可用--tls-cert/--tls-key接公司证书。使用公司域名时加--public-host，自动生成仅支持IP。
+每次独立输出zh_rag_demo_v2_*，历史输出/模型/词表算法不动；重启更换口令，无需resume。
+核验本次startup.json的gpu/https/public_url/case_limit=0，回传该小文件及必要错误日志。
+详细部署、信任证书、端口说明见[DEMO_V2_HTTPS.md](DEMO_V2_HTTPS.md)。
+本地相关9通过、1依赖跳过；真实TLS握手/信任验证、API鉴权、共享占用锁、TCP透传通过，
+桌面/窄屏浏览器搜索及滚动已检查（使用模拟数据）。Ruff/Mypy/Shell语法检查通过。
+未执行H200推理或改动真实宿主机网络；工区需验证内网端口与客户端证书信任。
+
 ## 0.249 2026-11-25 Demo v2 支持指定物理 GPU
 
 启动入口新增 `--gpu`，默认仍为3；不再在Shell和服务中固定使用3卡。
