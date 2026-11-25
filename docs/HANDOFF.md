@@ -1,5 +1,40 @@
 # 工作交接记录
 
+## 0.253 2026-11-25 英语／埃及阿语音素标注下游交接
+
+新增`docs/EN_AR_PHONEME_DOWNSTREAM_HANDOFF_2026-11-25.md`，记录当前实际
+前端、环境、固定模型、167类ID表、单条及批量调用、失败处理和版本身份。
+本次仅交付文档，不修改标注、词表、模型和训练结果。
+英语仍为固定MFA G2P 3.3.0 Top1；阿语为CALIMA EGY r13逐词MLE Top1
+加`arabic_pronunciation_policy.json`当前规则。说明未启用连读规则、候选例外
+隔离和未完成人工发音验收，不把计划项写成已完成。
+
+分支`codex/g2p-coverage-scan`。已有容器内执行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword
+conda activate qwen3-asr-hotword
+git pull --ff-only origin codex/g2p-coverage-scan &&
+python -B scripts/run_arabic_pronunciation_refresh.py query \
+  --group ar_egy --mode isolated --text 'بيت'
+```
+
+其余批量命令见新文档第4.4、5.3节；均为CPU文本标注，不启动训练或Encoder缓存。
+阿语实际在`models/arabic_native_v1/runtime/bin/python`中运行，英语worker在
+`aligner`环境。已有环境无需重装；缺失时仅用阿语脚本setup入口。
+单条查询显示日志和JSON；批量示例每次新建`outputs/downstream_ar_labels_*`
+或`outputs/downstream_en_labels_*`，不覆盖已有数据、不续跑旧训练。
+示例没有resume模式，大批量服务应复用同一前端实例并自行保存已完成业务ID。
+
+工区核验：词表SHA为`b337255bf239fdec3b4bdb0770bf39941fee74246336774c7ece8741d4534bf2`，
+成功英语ID在2–71、阿语ID在72–166；review结果不可进入有效索引。
+如需回传接入小样，仅返回`labels.jsonl`／`labels.json`和实际Git SHA，
+不传模型、全量清单或Encoder特征。
+
+本地39项阿语规则／前端单元测试通过；六个shell示例、内嵌Python语法、
+音素ID示例、英语前缀兼容及三份配置SHA核验通过。未在本地执行工区真实模型。
+本次无Python源码修改，不涉及新增类型／lint检查；空白检查通过。
+
 ## 0.252 2026-11-25 Demo v2 多网页会话隔离与并发接入
 
 每个网页自动生成独立会话，无口令；录音、文本、临时词及检索索引、重播、历史隔离。
