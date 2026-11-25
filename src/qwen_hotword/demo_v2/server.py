@@ -149,6 +149,7 @@ def main() -> None:
                             raise ValueError("音频传输中断")
                         params = {} if op == "/step" else json.loads(data or b"{}")
                         if session and time.monotonic() - seen > 120:
+                            demo.abort_pass()
                             session = ""
                         if op == "/state":
                             result = demo.snapshot()
@@ -159,7 +160,10 @@ def main() -> None:
                                 "extras": sorted(demo.extras),
                             }
                         elif op == "/clip":
-                            self.send(demo.replay(), mime="application/octet-stream")
+                            self.send(
+                                demo.replay_chunk(int(params.get("offset", 0))),
+                                mime="application/octet-stream",
+                            )
                             return
                         elif op in ("/start", "/add", "/remove", "/select") and session:
                             self.send({"error": "已有音频在识别，请先结束。"}, 409)
@@ -181,6 +185,7 @@ def main() -> None:
                             if not session or self.headers.get("X-Session") != session:
                                 raise ValueError("录音会话已失效")
                             if op == "/abort":
+                                demo.abort_pass()
                                 session = ""
                                 result = {}
                             else:

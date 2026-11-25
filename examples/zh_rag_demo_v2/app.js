@@ -55,10 +55,25 @@ async function abort(){release();if(sid)try{await req('/abort',{}, {'X-Session':
 async function action(fn){if(busy)return;busy=true;controls();try{await fn()}catch(e){await abort();status('未完成：'+e.message)}finally{busy=false;controls()}}
 el('samples').onchange=()=>action(async()=>{await req('/select',{i:+el('samples').value});await sync();el('word').value=info.clips[info.selected]?.word||micFocus;['phones','left','right','lr','rr','hits'].forEach(k=>el(k).textContent='');status('已切换音频 · 本场热词继续生效')});
 el('add').onclick=()=>action(async()=>{status('正在转换发音并更新检索索引…');const a=await req('/add',{word:el('word').value});if(info.selected<0)micFocus=a.word;el('phones').textContent=`${a.word} → ${a.phones}`;await sync();status('已入库 · 下一段语音生效')});
-el('play').onclick=()=>action(async()=>{ctx=new AudioContext({sampleRate:16000});try{await ctx.resume();const pcm=await req('/clip');await begin('replay');const b=ctx.createBuffer(1,pcm.length,16000), f=b.getChannelData(0);pcm.forEach((v,i)=>f[i]=v/32768);source=ctx.createBufferSource();source.buffer=b;source.connect(ctx.destination);const start=ctx.currentTime;source.start();for(let off=0;off<pcm.length;off+=32000){let end=Math.min(off+32000,pcm.length);await new Promise(r=>setTimeout(r,Math.max(0,(start+end/16000-ctx.currentTime)*1000)));await chunk(pcm.slice(off,end),end===pcm.length)}}finally{release()}});
+el('play').onclick=()=>action(async()=>{
+ ctx=new AudioContext({sampleRate:16000});
+ try{
+  await ctx.resume();await begin('replay');
+  const current=await req('/state'), bytes=current.replay_bytes;
+  for(let off=0;off<bytes;off+=64000){
+   const pcm=await req('/clip',{offset:off});
+   if(pcm.length!==Math.min(32000,(bytes-off)/2))throw Error('重播音频不完整');
+   const b=ctx.createBuffer(1,pcm.length,16000), f=b.getChannelData(0);
+   pcm.forEach((v,i)=>f[i]=v/32768);
+   source=ctx.createBufferSource();source.buffer=b;source.connect(ctx.destination);
+   const played=new Promise(resolve=>{source.onended=resolve});source.start();
+   await Promise.all([played,chunk(pcm,off+pcm.byteLength===bytes)]);
+  }
+ }finally{release()}
+});
 let stopRecording=()=>{};
 el('stop').onclick=()=>stopRecording();
-el('mic').onclick=()=>action(async()=>{if(!navigator.mediaDevices?.getUserMedia)throw Error('请使用已信任证书的 HTTPS 地址访问，并允许麦克风权限');try{ctx=new AudioContext({sampleRate:16000});await ctx.resume();if(ctx.sampleRate!==16000)throw Error('请使用支持 16 kHz 采集的 Chrome 或 Edge');stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});await ctx.audioWorklet.addModule('/mic.js');source=ctx.createMediaStreamSource(stream);node=new AudioWorkletNode(ctx,'pcm-input');const mute=ctx.createGain();mute.gain.value=0;node.connect(mute).connect(ctx.destination);await begin('mic');recording=true;controls();await new Promise(resolve=>{stopRecording=()=>{if(recording){recording=false;controls();resolve()}};node.port.onmessage=({data})=>{if(!recording)return;const n=Math.min(data.length,480000-total),next=new Int16Array(tail.length+n);next.set(tail);for(let i=0;i<n;i++)next[tail.length+i]=Math.max(-32768,Math.min(32767,Math.round(data[i]*32768)));total+=n;tail=next;if(tail.length>=32000){const p=tail.slice(0,32000);tail=tail.slice(32000);chain=chain.then(()=>{if(!fail)return chunk(p,false)}).catch(e=>{fail=e;stopRecording()})}if(total>=480000)stopRecording()};source.connect(node)});release();await chain;if(fail)throw fail;if(!total)throw Error('没有收到音频');await chunk(tail,true)}finally{release()}});
+el('mic').onclick=()=>action(async()=>{if(!navigator.mediaDevices?.getUserMedia)throw Error('请使用已信任证书的 HTTPS 地址访问，并允许麦克风权限');try{ctx=new AudioContext({sampleRate:16000});await ctx.resume();if(ctx.sampleRate!==16000)throw Error('请使用支持 16 kHz 采集的 Chrome 或 Edge');stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});await ctx.audioWorklet.addModule('/mic.js');source=ctx.createMediaStreamSource(stream);node=new AudioWorkletNode(ctx,'pcm-input');const mute=ctx.createGain();mute.gain.value=0;node.connect(mute).connect(ctx.destination);await begin('mic');recording=true;controls();await new Promise(resolve=>{stopRecording=()=>{if(recording){recording=false;controls();resolve()}};node.port.onmessage=({data})=>{if(!recording)return;const n=data.length,next=new Int16Array(tail.length+n);next.set(tail);for(let i=0;i<n;i++)next[tail.length+i]=Math.max(-32768,Math.min(32767,Math.round(data[i]*32768)));total+=n;tail=next;while(tail.length>=32000){const p=tail.slice(0,32000);tail=tail.slice(32000);chain=chain.then(()=>{if(!fail)return chunk(p,false)}).catch(e=>{fail=e;stopRecording()})}};source.connect(node)});release();status('正在处理剩余音频并定稿…');await chain;if(fail)throw fail;if(!total)throw Error('没有收到音频');await chunk(tail,true)}finally{release()}});
 function drawVocabulary(){
  const q=el('word-query').value.trim(), normalized=q.toLocaleLowerCase();
  const renderKey=JSON.stringify([q,vocabulary]);if(renderKey===vocabularyRenderKey)return;vocabularyRenderKey=renderKey;
