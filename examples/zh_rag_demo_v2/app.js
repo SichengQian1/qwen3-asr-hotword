@@ -1,16 +1,18 @@
 'use strict';
 const el=id=>document.getElementById(id), status=t=>el('status').textContent=t;
+let clientSession='';
 let info, busy=false, sid='', seq=0, stream, ctx,node,source;
 let vocabulary={words:[],extras:[]}, vocabularyRenderKey='';
 let tail=new Int16Array(0), chain=Promise.resolve(), total=0, recording=false, fail=null;
 async function req(path,body={},headers={}){
  const binary=body instanceof Int16Array;
- const r=await fetch(path,{method:'POST',headers:{'Content-Type':binary?'application/octet-stream':'application/json',...headers},body:binary?body:JSON.stringify(body)});
+ const r=await fetch(path,{method:'POST',headers:{'X-Client-Session':clientSession,'Content-Type':binary?'application/octet-stream':'application/json',...headers},body:binary?body:JSON.stringify(body)});
  if(!r.ok){let err;try{err=(await r.json()).error}catch{}throw Error(err||('HTTP '+r.status))}
  return path==='/clip'?new Int16Array(await r.arrayBuffer()):r.json();
 }
-function controls(){for(const id of ['mic','add','samples','word'])el(id).disabled=busy||!info||info.occupied;el('play').disabled=busy||!info||info.occupied||!info.replayable;el('stop').disabled=!recording;el('mic').disabled=busy||!info||info.occupied||info.selected>=0;document.querySelectorAll('#extras button').forEach(b=>b.disabled=busy||info?.occupied);}
-async function sync(){info=await req('/state');vocabulary=await req('/vocabulary');drawVocabulary();el('shared').textContent=info.occupied?'有人正在录音或识别，请稍候再操作。':'共享操作台 · 当前空闲 · 热词与历史共用，请轮流录音';el('samples').replaceChildren(new Option('自由麦克风',-1),...info.clips.map((c,i)=>new Option(`实测样例 ${i+1} · ${c.word} · ${c.source} · ${c.seconds.toFixed(1)} 秒`,i)));el('samples').value=info.selected;const c=info.clips[info.selected];el('hint').textContent=c?`本段目标：${c.word} · ${Object.hasOwn(info.extras,c.word)?'已加入本场词库':'尚未加入本场词库'}`:'输入中文人名、地名或品牌，下一段音频生效。';el('online').textContent=`GPU ${info.gpu} 已连接 · ${info.size} 个热词`;draw();controls();}
+function controls(){for(const id of ['mic','add','samples','word'])el(id).disabled=busy||!info||info.occupied;el('play').disabled=busy||!info||info.occupied||info.active_users>=info.max_active_users||!info.replayable;el('stop').disabled=!recording;el('mic').disabled=busy||!info||info.occupied||info.active_users>=info.max_active_users||info.selected>=0;document.querySelectorAll('#extras button').forEach(b=>b.disabled=busy||info?.occupied);}
+async function sync(){info=await req('/state');vocabulary=await req('/vocabulary');drawVocabulary();drawSessionStatus();el('samples').replaceChildren(new Option('自由麦克风',-1),...info.clips.map((c,i)=>new Option(`实测样例 ${i+1} · ${c.word} · ${c.source} · ${c.seconds.toFixed(1)} 秒`,i)));el('samples').value=info.selected;const c=info.clips[info.selected];el('hint').textContent=c?`本段目标：${c.word} · ${Object.hasOwn(info.extras,c.word)?'已加入本场词库':'尚未加入本场词库'}`:'输入中文人名、地名或品牌，下一段音频生效。';el('online').textContent=`GPU ${info.gpu} 已连接 · ${info.size} 个热词`;draw();controls();}
+function drawSessionStatus(){el('shared').textContent=`独立会话 · 录音、临时热词和历史仅本页面可见 · 正在录音 ${info.active_users}/${info.max_active_users} 人`}
 let micFocus='';
 function tag(parent,name,text,cls=''){const n=document.createElement(name);n.textContent=text;if(cls)n.className=cls;parent.append(n);return n}
 function draw(){
@@ -46,8 +48,8 @@ function draw(){
 
 }
 el('word').oninput=()=>{if(info&&info.selected<0){micFocus=el('word').value.trim();draw()}};
-function render(a){const focus=el('word').value.trim();for(const [k,rev] of [['left','lr'],['right','rr']]){const d=el(k),prev=d.textContent,t=a[k];let i=0;while(i<prev.length&&i<t.length&&prev[i]===t[i])i++;if(i<prev.length)el(rev).textContent='刚刚回改：'+prev.slice(i)+' → '+(t.slice(i)||'（删除）');d.replaceChildren();if(focus&&t.includes(focus)){t.split(focus).forEach((s,i)=>{if(i){let m=document.createElement('mark');m.textContent=focus;d.append(m)}d.append(s)})}else d.textContent=t;}
- const h=el('hits');h.replaceChildren();for(const c of a.candidates){const span=document.createElement('span');span.className='chip';span.textContent=`${c.word} · ${c.score.toFixed(2)}`;h.append(span)}if(!a.candidates.length)h.textContent='本步没有候选通过';status(`${a.final?'已定稿':'识别中'} · ${a.seconds.toFixed(1)} 秒`);}
+function render(a){if(info&&a.active_users!==undefined){info.active_users=a.active_users;info.max_active_users=a.max_active_users;drawSessionStatus()}const focus=el('word').value.trim();for(const [k,rev] of [['left','lr'],['right','rr']]){const d=el(k),prev=d.textContent,t=a[k];let i=0;while(i<prev.length&&i<t.length&&prev[i]===t[i])i++;if(i<prev.length)el(rev).textContent='刚刚回改：'+prev.slice(i)+' → '+(t.slice(i)||'（删除）');d.replaceChildren();if(focus&&t.includes(focus)){t.split(focus).forEach((s,i)=>{if(i){let m=document.createElement('mark');m.textContent=focus;d.append(m)}d.append(s)})}else d.textContent=t;}
+ const h=el('hits');h.replaceChildren();for(const c of a.candidates){const span=document.createElement('span');span.className='chip';span.textContent=`${c.word} · ${c.score.toFixed(2)}`;h.append(span)}if(!a.candidates.length)h.textContent='本步没有候选通过';status(`${a.final?'已定稿':'识别中'} · ${a.seconds.toFixed(1)} 秒${a.queue_seconds>0.05?' · 本块排队 '+a.queue_seconds.toFixed(1)+' 秒':''}${total/16000-a.seconds>2?' · 待处理 '+(total/16000-a.seconds).toFixed(1)+' 秒音频':''}`);}
 async function chunk(p,final){const a=await req('/step',p,{'X-Session':sid,'X-Seq':String(seq++),'X-Final':final?'1':'0'});render(a);if(final){sid='';await sync()}}
 async function begin(kind){sid=(await req('/start',{kind})).session;seq=0;total=0;tail=new Int16Array(0);chain=Promise.resolve();fail=null;for(const id of ['left','right','lr','rr','hits'])el(id).replaceChildren();status('正在接收语音…');}
 function release(){recording=false;if(node)node.port.onmessage=null;node?.disconnect();source?.disconnect();stream?.getTracks().forEach(t=>t.stop());if(ctx)ctx.close().catch(()=>{});ctx=node=source=stream=null;controls();}
@@ -86,7 +88,9 @@ function drawVocabulary(){
  if(!matches.length)tag(list,'small','没有匹配的热词');
 }
 el('word-query').oninput=drawVocabulary;
-async function connect(){try{await sync();el('word').value=info.clips[info.selected]?.word||micFocus;status('已就绪 · 可开始录音')}catch(e){status(e.message)}}
+async function connect(){try{clientSession=(await req('/session')).client_session;await sync();el('word').value=info.clips[info.selected]?.word||micFocus;status('已就绪 · 可开始录音')}catch(e){status(e.message)}}
 connect();
 let refreshing=false;
-setInterval(async()=>{if(busy||refreshing||document.hidden)return;refreshing=true;try{await sync()}catch(e){status(e.message)}finally{refreshing=false}},5000);
+setInterval(async()=>{if(!clientSession||busy||refreshing||document.hidden)return;refreshing=true;try{await sync()}catch(e){status(e.message)}finally{refreshing=false}},5000);
+
+window.addEventListener('pagehide',()=>{if(clientSession)navigator.sendBeacon('/leave',JSON.stringify({client_session:clientSession}))});

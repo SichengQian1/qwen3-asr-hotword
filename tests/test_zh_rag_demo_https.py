@@ -41,7 +41,14 @@ def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp
     demo.checkpoint = "checkpoint"
     demo.snapshot.return_value = {"selected": -1}
     monkeypatch.setattr(session, "SharedStudio", lambda *_: demo)
-    monkeypatch.setattr(server.secrets, "token_urlsafe", lambda _: "recording-session")
+
+    def fork(output):
+        child = MagicMock()
+        child.entries, child.extras = demo.entries.copy(), demo.extras.copy()
+        child.snapshot.return_value = {"selected": -1}
+        return child
+
+    demo.fork_session.side_effect = fork
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DEMO_DECODER_PY", sys.executable)
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "7")
@@ -60,6 +67,8 @@ def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp
             str(port),
             "--gpu",
             "5",
+            "--max-active-sessions",
+            "2",
         ],
     )
     ready = threading.Event()
@@ -90,7 +99,10 @@ def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp
         urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context)
     )
 
+    client_key = ""
+
     def request(path, payload=None, **headers):
+        headers.setdefault("X-Client-Session", client_key)
         req = urllib.request.Request(
             f"https://127.0.0.1:{port}" + path,
             data=json.dumps(payload or {}).encode(),
@@ -100,9 +112,20 @@ def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp
             return json.load(reply)
 
     try:
+        with pytest.raises(urllib.error.HTTPError) as no_session:
+            request("/state")
+        assert no_session.value.code == 401
+        client_key = request("/session")["client_session"]
+        first_key = client_key
         assert request("/vocabulary") == {"words": ["北京", "新热词"], "extras": ["新热词"]}
-        assert request("/state") == {"selected": -1, "occupied": False, "gpu": 5}
-        request("/start", {"kind": "mic"})
+        assert request("/state") == {
+            "selected": -1,
+            "occupied": False,
+            "gpu": 5,
+            "active_users": 0,
+            "max_active_users": 2,
+        }
+        recording_key = request("/start", {"kind": "mic"})["session"]
         assert request("/state")["occupied"]
         with pytest.raises(urllib.error.HTTPError) as occupied:
             request("/start", {"kind": "mic"})
@@ -111,7 +134,17 @@ def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp
             request("/abort", **{"X-Session": "someone-else"})
         assert invalid_session.value.code == 400
         assert request("/state")["occupied"]
-        request("/abort", **{"X-Session": "recording-session"})
+        client_key = request("/session")["client_session"]
+        assert client_key != first_key
+        assert not request("/state")["occupied"]
+        second_recording = request("/start", {"kind": "mic"})["session"]
+        assert request("/state")["active_users"] == 2
+        with pytest.raises(urllib.error.HTTPError) as wrong_recording:
+            request("/abort", **{"X-Session": recording_key})
+        assert wrong_recording.value.code == 400
+        request("/abort", **{"X-Session": second_recording})
+        client_key = first_key
+        request("/abort", **{"X-Session": recording_key})
         assert not request("/state")["occupied"]
         demo.hunt.assert_not_called()
         demo.select.assert_called_once_with(-1)
@@ -120,6 +153,7 @@ def test_tls_shared_console_without_password_and_recording_lock(monkeypatch, tmp
             next(tmp_path.glob("outputs/zh_rag_demo_v2_*/startup.json")).read_text()
         )
         assert report["https"] and report["case_limit"] == 0
+        assert report["session_isolation"] and report["max_active_sessions"] == 2
     finally:
         servers[0].shutdown()
         worker.join(5)

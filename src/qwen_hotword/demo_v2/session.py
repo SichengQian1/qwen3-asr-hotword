@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -14,6 +15,19 @@ from qwen_hotword.demo_v2.runtime import Studio
 
 
 class SharedStudio(Studio):
+    def fork_session(self, output: Path) -> SharedStudio:
+        """Share read-only model weights; never share mutable stream or index state."""
+        child = copy.copy(self)
+        child.out = output
+        output.mkdir(parents=True, exist_ok=False)
+        child.det = copy.copy(self.det)
+        child.init_studio()
+        child.states = []
+        child.pcm = bytearray()
+        child.seq = 0
+        child.configure("", {})
+        return child
+
     def init_studio(self) -> None:
         self.selected = -1
         self.mic_pcm = b""

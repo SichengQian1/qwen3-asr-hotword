@@ -1,4 +1,4 @@
-"""Shared LAN console with one active recording at a time."""
+"""Independent browser sessions backed by a single shared model worker."""
 
 from __future__ import annotations
 
@@ -6,14 +6,11 @@ import argparse
 import fcntl
 import json
 import os
-import secrets
 import socket
 import tempfile
-import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -32,7 +29,16 @@ def main() -> None:
         "--max-cases", default=0, type=int, help="每次自动验证的候选上限；0=仅麦克风（默认）"
     )
     parser.add_argument("--bind", default="0.0.0.0")
+    parser.add_argument(
+        "--max-active-sessions",
+        default=4,
+        type=int,
+        help="同时录音上限，默认4；GPU按音频块共享，实时能力需实测",
+    )
+    parser.add_argument("--max-sessions", default=64, type=int, help="保留的网页会话上限")
     args = parser.parse_args()
+    if not 1 <= args.max_active_sessions <= args.max_sessions:
+        parser.error("需满足 1 <= max-active-sessions <= max-sessions")
     if args.gpu < 0:
         parser.error("--gpu 必须为非负整数")
     if args.max_cases < 0:
@@ -46,6 +52,7 @@ def main() -> None:
     # Set visibility before importing the inference stack or spawning the Decoder.
     from qwen_hotword.demo.runtime import CHUNK
     from qwen_hotword.demo_v2.session import SharedStudio
+    from qwen_hotword.demo_v2.sessions import SessionError, Sessions
 
     # Don't initialize CUDA and run a search only to discover an occupied port.
     with socket.socket() as probe:
@@ -62,9 +69,7 @@ def main() -> None:
     static = root / "examples/zh_rag_demo_v2"
     (root / "outputs").mkdir(exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix="zh_rag_demo_v2_", dir=root / "outputs"))
-    lock = Lock()
-    session = ""
-    seen = 0.0
+    sessions = None
     print("本次输出：", out, flush=True)
     with stage_progress(f"验证资产，加载 GPU {args.gpu} 检索与双路共享的语音解码模型"):
         demo = SharedStudio(root, out, args.gpu, Path(os.environ["DEMO_DECODER_PY"]))
@@ -79,7 +84,10 @@ def main() -> None:
         demo.configure("", {})
         demo.init_studio()
         demo.select(-1)
-        print("默认进入自由麦克风；同事共享热词和历史，轮流录音。", flush=True)
+        sessions = Sessions(demo, args.max_active_sessions, args.max_sessions)
+        print(
+            f"每个网页独立录音、词表和历史；最多{args.max_active_sessions}人同时录音。", flush=True
+        )
 
         (out / "startup.json").write_text(
             json.dumps(
@@ -95,6 +103,10 @@ def main() -> None:
                     checked=len(demo.checked),
                     case_limit=args.max_cases,
                     chunk_seconds=2,
+                    max_active_sessions=args.max_active_sessions,
+                    max_sessions=args.max_sessions,
+                    session_isolation=True,
+                    gpu_scheduling="serialized_audio_chunks",
                 ),
                 indent=2,
             )
@@ -137,72 +149,39 @@ def main() -> None:
                     self.send({}, 404)
 
             def do_POST(self) -> None:
-                nonlocal session, seen
-                with lock:
-                    try:
-                        op = self.path
-                        n = int(self.headers.get("Content-Length", "0"))
-                        if not 0 <= n <= CHUNK:
-                            raise ValueError("请求超长")
-                        data = self.rfile.read(n)
-                        if len(data) != n:
-                            raise ValueError("音频传输中断")
-                        params = {} if op == "/step" else json.loads(data or b"{}")
-                        if session and time.monotonic() - seen > 120:
-                            demo.abort_pass()
-                            session = ""
-                        if op == "/state":
-                            result = demo.snapshot()
-                            result.update(gpu=args.gpu, occupied=bool(session))
-                        elif op == "/vocabulary":
-                            result = {
-                                "words": sorted({e.surface for e in demo.entries}),
-                                "extras": sorted(demo.extras),
-                            }
-                        elif op == "/clip":
-                            self.send(
-                                demo.replay_chunk(int(params.get("offset", 0))),
-                                mime="application/octet-stream",
-                            )
-                            return
-                        elif op in ("/start", "/add", "/remove", "/select") and session:
-                            self.send({"error": "已有音频在识别，请先结束。"}, 409)
-                            return
-                        elif op == "/select":
-                            i = int(params["i"])
-                            demo.select(i)
-                            result = {}
-                        elif op == "/add":
-                            result = demo.register(str(params["word"]).strip())
-                        elif op == "/remove":
-                            result = demo.remove(str(params["word"]))
-                        elif op == "/start":
-                            demo.begin_pass(params["kind"])
-                            session = secrets.token_urlsafe(16)
-                            seen = time.monotonic()
-                            result = {"session": session}
-                        elif op in ("/step", "/abort"):
-                            if not session or self.headers.get("X-Session") != session:
-                                raise ValueError("录音会话已失效")
-                            if op == "/abort":
-                                demo.abort_pass()
-                                session = ""
-                                result = {}
-                            else:
-                                if int(self.headers["X-Seq"]) != demo.seq:
-                                    raise ValueError("音频块顺序不一致")
-                                final = self.headers.get("X-Final") == "1"
-                                result = demo.record_step(data, final)
-                                seen = time.monotonic()
-                                if final:
-                                    session = ""
-                        else:
-                            self.send({}, 404)
-                            return
-                        self.send(result)
-                    except Exception as exc:
-                        traceback.print_exc()
-                        self.send({"error": str(exc)}, 400)
+                try:
+                    op = self.path
+                    n = int(self.headers.get("Content-Length", "0"))
+                    if not 0 <= n <= CHUNK:
+                        raise ValueError("请求超长")
+                    data = self.rfile.read(n)
+                    if len(data) != n:
+                        raise ValueError("音频传输中断")
+                    params = {} if op == "/step" else json.loads(data or b"{}")
+                    assert sessions is not None
+                    if op == "/session":
+                        self.send({"client_session": sessions.create()})
+                        return
+                    result = sessions.dispatch(
+                        str(params.get("client_session", ""))
+                        if op == "/leave"
+                        else self.headers.get("X-Client-Session", ""),
+                        op,
+                        params,
+                        data,
+                        self.headers,
+                    )
+                    if op == "/state":
+                        result["gpu"] = args.gpu
+                    self.send(
+                        result,
+                        mime="application/octet-stream" if op == "/clip" else "application/json",
+                    )
+                except SessionError as exc:
+                    self.send({"error": str(exc)}, exc.status)
+                except Exception as exc:
+                    traceback.print_exc()
+                    self.send({"error": str(exc)}, 400)
 
         with ThreadingHTTPServer((args.bind, args.port), Handler) as http:
             if tls:
@@ -235,6 +214,8 @@ def main() -> None:
                 )
             http.serve_forever()
     finally:
+        if sessions is not None:
+            sessions.close()
         demo.close()
 
 
