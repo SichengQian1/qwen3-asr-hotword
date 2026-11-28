@@ -97,7 +97,7 @@ def main() -> None:
     template = ROOT / "examples/zh_en_rag_kit"
     src = ROOT / "src"
     with stage_progress("Verify assets and package runtime, without loading the model"):
-        files = {n: template / n for n in ("run_delivery.py", "README.md")}
+        files = {n: template / n for n in ("run_delivery.py", "README.md", "DOWNSTREAM_HANDOFF.md")}
         for name, (path, checksum) in assets.items():
             pin(path, checksum)
             files["assets/" + name] = path

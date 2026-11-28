@@ -1,5 +1,7 @@
 # 中英音素 CTC / RAG 下游运行包
 
+下游开发与 AI 接入请先读 [接口与运行边界交接说明](DOWNSTREAM_HANDOFF.md)，内含时间步示例和可运行的 delivery 读取代码。
+
 固定版：Qwen3-ASR-1.7B + 中英 480h 版 epoch 25 的 Temporal 2× CTC Head，183 类，联合表 2,411 词面 / 2,412 个读音。输入一条或多条 WAV，输出每个 2 秒音频前缀（含最后不足 2 秒的句尾）的门控后 Top5 和 Top7。中英文音频都查同一张中英联合表。交付边界到 context learning 的输入为止；不跑 LLM Decoder，不输出转写文本。
 
 ## 首次运行

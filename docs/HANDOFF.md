@@ -1,5 +1,18 @@
 # 工作交接记录
 
+## 0.255 2026-11-28 中英运行包的下游接口交接文档
+
+下游可单独接收 [DOWNSTREAM_HANDOFF.md](../examples/zh_en_rag_kit/DOWNSTREAM_HANDOFF.md)；更新后的打包入口也会把它写入 ZIP 根目录 zh_en_rag/ 并登记 SHA。说明覆盖环境、JSONL、实际 CLI、三份输出、same-step 提示和 Decoder 分工；不改变 0.254 的推理或 delivery 格式。持有 0.254 包的接收方可直接配用此文档，无需重跑 GPU。
+
+分支 `codex/g2p-coverage-scan`。如要文档随包发送，容器内运行：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/package_zh_en_rag_kit.py
+```
+
+每次在新目录生成 `outputs/zh_en183_rag_kit_*/zh_en_rag_kit.zip`，中断可重复同一命令。
+核对 `unzip -l /实际路径/zh_en_rag_kit.zip zh_en_rag/DOWNSTREAM_HANDOFF.md`，交付 ZIP 与 SHA256；只需复核时返回终端 SHA，无需回传权重。
+
 ## 0.254 2026-11-28 中英 480h / 2,411 词独立下游推理包
 
 供已有完整 Qwen3-ASR-1.7B 的下游对**新音频**生成 same-step 门控 Top5/Top7。
