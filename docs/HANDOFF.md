@@ -1,5 +1,17 @@
 # 工作交接记录
 
+## 0.256 2026-11-28 中英新增中文业务词与昇腾独立运行包
+
+从 0.254 的 480h、epoch 25、183 类 Head 和完整 2,411 词表出发。新增清单有 304 次列举、293 个不同词面，其中 8 词已在旧表，新增 285 词。打包入口先按训练前端生成发音，检查 2,696 词面和 2,697 条发音，再封装独立运行包。新旧表哈希、重复项、旧表命中和数字／混排读法见包内 `assets/word_audit.json`。原 H200 包入口和历史结果保留。
+
+分支 `codex/g2p-coverage-scan`。在工区原项目环境运行下列命令，仅需 CPU 和原 MFA 资产。
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/package_zh_en_ascend.py
+```
+
+每次新建 `outputs/zh_en_ascend2696_*/`，中断后重跑同一命令会在另一目录重新生成。完成时打印 `zh_en_ascend2696.zip` 的绝对路径与 SHA256。用 `unzip -t /实际路径/zh_en_ascend2696.zip` 核验，发送 ZIP 和 SHA256。接收方保有匹配的 Qwen3-ASR-1.7B 基座。独立测试环境、A3 与 910B4 的区分、单 WAV 清单、两端启动、逐前缀门控 Top5/Top7 比对及结果字段见[包内使用说明](../examples/zh_en_ascend/README.md)。下游需要已分配的测试芯片。先在 H200 和昇腾各用同一个包、相同精度和同一 WAV 推理，再回传 `paired_diff.json`、两端 `.zip.run.json` 和日志。本地验证使用测试权重和示例发音；实机打包和两端一致性结果由工区运行产生。
+
 ## 0.255 2026-11-28 中英运行包的下游接口交接文档
 
 下游可单独接收 [DOWNSTREAM_HANDOFF.md](../examples/zh_en_rag_kit/DOWNSTREAM_HANDOFF.md)；更新后的打包入口也会把它写入 ZIP 根目录 zh_en_rag/ 并登记 SHA。说明覆盖环境、JSONL、实际 CLI、三份输出、same-step 提示和 Decoder 分工；不改变 0.254 的推理或 delivery 格式。持有 0.254 包的接收方可直接配用此文档，无需重跑 GPU。
