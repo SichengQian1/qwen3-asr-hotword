@@ -1,5 +1,25 @@
 # 工作交接记录
 
+## 0.254 2026-11-28 中英 480h / 2,411 词独立下游推理包
+
+供已有完整 Qwen3-ASR-1.7B 的下游对**新音频**生成 same-step 门控 Top5/Top7。
+不是 530h epoch16、不是 2,351 词十一组的缓存导出。沿用 0.244/0.248 的
+183 类 Head epoch25，校验该轮报告、权重、词表、热词表及登记的运行模块版本。
+工区项目环境，分支 `codex/g2p-coverage-scan`：
+
+```bash
+cd /host_home/star/q00933266/qwen3-asr-hotword && git pull --ff-only origin codex/g2p-coverage-scan && python -u -B scripts/package_zh_en_rag_kit.py
+```
+
+打包只需 CPU。每次生成独立的 `outputs/zh_en183_rag_kit_*/zh_en_rag_kit.zip`，
+不覆盖旧包；中断后重复命令。发该包及终端 SHA256，不发整份仓库、训练缓存或基座。
+解压后的自检、GPU 单 WAV / 清单推理、输入和下游接口见包内 README。
+七组已有结果如需回放可另发 0.248 的 delivery.zip。下游不需工区挂载；
+固定表推理不需 MFA；未打包环境 wheel、音频、网页和最终 ASR。
+核验可执行 `unzip -t /实际路径/zh_en_rag_kit.zip`，解压后用包内入口
+`--model /实际路径/Qwen3-ASR-1.7B --check`。核对真实推理时可回传包 SHA、
+成功的校验行及一个样例的候选；本地验证不代表下游 GPU 实测。
+
 ## 0.253 2026-11-25 英语／埃及阿语音素标注下游交接
 
 新增`docs/EN_AR_PHONEME_DOWNSTREAM_HANDOFF_2026-11-25.md`，记录当前实际
